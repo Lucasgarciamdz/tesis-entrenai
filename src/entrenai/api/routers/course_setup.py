@@ -10,8 +10,16 @@ from src.entrenai.core.moodle_client import MoodleClient, MoodleAPIError
 from src.entrenai.core.qdrant_wrapper import QdrantWrapper
 from src.entrenai.core.ollama_wrapper import OllamaWrapper
 from src.entrenai.core.n8n_client import N8NClient
-from src.entrenai.config import moodle_config, qdrant_config, ollama_config, n8n_config
+from src.entrenai.core.file_tracker import FileTracker  # Moved import to top
+from src.entrenai.config import (
+    moodle_config,
+    qdrant_config,
+    ollama_config,
+    n8n_config,
+    base_config,
+)  # Added base_config
 from src.entrenai.utils.logger import get_logger
+from pathlib import Path  # Added Path import
 
 logger = get_logger(__name__)
 
@@ -40,6 +48,12 @@ def get_ollama_wrapper() -> OllamaWrapper:
 
 def get_n8n_client() -> N8NClient:
     return N8NClient(config=n8n_config)
+
+
+def get_file_tracker() -> FileTracker:
+    # base_config.file_tracker_db_path is already a string path
+    # FileTracker constructor handles converting it to Path if needed.
+    return FileTracker(db_path=Path(base_config.file_tracker_db_path))
 
 
 @router.get("/courses", response_model=List[MoodleCourse])
@@ -334,6 +348,197 @@ async def refresh_course_files_placeholder(course_id: int):
     )
     # Actual logic will be implemented in Phase 3
     return {"message": f"File refresh process placeholder for course {course_id}."}
+
+
+@router.get(
+    "/courses/{course_id}/refresh-files", name="refresh_files"
+)  # Renamed from placeholder
+async def refresh_course_files(
+    course_id: int,
+    moodle: MoodleClient = Depends(get_moodle_client),
+    file_tracker: FileTracker = Depends(get_file_tracker),  # Corrected dependency
+    # qdrant: QdrantWrapper = Depends(get_qdrant_wrapper), # For later processing steps
+    # ollama: OllamaWrapper = Depends(get_ollama_wrapper), # For later processing steps
+):
+    """
+    Refreshes files for a given course:
+    1. Finds the designated Moodle folder for the course.
+    2. Lists files in that folder.
+    3. Compares with FileTracker to find new/modified files.
+    4. Downloads these files.
+    (Future steps: process files, generate embeddings, upsert to Qdrant).
+    """
+    logger.info(f"Starting file refresh process for course ID: {course_id}")
+
+    # base_config is now imported at the top and available
+    # FileTracker instance is injected via Depends(get_file_tracker)
+
+    # --- Locate Moodle Section and Folder ---
+    target_section_name = moodle_config.course_folder_name
+    target_folder_name = "Documentos Entrenai"  # As defined in setup_ia_for_course
+
+    course_section_id: Optional[int] = None
+    folder_module_id: Optional[int] = None
+
+    try:
+        # Find the section. This is a bit simplified.
+        # A more robust way would be to store section_id during setup_ia or iterate all sections.
+        # For now, let's assume create_course_section was successful and we might need to find it by name.
+        # Or, better, the setup_ia should store the created section_id somewhere accessible.
+        # For this iteration, let's assume we need to find it.
+        # This part is tricky without knowing the exact section ID.
+        # Let's assume the section created by setup_ia is the one we need.
+        # We need a way to get the section ID for "Entrenai IA".
+        # MoodleClient.create_course_section returns a MoodleSection object.
+        # The setup_ia endpoint should ideally store this.
+        # For now, we'll try to find it by name, which is less robust.
+
+        logger.info(
+            f"Searching for section '{target_section_name}' in course {course_id}"
+        )
+        # This requires a method in MoodleClient like get_section_by_name(course_id, name)
+        # Let's assume we have the section_id from a previous step or config for now.
+        # This is a placeholder for fetching/knowing the correct section_id.
+        # For the purpose of this endpoint, we'd typically have the section_id from the setup phase.
+        # If not, we'd need to implement a robust get_section_by_name in MoodleClient.
+
+        # Simplified: Assume the setup_ia_for_course stored the moodle_section_id somewhere,
+        # or we re-fetch course contents and find it.
+        # For now, let's simulate finding it. This part needs a robust solution.
+        # We'll use get_course_module_by_name within a loop of sections if needed,
+        # or a new MoodleClient method: get_section_by_name.
+
+        # Let's assume we have a way to get the target_section_id.
+        # This is a critical missing piece if not stored from setup.
+        # For now, we'll try to find the folder directly in any section if section_id is unknown.
+        # This is not ideal. A better approach is to get all sections, find the target one, then the folder.
+
+        # Placeholder: Get all sections, find the one named `target_section_name`
+        all_course_contents = moodle._make_request(
+            "core_course_get_contents", payload_params={"courseid": course_id}
+        )
+        if not isinstance(all_course_contents, list):
+            raise HTTPException(
+                status_code=500, detail="Could not retrieve course contents."
+            )
+
+        found_section_id: Optional[int] = None
+        for section_data in all_course_contents:
+            if section_data.get("name") == target_section_name:
+                found_section_id = section_data.get("id")
+                break
+
+        if not found_section_id:
+            logger.error(
+                f"Target section '{target_section_name}' not found in course {course_id}."
+            )
+            raise HTTPException(
+                status_code=404,
+                detail=f"Setup section '{target_section_name}' not found.",
+            )
+
+        logger.info(
+            f"Found section '{target_section_name}' with ID: {found_section_id}."
+        )
+
+        folder_module = moodle.get_course_module_by_name(
+            course_id,
+            target_section_id=found_section_id,
+            target_module_name=target_folder_name,
+            target_mod_type="folder",
+        )
+
+        if not folder_module or not folder_module.id:
+            logger.error(
+                f"Folder '{target_folder_name}' not found in course {course_id}, section {found_section_id}."
+            )
+            raise HTTPException(
+                status_code=404,
+                detail=f"Designated Moodle folder '{target_folder_name}' not found.",
+            )
+
+        folder_cmid = folder_module.id
+        logger.info(f"Found folder '{target_folder_name}' with cmid: {folder_cmid}.")
+
+        # --- List files in the folder ---
+        moodle_files = moodle.get_folder_files(folder_cmid=folder_cmid)
+        if not moodle_files:
+            logger.info(
+                f"No files found in folder '{target_folder_name}' (cmid: {folder_cmid})."
+            )
+            return {
+                "message": "No files found in the designated Moodle folder.",
+                "files_checked": 0,
+                "files_downloaded": 0,
+            }
+
+        logger.info(f"Found {len(moodle_files)} files in Moodle folder.")
+
+        # --- Filter new/modified files and download ---
+        files_to_download_count = 0
+        downloaded_files_paths: List[str] = []
+
+        # Ensure course-specific download directory exists
+        course_download_dir = Path(base_config.download_dir) / str(course_id)
+        course_download_dir.mkdir(parents=True, exist_ok=True)
+
+        for mf in moodle_files:
+            if not mf.filename or not mf.fileurl or mf.timemodified is None:
+                logger.warning(
+                    f"Skipping Moodle file with incomplete data: {mf.model_dump_json()}"
+                )
+                continue
+
+            if file_tracker.is_file_new_or_modified(
+                course_id, mf.filename, mf.timemodified
+            ):
+                logger.info(f"File '{mf.filename}' is new or modified. Downloading...")
+                try:
+                    downloaded_path = moodle.download_file(
+                        file_url=str(mf.fileurl),  # Ensure HttpUrl is converted to str
+                        download_dir=course_download_dir,
+                        filename=mf.filename,
+                    )
+                    file_tracker.mark_file_as_processed(
+                        course_id, mf.filename, mf.timemodified
+                    )
+                    files_to_download_count += 1
+                    downloaded_files_paths.append(str(downloaded_path))
+                    logger.info(
+                        f"Successfully downloaded and marked as processed: {mf.filename}"
+                    )
+                except MoodleAPIError as e:
+                    logger.error(f"Failed to download Moodle file '{mf.filename}': {e}")
+                except Exception as e:
+                    logger.exception(
+                        f"Unexpected error downloading file '{mf.filename}': {e}"
+                    )
+            else:
+                logger.info(
+                    f"File '{mf.filename}' is already up-to-date. Skipping download."
+                )
+
+        msg = f"File refresh process completed for course {course_id}. Checked {len(moodle_files)} files. Downloaded {files_to_download_count} new/modified files."
+        logger.info(msg)
+        return {
+            "message": msg,
+            "files_checked": len(moodle_files),
+            "files_downloaded": files_to_download_count,
+            "downloaded_paths": downloaded_files_paths,  # For debugging/info
+        }
+
+    except HTTPException as http_exc:
+        raise http_exc  # Re-raise FastAPI's HTTPExceptions
+    except MoodleAPIError as e:
+        logger.error(
+            f"Moodle API error during file refresh for course {course_id}: {e}"
+        )
+        raise HTTPException(status_code=502, detail=f"Moodle API error: {str(e)}")
+    except Exception as e:
+        logger.exception(
+            f"Unexpected error during file refresh for course {course_id}: {e}"
+        )
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 # import os # Moved to top
