@@ -37,10 +37,21 @@ class MoodleConfig(BaseConfig):
         self.chat_link_name: str = os.getenv(
             "MOODLE_CHAT_LINK_NAME", "Chat con Entrenai IA"
         )
+        self.default_teacher_id: Optional[int] = (
+            int(val)
+            if (val := os.getenv("MOODLE_DEFAULT_TEACHER_ID")) is not None
+            and val.isdigit()
+            else None
+        )
 
         if not self.url or not self.token:
             # Or raise an error, or log a warning, depending on how critical these are at startup
             print("Warning: MOODLE_URL or MOODLE_TOKEN is not set in the environment.")
+
+        if self.default_teacher_id is None:
+            print(
+                "Warning: MOODLE_DEFAULT_TEACHER_ID is not set or not a valid integer in the environment."
+            )
 
 
 class QdrantConfig(BaseConfig):
@@ -55,6 +66,7 @@ class QdrantConfig(BaseConfig):
         self.collection_prefix: str = os.getenv(
             "QDRANT_COLLECTION_PREFIX", "entrenai_course_"
         )
+        self.default_vector_size: int = int(os.getenv("DEFAULT_VECTOR_SIZE", "384"))
 
         if not self.host:
             print("Warning: QDRANT_HOST is not set in the environment.")

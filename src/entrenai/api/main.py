@@ -44,6 +44,12 @@ async def health_check():
 # from .routers import some_router
 # app.include_router(some_router.router, prefix="/items", tags=["items"])
 
+# Import and include routers
+from src.entrenai.api.routers import course_setup
+
+app.include_router(course_setup.router)
+
+
 if __name__ == "__main__":
     # This part is for direct execution (e.g., python src/entrenai/api/main.py)
     # Uvicorn is typically used for production or via the Makefile.
