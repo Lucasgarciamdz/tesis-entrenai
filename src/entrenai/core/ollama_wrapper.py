@@ -1,5 +1,5 @@
 import ollama
-from typing import List, Optional
+from typing import List, Optional  # Added Dict, Any
 
 from src.entrenai.config import OllamaConfig
 from src.entrenai.utils.logger import get_logger
@@ -51,8 +51,13 @@ class OllamaWrapper:
             return
 
         try:
-            available_models = self.client.list()["models"]
-            available_model_names = [model["name"] for model in available_models]
+            available_models_data = self.client.list()  # Store the full response
+            available_models = available_models_data.get(
+                "models", []
+            )  # Safely get models list
+            available_model_names = [
+                model["name"] for model in available_models if "name" in model
+            ]
 
             required_models = {
                 "embedding": self.config.embedding_model,
@@ -62,8 +67,12 @@ class OllamaWrapper:
             }
 
             for model_type, model_name in required_models.items():
-                # Ollama model names can be like 'llama3:latest' or just 'llama3'.
-                # We check if the base name is present.
+                if not model_name:  # Skip if a model name is not configured
+                    logger.info(
+                        f"Ollama model for {model_type} is not configured. Skipping check."
+                    )
+                    continue
+
                 base_model_name = model_name.split(":")[0]
                 is_present = any(base_model_name in an for an in available_model_names)
 
@@ -90,6 +99,9 @@ class OllamaWrapper:
             raise OllamaWrapperError("Ollama client not initialized.")
 
         model_to_use = model or self.config.embedding_model
+        if not model_to_use:
+            logger.error("Embedding model name not configured.")
+            raise OllamaWrapperError("Embedding model name not configured.")
         try:
             response = self.client.embeddings(model=model_to_use, prompt=text)
             return response["embedding"]
@@ -103,7 +115,7 @@ class OllamaWrapper:
         model: Optional[str] = None,
         system_message: Optional[str] = None,
         context_chunks: Optional[List[str]] = None,  # For RAG
-        stream: bool = False,  # Not fully supported in this basic wrapper yet
+        stream: bool = False,
     ) -> str:
         """
         Generates a chat completion (response) for a given prompt.
@@ -116,21 +128,16 @@ class OllamaWrapper:
             raise OllamaWrapperError("Ollama client not initialized.")
 
         model_to_use = model or self.config.qa_model
+        if not model_to_use:
+            logger.error("QA model name not configured.")
+            raise OllamaWrapperError("QA model name not configured.")
 
         messages = []
         if system_message:
             messages.append({"role": "system", "content": system_message})
 
         if context_chunks:
-            # Basic RAG: Prepend context to the user prompt or add as a separate message
-            # A more sophisticated approach might involve specific formatting or a dedicated context role.
             context_str = "\n\n".join(context_chunks)
-            # For now, let's add context as part of the user prompt or a preceding assistant message.
-            # This part needs careful prompt engineering.
-            # Example: "Based on the following context, answer the question: Context: {context_str} Question: {prompt}"
-            # Or, add context as a system message or a few-shot example.
-            # For simplicity, we'll just prepend it to the prompt for now.
-            # This is a common, though not always optimal, way to do RAG.
             full_prompt = f"Context:\n{context_str}\n\nQuestion: {prompt}"
             messages.append({"role": "user", "content": full_prompt})
         else:
@@ -138,17 +145,17 @@ class OllamaWrapper:
 
         try:
             if stream:
-                # Streaming requires different handling, collecting chunks.
-                # For now, this basic wrapper will not implement full streaming support.
                 logger.warning(
                     "Streaming is not fully implemented in this basic wrapper. Returning full response."
                 )
-                # response = self.client.chat(model=model_to_use, messages=messages, stream=True)
+                # This part would need to accumulate chunks from the stream
+                # response_stream = self.client.chat(model=model_to_use, messages=messages, stream=True)
                 # full_response_content = ""
-                # for chunk in response:
-                #     full_response_content += chunk['message']['content']
+                # for chunk in response_stream:
+                #     if 'message' in chunk and 'content' in chunk['message']:
+                #         full_response_content += chunk['message']['content']
                 # return full_response_content
-                pass  # Fall through to non-streaming for now
+                pass
 
             response = self.client.chat(
                 model=model_to_use, messages=messages, stream=False
@@ -160,9 +167,50 @@ class OllamaWrapper:
             )
             raise OllamaWrapperError(f"Failed to generate chat completion: {e}") from e
 
-    # Placeholder for other methods (e.g., text to markdown, contextualization)
-    # def format_to_markdown(self, text: str, model: Optional[str] = None) -> str: ...
-    # def add_context_to_chunk(self, chunk_text: str, metadata: Dict[str, Any], model: Optional[str] = None) -> str: ...
+    def format_to_markdown(self, text_content: str, model: Optional[str] = None) -> str:
+        """
+        Converts the given text content to a well-structured Markdown format using an LLM.
+        """
+        if not self.client:
+            logger.error("Ollama client not initialized. Cannot format to Markdown.")
+            raise OllamaWrapperError("Ollama client not initialized.")
+
+        model_to_use = model or self.config.markdown_model
+        if not model_to_use:
+            logger.error("Markdown formatting model name not configured.")
+            raise OllamaWrapperError("Markdown formatting model name not configured.")
+
+        system_prompt = (
+            "You are an expert text processing assistant. Your task is to convert the given text content "
+            "into a clean, well-structured Markdown format. "
+            "Preserve all factual information, lists, headings, and code blocks if present. "
+            "Ensure the Markdown is readable and accurately represents the original content structure. "
+            "Do not add any introductory phrases, summaries, or comments that are not part of the original text. "
+            "Output only the Markdown content."
+        )
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": text_content},
+        ]
+
+        try:
+            logger.info(f"Formatting text to Markdown using model '{model_to_use}'...")
+            response = self.client.chat(
+                model=model_to_use, messages=messages, stream=False
+            )
+            markdown_content = response["message"]["content"]
+            logger.info(
+                f"Successfully formatted text to Markdown (length: {len(markdown_content)})."
+            )
+            return markdown_content
+        except Exception as e:
+            logger.error(
+                f"Error formatting text to Markdown with model '{model_to_use}': {e}"
+            )
+            raise OllamaWrapperError(f"Failed to format text to Markdown: {e}") from e
+
+    # add_context_to_chunk will be handled by EmbeddingManager for now.
 
 
 if __name__ == "__main__":
@@ -177,59 +225,89 @@ if __name__ == "__main__":
             if ollama_wrapper.client:
                 print("Ollama client initialized successfully.")
 
-                # Test embedding
-                try:
+                # Test embedding (ensure embedding_model is configured and pulled)
+                if ollama_config.embedding_model:
+                    try:
+                        print(
+                            f"\nGenerating embedding for 'Hello, world!' using {ollama_wrapper.config.embedding_model}..."
+                        )
+                        embedding = ollama_wrapper.generate_embedding("Hello, world!")
+                        print(
+                            f"Embedding (first 5 dims): {embedding[:5]}... (Length: {len(embedding)})"
+                        )
+                    except OllamaWrapperError as e:
+                        print(f"Error during embedding test: {e}")
+                    except Exception as e:
+                        print(f"Unexpected error during embedding test: {e}")
+                else:
                     print(
-                        f"\nGenerating embedding for 'Hello, world!' using {ollama_wrapper.config.embedding_model}..."
+                        "\nSkipping embedding test: OLLAMA_EMBEDDING_MODEL not configured."
                     )
-                    embedding = ollama_wrapper.generate_embedding("Hello, world!")
-                    print(
-                        f"Embedding (first 5 dims): {embedding[:5]}... (Length: {len(embedding)})"
-                    )
-                except OllamaWrapperError as e:
-                    print(f"Error during embedding test: {e}")
-                except (
-                    Exception
-                ) as e:  # Catch other potential errors like model not found
-                    print(f"Unexpected error during embedding test: {e}")
 
-                # Test chat completion
-                try:
+                # Test chat completion (ensure qa_model is configured and pulled)
+                if ollama_config.qa_model:
+                    try:
+                        print(
+                            f"\nGenerating chat completion for 'Why is the sky blue?' using {ollama_wrapper.config.qa_model}..."
+                        )
+                        chat_response = ollama_wrapper.generate_chat_completion(
+                            "Why is the sky blue?"
+                        )
+                        print(f"Chat response: {chat_response}")
+                    except OllamaWrapperError as e:
+                        print(f"Error during chat completion test: {e}")
+                    except Exception as e:
+                        print(f"Unexpected error during chat completion test: {e}")
+                else:
                     print(
-                        f"\nGenerating chat completion for 'Why is the sky blue?' using {ollama_wrapper.config.qa_model}..."
+                        "\nSkipping chat completion test: OLLAMA_QA_MODEL not configured."
                     )
-                    # Ensure the QA model is pulled in your Ollama instance, e.g., 'ollama pull llama3'
-                    chat_response = ollama_wrapper.generate_chat_completion(
-                        "Why is the sky blue?"
-                    )
-                    print(f"Chat response: {chat_response}")
-                except OllamaWrapperError as e:
-                    print(f"Error during chat completion test: {e}")
-                except Exception as e:
-                    print(f"Unexpected error during chat completion test: {e}")
 
-                # Test RAG-style chat completion
-                try:
+                # Test RAG-style chat completion (ensure qa_model is configured and pulled)
+                if ollama_config.qa_model:
+                    try:
+                        print(
+                            f"\nGenerating RAG chat completion using {ollama_wrapper.config.qa_model}..."
+                        )
+                        rag_prompt = "What is the capital of France?"
+                        rag_context = [
+                            "France is a country in Europe.",
+                            "Paris is a famous city known for the Eiffel Tower.",
+                        ]
+                        rag_response = ollama_wrapper.generate_chat_completion(
+                            prompt=rag_prompt,
+                            context_chunks=rag_context,
+                            system_message="You are a helpful assistant. Answer based on the provided context.",
+                        )
+                        print(f"RAG Chat response: {rag_response}")
+                    except OllamaWrapperError as e:
+                        print(f"Error during RAG chat completion test: {e}")
+                    except Exception as e:
+                        print(f"Unexpected error during RAG chat completion test: {e}")
+                else:
                     print(
-                        f"\nGenerating RAG chat completion using {ollama_wrapper.config.qa_model}..."
+                        "\nSkipping RAG chat completion test: OLLAMA_QA_MODEL not configured."
                     )
-                    rag_prompt = "What is the capital of France?"
-                    rag_context = [
-                        "France is a country in Europe.",
-                        "Paris is a famous city known for the Eiffel Tower.",
-                    ]
-                    # Ensure the QA model is pulled
-                    rag_response = ollama_wrapper.generate_chat_completion(
-                        prompt=rag_prompt,
-                        context_chunks=rag_context,
-                        system_message="You are a helpful assistant. Answer based on the provided context.",
-                    )
-                    print(f"RAG Chat response: {rag_response}")
-                except OllamaWrapperError as e:
-                    print(f"Error during RAG chat completion test: {e}")
-                except Exception as e:
-                    print(f"Unexpected error during RAG chat completion test: {e}")
 
+                # Test Markdown formatting (ensure markdown_model is configured and pulled)
+                if ollama_config.markdown_model:
+                    try:
+                        print(
+                            f"\nFormatting text to Markdown using {ollama_wrapper.config.markdown_model}..."
+                        )
+                        sample_text_for_md = "This is a heading.\n\nThis is a paragraph with a list:\n- Item 1\n- Item 2\n\nAnd some **bold** text."
+                        markdown_output = ollama_wrapper.format_to_markdown(
+                            sample_text_for_md
+                        )
+                        print(f"Markdown output:\n{markdown_output}")
+                    except OllamaWrapperError as e:
+                        print(f"Error during Markdown formatting test: {e}")
+                    except Exception as e:
+                        print(f"Unexpected error during Markdown formatting test: {e}")
+                else:
+                    print(
+                        "\nSkipping Markdown formatting test: OLLAMA_MARKDOWN_MODEL not configured."
+                    )
             else:
                 print(
                     "Failed to initialize Ollama client (client is None). Check logs for errors."
