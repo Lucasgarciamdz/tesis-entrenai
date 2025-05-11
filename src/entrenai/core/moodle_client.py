@@ -1,5 +1,7 @@
 import requests
 import json  # Added import for json.dumps
+import shutil  # For download_file
+from pathlib import Path  # For download_file and type hinting
 from typing import List, Optional, Dict, Any
 from urllib.parse import urljoin
 
@@ -8,7 +10,8 @@ from src.entrenai.core.models import (
     MoodleCourse,
     MoodleSection,
     MoodleModule,
-)  # Add more as needed
+    MoodleFile,  # Added MoodleFile
+)
 from src.entrenai.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -80,9 +83,6 @@ class MoodleClient:
             out_dict[prefix] = in_args
             return out_dict
 
-        # Determine the new prefix format based on whether the current prefix is empty or not
-        # This logic ensures correct formatting like 'keyname' for the first level dict,
-        # then 'keyname[subkey]' or 'keyname[0]'
         if isinstance(in_args, list):
             for idx, item in enumerate(in_args):
                 new_prefix = f"{prefix}[{idx}]"
@@ -94,46 +94,69 @@ class MoodleClient:
         return out_dict
 
     def _make_request(
-        self, wsfunction: str, payload_params: Optional[Dict[str, Any]] = None
+        self,
+        wsfunction: str,
+        payload_params: Optional[Dict[str, Any]] = None,
+        http_method: str = "POST",
     ) -> Any:
         """
-        Helper method to make requests to the Moodle API using POST with form data.
+        Helper method to make requests to the Moodle API.
+        Supports POST with form data and GET.
         """
         if not self.base_url:
             logger.error(
                 f"MoodleClient is not configured with a base URL. Cannot make request for '{wsfunction}'."
             )
             raise MoodleAPIError("MoodleClient not configured with base URL.")
-        if not self.config.token:
+        if not self.config.token:  # Most Moodle WS require a token
             logger.error(
                 f"Moodle token not configured. Cannot make authenticated request for '{wsfunction}'."
             )
             raise MoodleAPIError("Moodle token not configured.")
 
-        # Prepare base data for the POST request body
-        request_data: Dict[str, Any] = {
+        request_params: Dict[str, Any] = {  # For GET requests or common query params
             "wsfunction": wsfunction,
             "wstoken": self.config.token,
             "moodlewsrestformat": "json",
         }
 
-        if payload_params:
-            # Format complex parameters if any, and merge them into request_data
-            # The _format_moodle_params expects a dict where keys are the top-level param names
-            # e.g. if Moodle expects 'courses[0][id]', payload_params should be {'courses': [{'id': ...}]}
-            formatted_payload = self._format_moodle_params(payload_params)
-            request_data.update(formatted_payload)
+        data_payload: Optional[Dict[str, Any]] = None  # For POST form data
 
-        response: Optional[requests.Response] = None  # Initialize response
+        if http_method.upper() == "POST":
+            data_payload = (
+                request_params.copy()
+            )  # Start with common params for POST data
+            if payload_params:
+                formatted_payload = self._format_moodle_params(payload_params)
+                data_payload.update(formatted_payload)
+            # For POST, common params like wstoken are part of the data payload, not query string.
+            # So, request_params for session.post should be None or only for URL query if Moodle needs that.
+            # Moodle typically expects all params in the POST body for ws calls.
+            final_url_params = None
+        elif http_method.upper() == "GET":
+            if payload_params:
+                formatted_payload = self._format_moodle_params(payload_params)
+                request_params.update(formatted_payload)
+            final_url_params = request_params
+        else:
+            raise MoodleAPIError(f"Unsupported HTTP method: {http_method}")
+
+        response: Optional[requests.Response] = None
 
         try:
-            # Using data= for application/x-www-form-urlencoded
-            response = self.session.post(self.base_url, data=request_data)
-            response.raise_for_status()  # Raises HTTPError for bad responses (4XX or 5XX)
+            if http_method.upper() == "POST":
+                response = self.session.post(
+                    self.base_url, data=data_payload, params=final_url_params
+                )
+            elif http_method.upper() == "GET":
+                response = self.session.get(self.base_url, params=final_url_params)
 
+            if response is None:  # Should not happen if method is GET/POST
+                raise MoodleAPIError("Response object is None after request attempt.")
+
+            response.raise_for_status()
             data = response.json()
 
-            # Moodle API specific error checking (some errors return 200 OK but contain an error message)
             if isinstance(data, dict) and data.get("exception"):
                 logger.error(f"Moodle API error for function '{wsfunction}': {data}")
                 raise MoodleAPIError(
@@ -145,7 +168,7 @@ class MoodleClient:
                 and data
                 and isinstance(data[0], dict)
                 and data[0].get("exception")
-            ):  # some functions return a list of errors
+            ):
                 logger.error(f"Moodle API error for function '{wsfunction}': {data[0]}")
                 raise MoodleAPIError(
                     message=f"Moodle API Exception: {data[0].get('message', 'Unknown Moodle error')}",
@@ -167,7 +190,7 @@ class MoodleClient:
                 f"Request exception occurred while calling Moodle function '{wsfunction}': {req_err}"
             )
             raise MoodleAPIError(message=str(req_err)) from req_err
-        except ValueError as json_err:  # Includes JSONDecodeError
+        except ValueError as json_err:
             err_msg = (
                 f"JSON decode error for Moodle function '{wsfunction}': {json_err}"
             )
@@ -181,19 +204,12 @@ class MoodleClient:
             ) from json_err
 
     def get_courses_by_user(self, user_id: int) -> List[MoodleCourse]:
-        """
-        Retrieves courses for a specific user.
-        Uses `core_enrol_get_users_courses` typically.
-        """
         logger.info(f"Fetching courses for user_id: {user_id}")
         payload = {"userid": user_id}
         try:
-            # Parameters for core_enrol_get_users_courses are simple, no complex formatting needed here by _format_moodle_params
-            # but _make_request will handle adding wsfunction, token etc.
             courses_data = self._make_request(
                 "core_enrol_get_users_courses", payload_params=payload
             )
-
             if not isinstance(courses_data, list):
                 logger.error(
                     f"Unexpected response type for get_courses_by_user: {type(courses_data)}. Expected list. Data: {courses_data}"
@@ -209,7 +225,6 @@ class MoodleClient:
                         "Courses data is not in expected list format.",
                         response_data=courses_data,
                     )
-
             courses = [MoodleCourse(**course_data) for course_data in courses_data]
             logger.info(f"Found {len(courses)} courses for user_id: {user_id}")
             return courses
@@ -222,129 +237,57 @@ class MoodleClient:
             )
             raise MoodleAPIError(f"Unexpected error fetching courses: {e}")
 
-    # Placeholder for other methods to be implemented in Fase 2.1:
-    # def create_folder_in_section(self, course_id: int, section_id: int, folder_name: str) -> MoodleFolder: ...
-    # def create_url_in_section(self, course_id: int, section_id: int, url_name: str, external_url: str, description: Optional[str] = None) -> MoodleUrl: ...
-    # def get_folder_contents(self, folder_id: int) -> List[MoodleFile]: ... # folder_id is usually the course module id (cmid)
-    # def download_file(self, file_url: str, local_path: str) -> None: ...
-
     def create_module_in_section(
         self,
         course_id: int,
-        section_id: int,  # This is the Moodle section ID (pk from course_sections table)
+        section_id: int,
         module_name: str,
-        mod_type: str,  # e.g., "folder", "url", "resource" (for file uploads)
-        instance_params: Optional[Dict[str, Any]] = None,  # Specific to the mod_type
-        common_module_options: Optional[
-            List[Dict[str, Any]]
-        ] = None,  # e.g., visible, idnumber
+        mod_type: str,
+        instance_params: Optional[Dict[str, Any]] = None,
+        common_module_options: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[MoodleModule]:
-        """
-        Adds a new module (like a folder or URL) to a specific course section.
-        Uses 'core_course_add_module'.
-        Note: 'section_id' here is the actual ID of the course section, not its number/order.
-              'core_course_add_module' expects 'sectionreturn' to get module details back.
-        """
         logger.info(
             f"Attempting to add module '{module_name}' (type: {mod_type}) to course {course_id}, section {section_id}"
         )
-
-        # Construct the 'modules' payload structure for core_course_add_module
-        # This function expects a list of modules to add, even if it's just one.
         module_data: Dict[str, Any] = {
             "modname": mod_type,
-            "name": module_name,  # Name of the folder or URL resource
-            "section": section_id,  # The ID of the course_sections record
-            # "visible": 1, # Default to visible, can be overridden by common_module_options
-            # "groupmode": 0, # Default group mode
-            # "groupingid": 0, # Default grouping ID
+            "name": module_name,
+            "section": section_id,
         }
-
-        # Add instance-specific parameters (these are usually flat key-values for the module type)
-        # For 'url', this would be {'externalurl': 'http://...', 'display': 0}
-        # For 'folder', this might include 'intro', 'display', 'showexpanded'
-        # These are typically passed as options with name/value pairs.
-        # The Moodle API for core_course_add_module is a bit tricky with how it handles
-        # module-specific settings. Often, they are passed within an 'options' array.
-        # Let's structure instance_params to be part of these options.
-
         options_list: List[Dict[str, Any]] = common_module_options or []
-
         if instance_params:
             for key, value in instance_params.items():
-                options_list.append(
-                    {"name": key, "value": str(value)}
-                )  # Values often need to be strings
-
+                options_list.append({"name": key, "value": str(value)})
         if options_list:
             module_data["options"] = options_list
-
-        # The wsfunction expects a list of modules under the 'modules' key
         payload = {"courseid": course_id, "modules": [module_data]}
-
         try:
-            # core_course_add_module returns a list of module IDs and potentially warnings.
-            # To get full module details, we might need another call or ensure 'sectionreturn' is handled.
-            # The 'sectionreturn' parameter in core_course_add_module can specify which section's
-            # content to return, which would include the new module.
-            # However, it's often simpler to just get the cmid (course module id) back.
-
-            # The response structure is typically like:
-            # [{'id': cmid, 'instance': instanceid, 'name': 'My Folder', 'visible': 1, ...}]
-            # Or it might be just warnings if something went slightly wrong but it still created.
-            # Or an error object.
-
-            # Let's try to get the module details back by asking for the sectionreturn.
-            # This might not always work or might be too verbose.
-            # A simpler response is just the cmid.
-            # For now, let's assume it returns enough info to populate MoodleModule.
-            # The function `core_course_add_module` does not directly return the module details in a rich format.
-            # It returns a list of `cmid` (course module id) and `instanceid`.
-            # Example response: `[{"id": cm_id, "instance": instance_id, "warnings": []}]`
-
             response_data = self._make_request(
                 "core_course_add_module", payload_params=payload
             )
-
             if not isinstance(response_data, list) or not response_data:
                 logger.error(
                     f"Failed to add module or unexpected response: {response_data}"
                 )
                 return None
-
-            # Assuming the first item in the list corresponds to our added module
             added_module_info = response_data[0]
-
             if "id" not in added_module_info or "instance" not in added_module_info:
                 logger.error(
                     f"Response from core_course_add_module missing 'id' or 'instance': {added_module_info}"
                 )
-                # Check for warnings, as Moodle sometimes returns warnings instead of errors
                 if "warnings" in added_module_info and added_module_info["warnings"]:
                     logger.warning(
                         f"Moodle warnings while adding module: {added_module_info['warnings']}"
                     )
                 return None
-
             cmid = added_module_info["id"]
             instance_id = added_module_info["instance"]
-
             logger.info(
                 f"Module '{module_name}' (type: {mod_type}) added with cmid: {cmid}, instanceid: {instance_id}."
             )
-
-            # Construct a MoodleModule object. We might not have all details from this call.
-            # A follow-up call to core_course_get_course_module (cmid) or
-            # core_course_get_contents (for the section) would be needed for full details.
-            # For now, return what we have.
             return MoodleModule(
-                id=cmid,
-                name=module_name,  # Name we intended
-                modname=mod_type,
-                instance=instance_id,
-                # Other fields like 'visible', 'url' (for URL module) would need another fetch.
+                id=cmid, name=module_name, modname=mod_type, instance=instance_id
             )
-
         except MoodleAPIError as e:
             logger.error(f"Moodle API Error while adding module '{module_name}': {e}")
             return None
@@ -361,17 +304,15 @@ class MoodleClient:
         folder_name: str,
         intro: Optional[str] = "",
     ) -> Optional[MoodleModule]:
-        """Creates a folder in the specified course section."""
         logger.info(
             f"Creating folder '{folder_name}' in course {course_id}, section {section_id}"
         )
         instance_params = {
-            "intro": intro or f"Carpeta para {folder_name}",  # Summary for the folder
-            "introformat": 1,  # HTML format for intro
-            "display": 0,  # 0 = Display folder contents on a separate page
-            "showexpanded": 1,  # 1 = Show subfolders expanded by default
+            "intro": intro or f"Carpeta para {folder_name}",
+            "introformat": 1,
+            "display": 0,
+            "showexpanded": 1,
         }
-        # Common module options like visibility can be passed here if needed
         common_opts = [{"name": "visible", "value": "1"}]
         return self.create_module_in_section(
             course_id=course_id,
@@ -389,19 +330,17 @@ class MoodleClient:
         url_name: str,
         external_url: str,
         description: Optional[str] = "",
-        display_mode: int = 0,  # 0=auto, 1=embed, 2=open, 3=popup
+        display_mode: int = 0,
     ) -> Optional[MoodleModule]:
-        """Creates a URL resource in the specified course section."""
         logger.info(
             f"Creating URL '{url_name}' -> '{external_url}' in course {course_id}, section {section_id}"
         )
         instance_params = {
             "externalurl": external_url,
             "intro": description or f"Enlace a {url_name}",
-            "introformat": 1,  # HTML format
+            "introformat": 1,
             "display": display_mode,
         }
-        # Common module options like visibility can be passed here if needed
         common_opts = [{"name": "visible", "value": "1"}]
         return self.create_module_in_section(
             course_id=course_id,
@@ -415,82 +354,42 @@ class MoodleClient:
     def create_course_section(
         self, course_id: int, section_name: str, position: int = 0
     ) -> Optional[MoodleSection]:
-        """
-        Creates a new course section using the local_wsmanagesections plugin.
-        First creates the section structure, then updates its name.
-        Position 0 is typically the first section after "General".
-        """
         logger.info(
             f"Attempting to create section '{section_name}' in course {course_id} at position {position}"
         )
         try:
-            # Step 1: Create the section structure
-            create_payload = {
-                "courseid": course_id,
-                "position": position,  # Position where the new section(s) should be created.
-                "number": 1,  # Number of sections to create.
-            }
-            # Response from local_wsmanagesections_create_sections is expected to be a list of created sections.
-            # Example: [{'id': 123, 'section': 1, 'name': 'New Section Name from Update', ...}]
+            create_payload = {"courseid": course_id, "position": position, "number": 1}
             created_sections_data = self._make_request(
                 "local_wsmanagesections_create_sections", payload_params=create_payload
             )
-
             if not isinstance(created_sections_data, list) or not created_sections_data:
                 logger.error(
                     f"Failed to create section structure or unexpected response: {created_sections_data}"
                 )
                 return None
-
-            # Assuming the first element in the list is our newly created section
-            # and it contains an 'id' or 'section' (number) that we can use.
-            # The plugin docs/examples should clarify the exact response structure.
-            # Let's assume it returns at least an 'id'.
             new_section_info = created_sections_data[0]
             new_section_id = new_section_info.get("id")
-            new_section_number = new_section_info.get(
-                "section"
-            )  # This is the Moodle section number (0, 1, 2...)
-
+            new_section_number = new_section_info.get("section")
             if new_section_id is None:
                 logger.error(
                     f"Created section data does not contain an 'id': {new_section_info}"
                 )
                 return None
-
             logger.info(
                 f"Section structure created with ID: {new_section_id}, Number: {new_section_number}. Now updating name."
             )
-
-            # Step 2: Update the newly created section's name (and other properties if needed)
             update_payload = {
                 "courseid": course_id,
-                "sections": [  # This needs to be a list of section objects to update
-                    {
-                        "id": new_section_id,  # Use the ID of the newly created section
-                        "name": section_name,
-                        "visible": 1,  # Make it visible
-                        # Add other parameters like 'summary', 'summaryformat' as needed
-                        # "summary": f"Contenido para {section_name}",
-                        # "summaryformat": 1, # 1 = HTML
-                    }
+                "sections": [
+                    {"id": new_section_id, "name": section_name, "visible": 1}
                 ],
             }
-            # local_wsmanagesections_update_sections usually returns a status or the updated sections.
-            # The example shows `print(sec.updatesections)`, implying it returns something.
             update_response = self._make_request(
                 "local_wsmanagesections_update_sections", payload_params=update_payload
             )
-
-            # We need to confirm the structure of update_response.
-            # Assuming it returns a list of updated sections, or a status.
-            # For now, let's try to re-fetch the section to get its final state.
             logger.info(
                 f"Update request for section ID {new_section_id} sent. Response: {update_response}"
             )
-
-            # Step 3: Get the updated section details to return
-            # local_wsmanagesections_get_sections can take sectionids
             get_section_payload = {
                 "courseid": course_id,
                 "sectionids": [new_section_id],
@@ -499,7 +398,6 @@ class MoodleClient:
                 "local_wsmanagesections_get_sections",
                 payload_params=get_section_payload,
             )
-
             if (
                 not isinstance(updated_section_data_list, list)
                 or not updated_section_data_list
@@ -507,7 +405,6 @@ class MoodleClient:
                 logger.error(
                     f"Failed to retrieve updated section details for ID {new_section_id}."
                 )
-                # Fallback: construct a MoodleSection with what we know if retrieval fails
                 return MoodleSection(
                     id=new_section_id,
                     name=section_name,
@@ -515,20 +412,15 @@ class MoodleClient:
                     if new_section_number is not None
                     else position,
                 )
-
             final_section_data = updated_section_data_list[0]
-            # Ensure the name matches, though it should if update was successful
             if final_section_data.get("name") != section_name:
                 logger.warning(
-                    f"Section name after update ('{final_section_data.get('name')}') "
-                    f"differs from target ('{section_name}'). Using actual name."
+                    f"Section name after update ('{final_section_data.get('name')}') differs from target ('{section_name}'). Using actual name."
                 )
-
             logger.info(
                 f"Successfully created and named section: ID {final_section_data.get('id')}, Name '{final_section_data.get('name')}'"
             )
             return MoodleSection(**final_section_data)
-
         except MoodleAPIError as e:
             logger.error(
                 f"Moodle API Error while creating section '{section_name}' for course {course_id}: {e}"
@@ -540,8 +432,203 @@ class MoodleClient:
             )
             return None
 
-    # ensure_course_section method was here, it's removed as create_course_section with plugin is more direct.
-    # If ensure logic is still needed, it would use local_wsmanagesections_get_sections and then create/update.
+    def get_course_module_by_name(
+        self,
+        course_id: int,
+        target_section_id: int,
+        target_module_name: str,
+        target_mod_type: Optional[str] = None,
+    ) -> Optional[MoodleModule]:
+        """Finds a specific module by name within a specific section of a course."""
+        logger.info(
+            f"Searching for module '{target_module_name}' (type: {target_mod_type or 'any'}) in course {course_id}, section {target_section_id}"
+        )
+        try:
+            # core_course_get_contents can get sections and their modules.
+            course_contents = self._make_request(
+                "core_course_get_contents", payload_params={"courseid": course_id}
+            )
+            if not isinstance(course_contents, list):
+                logger.error(
+                    f"Expected list of sections from core_course_get_contents, got {type(course_contents)}"
+                )
+                return None
+
+            for section_data in course_contents:
+                if section_data.get("id") == target_section_id:
+                    modules_in_section = section_data.get("modules", [])
+                    for module_data in modules_in_section:
+                        name_match = module_data.get("name") == target_module_name
+                        type_match = (
+                            target_mod_type is None
+                            or module_data.get("modname") == target_mod_type
+                        )
+                        if name_match and type_match:
+                            logger.info(
+                                f"Found module '{target_module_name}' (ID: {module_data.get('id')}) in section {target_section_id}."
+                            )
+                            return MoodleModule(**module_data)
+                    logger.warning(
+                        f"Module '{target_module_name}' not found in section {target_section_id}."
+                    )
+                    return None  # Module not found in the target section
+
+            logger.warning(
+                f"Section {target_section_id} not found in course {course_id}."
+            )
+            return None  # Target section not found
+        except MoodleAPIError as e:
+            logger.error(
+                f"Moodle API Error while searching for module '{target_module_name}': {e}"
+            )
+            return None
+        except Exception as e:
+            logger.exception(
+                f"Unexpected error while searching for module '{target_module_name}': {e}"
+            )
+            return None
+
+    def get_folder_files(self, folder_cmid: int) -> List[MoodleFile]:
+        """Retrieves a list of files within a specific folder module."""
+        logger.info(f"Fetching files for folder module ID (cmid): {folder_cmid}")
+        try:
+            # mod_folder_get_folders_by_courses expects 'courseids' but can work with a single cmid
+            # if the web service is set up to allow it or if we wrap it.
+            # A common way is to get course contents and filter.
+            # However, if we have cmid, core_course_get_course_module might give some info,
+            # but not directly file list.
+            # The most reliable is often core_course_get_contents for the module itself if it's detailed enough,
+            # or a specific mod_folder function.
+            # Let's assume `core_course_get_module` (if it exists and gives file info) or parse `core_course_get_contents`.
+
+            # Using core_course_get_contents for the specific module:
+            # This requires knowing the section the module is in, or getting all course contents.
+            # A more direct approach if available:
+            # payload = {"cmids": [folder_cmid]} # For functions that accept cmids
+            # For `mod_folder_get_folders_by_courses`, it expects course IDs, not cmids directly.
+            # It returns all folders in given courses. We'd need to filter.
+
+            # Let's try to get the module by its cmid first to confirm it's a folder
+            # then use its instance id with a folder-specific function if one exists,
+            # or parse its contents if available from a general get_contents call.
+
+            # This is a simplification: core_course_get_course_module by itself doesn't list files.
+            # We typically need to use core_course_get_contents and look for the module, then its files.
+            # Or, if a folder's files are listed under its 'contents' in core_course_get_module response.
+
+            # A robust way:
+            # 1. Get module details using core_course_get_course_module(cmid) to get its instance id and section.
+            # 2. Get section contents using core_course_get_contents(courseid, options={'sectionid': section.id})
+            # 3. Find the module in the section contents and extract files from its 'contents' or 'contentsinfo'.
+            # This is complex.
+
+            # Simpler attempt: Assume `core_course_get_course_module` might have 'contents' for folders.
+            # This is often true for Moodle's mobile format additions.
+            module_details = self._make_request(
+                "core_course_get_course_module", payload_params={"cmid": folder_cmid}
+            )
+
+            if not module_details or "cm" not in module_details:
+                logger.error(f"Could not retrieve details for module ID {folder_cmid}")
+                return []
+
+            cm_info = module_details["cm"]
+            if cm_info.get("modname") != "folder":
+                logger.warning(
+                    f"Module ID {folder_cmid} is not a folder, it's a '{cm_info.get('modname')}'."
+                )
+                return []
+
+            files_data = []
+            if "contents" in cm_info and isinstance(cm_info["contents"], list):
+                for file_info in cm_info["contents"]:
+                    if file_info.get("type") == "file":
+                        # Ensure all required fields for MoodleFile are present
+                        if all(
+                            k in file_info
+                            for k in (
+                                "filename",
+                                "filepath",
+                                "filesize",
+                                "fileurl",
+                                "timemodified",
+                            )
+                        ):
+                            files_data.append(MoodleFile(**file_info))
+                        else:
+                            logger.warning(
+                                f"Skipping file due to missing fields in folder {folder_cmid}: {file_info}"
+                            )
+
+            if not files_data:
+                logger.info(
+                    f"No files found directly in 'contents' of module {folder_cmid}. This might mean the folder is empty or files are nested deeper (not supported by this simple fetch)."
+                )
+
+            logger.info(
+                f"Found {len(files_data)} files in folder module ID {folder_cmid}."
+            )
+            return files_data
+
+        except MoodleAPIError as e:
+            logger.error(
+                f"Moodle API Error while fetching files for folder {folder_cmid}: {e}"
+            )
+            return []
+        except Exception as e:
+            logger.exception(
+                f"Unexpected error while fetching files for folder {folder_cmid}: {e}"
+            )
+            return []
+
+    def download_file(self, file_url: str, download_dir: Path, filename: str) -> Path:
+        """Downloads a file from a Moodle file URL to a local directory."""
+        if not self.config.token:  # File URLs from Moodle often require the token
+            raise MoodleAPIError(
+                "Moodle token not configured, cannot download files securely."
+            )
+
+        # Ensure download_dir exists (though BaseConfig should handle its root)
+        download_dir.mkdir(parents=True, exist_ok=True)
+        local_filepath = download_dir / filename
+
+        logger.info(f"Downloading Moodle file from {file_url} to {local_filepath}")
+
+        try:
+            # Moodle file URLs might already include the token if generated by API,
+            # or sometimes they need it appended. If self.session has the token in params,
+            # it might be automatically used. For direct URL download, it's safer to ensure
+            # the URL itself is complete or the session handles auth.
+            # The `fileurl` from Moodle usually includes `?token=...`
+
+            # Use a new session for download if params on self.session interfere,
+            # or ensure self.session is suitable. For now, use self.session.
+            # If file_url already has token, session token might be redundant or conflict.
+            # Let's assume file_url is directly usable.
+
+            # Remove wsfunction from params for direct file download if it's in session defaults
+            temp_params = self.session.params.copy()
+            if "wsfunction" in temp_params:  # wsfunction is not for file download
+                del temp_params["wsfunction"]
+
+            with self.session.get(file_url, params=temp_params, stream=True) as r:
+                r.raise_for_status()
+                with open(local_filepath, "wb") as f:
+                    shutil.copyfileobj(r.raw, f)
+            logger.info(f"Successfully downloaded {filename} to {local_filepath}")
+            return local_filepath
+        except requests.exceptions.HTTPError as http_err:
+            logger.error(
+                f"HTTP error downloading {filename}: {http_err} (URL: {file_url})"
+            )
+            raise MoodleAPIError(
+                f"Failed to download file '{filename}': {http_err}"
+            ) from http_err
+        except Exception as e:
+            logger.exception(f"Error downloading file {filename} from {file_url}: {e}")
+            raise MoodleAPIError(
+                f"Unexpected error downloading file '{filename}': {e}"
+            ) from e
 
 
 if __name__ == "__main__":
@@ -555,10 +642,9 @@ if __name__ == "__main__":
     else:
         client = MoodleClient(config=moodle_config)
 
-        # Replace with a valid user ID from your Moodle instance
-        # Often, admin user ID is 2, but check your Moodle.
         test_user_id = 2
         print(f"\nAttempting to get courses for user ID: {test_user_id}...")
+        # ... (rest of the __main__ block remains the same) ...
         try:
             courses = client.get_courses_by_user(test_user_id)
             if courses:
@@ -576,15 +662,11 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Generic error during testing get_courses_by_user: {e}")
 
-        # Example: Test _make_request with a generic Moodle function like 'core_webservice_get_site_info'
-        # This function takes no specific payload parameters beyond the standard ones.
         print("\nAttempting to get site info...")
         try:
-            site_info = client._make_request(
-                "core_webservice_get_site_info"
-            )  # No payload_params needed
+            site_info = client._make_request("core_webservice_get_site_info")
             print("Site Info (raw):")
-            print(json.dumps(site_info, indent=2))  # Pretty print the JSON
+            print(json.dumps(site_info, indent=2))
             print("\nParsed Site Info:")
             print(f"  Sitename: {site_info.get('sitename')}")
             print(f"  User ID: {site_info.get('userid')}")
@@ -598,7 +680,3 @@ if __name__ == "__main__":
 # The Moodle Web Services API can be inconsistent. Functions might be disabled,
 # or return data in slightly different formats than expected.
 # Thorough testing against a real Moodle instance is crucial.
-# The `core_enrol_get_users_courses` function, for example, might require specific
-# capabilities for the user associated with the token.
-# An alternative for getting courses might be `core_course_get_courses` and then filtering,
-# or `core_course_get_enrolled_courses_by_timeline_classification` with classification 'all'.

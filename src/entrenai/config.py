@@ -20,6 +20,23 @@ class BaseConfig:
         self.fastapi_host: str = os.getenv("FASTAPI_HOST", "0.0.0.0")
         self.fastapi_port: int = int(os.getenv("FASTAPI_PORT", "8000"))
 
+        # Path configurations
+        self.data_dir: str = os.getenv(
+            "DATA_DIR", "data"
+        )  # Base directory for app data
+        self.file_tracker_db_path: str = os.path.join(
+            self.data_dir, os.getenv("FILE_TRACKER_DB_NAME", "file_tracker.sqlite")
+        )
+        self.download_dir: str = os.path.join(
+            self.data_dir, os.getenv("DOWNLOAD_SUBDIR", "downloads")
+        )
+
+        # Ensure data directories exist
+        os.makedirs(self.data_dir, exist_ok=True)
+        os.makedirs(self.download_dir, exist_ok=True)
+        # Directory for SQLite DB will be created by sqlite3 if it doesn't exist,
+        # but its parent (data_dir) must exist.
+
 
 class MoodleConfig(BaseConfig):
     """Moodle specific configurations."""
