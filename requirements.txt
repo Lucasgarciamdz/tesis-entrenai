@@ -1,0 +1,37 @@
+# FastAPI and related
+fastapi
+uvicorn[standard]
+
+# Environment variables
+python-dotenv
+
+# HTTP requests
+requests
+aiohttp # For async requests, if needed later
+
+# Qdrant client
+qdrant-client
+
+# Ollama client
+ollama
+
+# Testing
+pytest
+pytest-asyncio # For testing async code with pytest
+
+# File processing
+pdf2image
+pytesseract
+python-pptx
+python-docx
+beautifulsoup4
+pandas
+lxml # Often a faster parser for BeautifulSoup
+
+# Moodle (No client library specified, will use requests. Add if a specific client is found/needed)
+
+# N8N (No client library specified, will use requests. Add if a specific client is found/needed)
+
+# Generic
+uv
+ruff
