@@ -2,6 +2,7 @@ import logging
 import sys
 from src.entrenai.config import base_config
 
+
 def get_logger(name: str) -> logging.Logger:
     """
     Configures and returns a logger instance.
@@ -17,7 +18,7 @@ def get_logger(name: str) -> logging.Logger:
 
         # Formatter
         formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
         ch.setFormatter(formatter)
         logger.addHandler(ch)
@@ -26,6 +27,7 @@ def get_logger(name: str) -> logging.Logger:
     # logger.propagate = False
 
     return logger
+
 
 # Example of a global logger for the application if needed,
 # though it's often better to get loggers per module: logging.getLogger(__name__)
