@@ -118,7 +118,8 @@ class N8NConfig(BaseConfig):
         self.api_key: Optional[str] = os.getenv(
             "N8N_API_KEY"
         )  # For N8N's REST API, if secured
-        self.chat_workflow_id: Optional[str] = os.getenv("N8N_CHAT_WORKFLOW_ID")
+        self.chat_workflow_id: Optional[str] = os.getenv("N8N_CHAT_WORKFLOW_ID") # Might be deprecated if we import by JSON path
+        self.workflow_json_path: Optional[str] = os.getenv("N8N_WORKFLOW_JSON_PATH", "src/entrenai/n8n_workflow.json")
         # N8N_ENCRYPTION_KEY is used by N8N itself, not directly by our app typically
 
         if not self.url:

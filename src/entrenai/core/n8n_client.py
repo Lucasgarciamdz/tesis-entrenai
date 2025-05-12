@@ -1,23 +1,18 @@
 import requests
+import json # For loading workflow JSON
+from pathlib import Path # For workflow_json_path
 from typing import List, Optional, Dict, Any
 from urllib.parse import urljoin
 
-from src.entrenai.config import N8NConfig
-from src.entrenai.core.models import N8NWorkflow  # Assuming this model exists
+from src.entrenai.config import N8NConfig, OllamaConfig # OllamaConfig for type hint
+from src.entrenai.core.models import N8NWorkflow
 from src.entrenai.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-
 class N8NClientError(Exception):
     """Custom exception for N8NClient errors."""
-
-    def __init__(
-        self,
-        message: str,
-        status_code: Optional[int] = None,
-        response_data: Optional[Any] = None,
-    ):
+    def __init__(self, message: str, status_code: Optional[int] = None, response_data: Optional[Any] = None):
         super().__init__(message)
         self.status_code = status_code
         self.response_data = response_data
@@ -25,17 +20,10 @@ class N8NClientError(Exception):
     def __str__(self):
         return f"{super().__str__()} (Status Code: {self.status_code}, Response: {self.response_data})"
 
-
 class N8NClient:
-    """
-    Client for interacting with the N8N API.
-    """
-
     def __init__(self, config: N8NConfig, session: Optional[requests.Session] = None):
         self.config = config
-        self.base_url = (
-            config.url
-        )  # N8N API base URL (e.g., http://localhost:5678/api/v1)
+        self.base_url = config.url
         self.session = session or requests.Session()
 
         if self.config.api_key:
@@ -43,48 +31,21 @@ class N8NClient:
 
         if not self.base_url:
             logger.error("N8N URL not configured. N8NClient will not be functional.")
-            # Or raise ValueError("N8N URL must be configured")
         else:
-            # Ensure base_url ends with /api/v1 if not already present
             if not self.base_url.endswith(("/api/v1", "/api/v1/")):
                 self.base_url = urljoin(self.base_url, "api/v1/")
-            else:  # Ensure it ends with a slash
+            else:
                 if not self.base_url.endswith("/"):
                     self.base_url += "/"
             logger.info(f"N8NClient initialized for URL: {self.base_url}")
-            try:
-                # Attempt a simple health check or status check if available
-                # For example, listing workflows (often requires auth)
-                self.get_workflows_list(limit=1)
-                logger.info(f"N8NClient connection to {self.base_url} seems OK.")
-            except N8NClientError as e:
-                logger.warning(
-                    f"N8NClient initial check failed for {self.base_url}: {e}. This might be due to auth or endpoint not found."
-                )
-            except Exception as e:
-                logger.warning(
-                    f"N8NClient initial check failed for {self.base_url} with an unexpected error: {e}"
-                )
+            # Initial check removed to avoid errors if N8N is not fully up or auth fails silently here.
+            # Methods will handle connection errors.
 
-    def _make_request(
-        self,
-        method: str,
-        endpoint: str,
-        params: Optional[Dict[str, Any]] = None,
-        json_data: Optional[Dict[str, Any]] = None,
-    ) -> Any:
-        """
-        Helper method to make requests to the N8N API.
-        """
+    def _make_request(self, method: str, endpoint: str, params: Optional[Dict[str, Any]] = None, json_data: Optional[Dict[str, Any]] = None) -> Any:
         if not self.base_url:
-            logger.error(
-                "N8NClient is not configured with a base URL. Cannot make request."
-            )
             raise N8NClientError("N8NClient not configured with base URL.")
-
         url = urljoin(self.base_url, endpoint)
         response: Optional[requests.Response] = None
-
         try:
             if method.upper() == "GET":
                 response = self.session.get(url, params=params)
@@ -92,282 +53,206 @@ class N8NClient:
                 response = self.session.post(url, params=params, json=json_data)
             elif method.upper() == "PUT":
                 response = self.session.put(url, params=params, json=json_data)
-            # Add other methods (DELETE, etc.) if needed
             else:
                 raise N8NClientError(f"Unsupported HTTP method: {method}")
-
-            response.raise_for_status()  # Raises HTTPError for bad responses (4XX or 5XX)
-
-            # N8N API might return empty body for 204 No Content, handle this
-            if response.status_code == 204:
-                return None
-
-            data = response.json()
-            return data
+            response.raise_for_status()
+            if response.status_code == 204: return None
+            return response.json()
         except requests.exceptions.HTTPError as http_err:
-            err_msg = f"HTTP error occurred while calling N8N endpoint '{endpoint}': {http_err}"
-            resp_text = (
-                response.text if response is not None else "No response text available"
-            )
+            resp_text = response.text if response is not None else "No response"
             status = response.status_code if response is not None else None
-            logger.error(f"{err_msg} - Response: {resp_text}")
-            raise N8NClientError(
-                message=str(http_err), status_code=status, response_data=resp_text
-            ) from http_err
+            logger.error(f"HTTP error calling N8N {endpoint}: {http_err} - Response: {resp_text}")
+            raise N8NClientError(str(http_err), status_code=status, response_data=resp_text) from http_err
         except requests.exceptions.RequestException as req_err:
-            logger.error(
-                f"Request exception occurred while calling N8N endpoint '{endpoint}': {req_err}"
-            )
-            raise N8NClientError(message=str(req_err)) from req_err
-        except ValueError as json_err:  # Includes JSONDecodeError
-            err_msg = f"JSON decode error for N8N endpoint '{endpoint}': {json_err}"
-            resp_text = (
-                response.text if response is not None else "No response text available"
-            )
-            logger.error(f"{err_msg} - Response: {resp_text}")
-            raise N8NClientError(
-                message=f"Failed to decode JSON response: {json_err}",
-                response_data=resp_text,
-            ) from json_err
+            logger.error(f"Request exception for N8N {endpoint}: {req_err}")
+            raise N8NClientError(str(req_err)) from req_err
+        except ValueError as json_err: # JSONDecodeError
+            resp_text = response.text if response is not None else "No response"
+            logger.error(f"JSON decode error for N8N {endpoint}: {json_err} - Response: {resp_text}")
+            raise N8NClientError(f"Failed to decode JSON response: {json_err}", response_data=resp_text) from json_err
 
-    def get_workflows_list(
-        self, limit: Optional[int] = None, tags: Optional[str] = None
-    ) -> List[N8NWorkflow]:
-        """
-        Retrieves a list of workflows from N8N.
-        API endpoint: GET /workflows
-        """
+    def get_workflows_list(self, limit: Optional[int] = None, tags: Optional[str] = None) -> List[N8NWorkflow]:
         params = {}
-        if limit is not None:
-            params["limit"] = limit
-        if tags is not None:
-            params["tags"] = tags  # Comma-separated string of tags
-
+        if limit is not None: params['limit'] = limit
+        if tags is not None: params['tags'] = tags
         try:
             response_data = self._make_request("GET", "workflows", params=params)
-            # N8N API for workflows usually returns a dict with a 'data' key containing the list
-            if (
-                isinstance(response_data, dict)
-                and "data" in response_data
-                and isinstance(response_data["data"], list)
-            ):
+            if isinstance(response_data, dict) and "data" in response_data and isinstance(response_data["data"], list):
                 workflows_raw = response_data["data"]
-            elif isinstance(
-                response_data, list
-            ):  # Some endpoints might return a list directly
-                workflows_raw = response_data
+            elif isinstance(response_data, list):
+                 workflows_raw = response_data
             else:
-                logger.error(
-                    f"Unexpected response structure for get_workflows_list: {response_data}"
-                )
-                raise N8NClientError(
-                    "Workflow list data is not in expected format.",
-                    response_data=response_data,
-                )
-
-            workflows = [N8NWorkflow(**wf_data) for wf_data in workflows_raw]
-            logger.info(f"Retrieved {len(workflows)} workflows from N8N.")
-            return workflows
+                raise N8NClientError("Workflow list data not in expected format.", response_data=response_data)
+            return [N8NWorkflow(**wf_data) for wf_data in workflows_raw]
         except N8NClientError as e:
             logger.error(f"Failed to get workflows list from N8N: {e}")
             raise
-        except Exception as e:
-            logger.exception(f"An unexpected error occurred in get_workflows_list: {e}")
-            raise N8NClientError(f"Unexpected error fetching N8N workflows: {e}")
+        except Exception as e: # Catch any other parsing error for N8NWorkflow
+            logger.exception(f"Unexpected error parsing N8N workflows list: {e}")
+            raise N8NClientError(f"Unexpected error parsing N8N workflows: {e}")
+
 
     def get_workflow_details(self, workflow_id: str) -> Optional[N8NWorkflow]:
-        """
-        Retrieves details for a specific workflow.
-        API endpoint: GET /workflows/{workflow_id}
-        """
         try:
             workflow_data = self._make_request("GET", f"workflows/{workflow_id}")
-            # N8N API for single workflow usually returns a dict with a 'data' key
             if isinstance(workflow_data, dict) and "data" in workflow_data:
-                return N8NWorkflow(**workflow_data["data"])
-            elif (
-                isinstance(workflow_data, dict) and "id" in workflow_data
-            ):  # If 'data' key is not present but 'id' is
-                return N8NWorkflow(**workflow_data)
-            else:
-                logger.error(
-                    f"Unexpected response structure for get_workflow_details (id: {workflow_id}): {workflow_data}"
-                )
-                return None  # Or raise error
+                 return N8NWorkflow(**workflow_data["data"])
+            elif isinstance(workflow_data, dict) and "id" in workflow_data:
+                 return N8NWorkflow(**workflow_data)
+            return None
         except N8NClientError as e:
-            if e.status_code == 404:
-                logger.warning(f"Workflow with ID '{workflow_id}' not found in N8N.")
-                return None
+            if e.status_code == 404: return None
             logger.error(f"Failed to get details for workflow '{workflow_id}': {e}")
             raise
         except Exception as e:
-            logger.exception(
-                f"An unexpected error occurred in get_workflow_details for workflow '{workflow_id}': {e}"
-            )
+            logger.exception(f"Unexpected error fetching N8N workflow details for '{workflow_id}': {e}")
             raise N8NClientError(f"Unexpected error fetching N8N workflow details: {e}")
 
-    # --- Placeholder methods for Fase 2.1 requirements ---
-    # The actual implementation of these can be complex and depends heavily on N8N's API capabilities
-    # for dynamic workflow management and parameterization.
+    def import_workflow(self, workflow_json_content: Dict[str, Any]) -> Optional[N8NWorkflow]:
+        """Imports a workflow from a JSON content. If a workflow with the same name exists, it might be updated."""
+        try:
+            # N8N's import endpoint is typically POST /workflows (same as create)
+            # It might update if a workflow with the same ID exists in the JSON, or by name.
+            # For safety, let's assume it creates or updates based on N8N's internal logic.
+            # The provided JSON has an "id", N8N might use this to update if it exists.
+            logger.info(f"Importing workflow '{workflow_json_content.get('name', 'Unknown name')}' to N8N.")
+            imported_workflow_data = self._make_request("POST", "workflows", json_data=workflow_json_content)
+            
+            # The response structure for workflow creation/import can vary.
+            # It often returns the full workflow object.
+            if isinstance(imported_workflow_data, dict) and "id" in imported_workflow_data:
+                logger.info(f"Workflow imported/updated successfully. ID: {imported_workflow_data['id']}")
+                return N8NWorkflow(**imported_workflow_data)
+            else:
+                logger.error(f"Unexpected response structure after importing workflow: {imported_workflow_data}")
+                return None
+        except N8NClientError as e:
+            logger.error(f"Failed to import workflow into N8N: {e}")
+            return None
+        except Exception as e:
+            logger.exception(f"Unexpected error during N8N workflow import: {e}")
+            return None
+
+    def activate_workflow(self, workflow_id: str) -> bool:
+        """Activates a workflow by its ID."""
+        try:
+            self._make_request("POST", f"workflows/{workflow_id}/activate")
+            logger.info(f"Successfully activated workflow ID: {workflow_id}")
+            return True
+        except N8NClientError as e:
+            logger.error(f"Failed to activate workflow ID {workflow_id}: {e}")
+            return False
+        except Exception as e:
+            logger.exception(f"Unexpected error activating N8N workflow ID {workflow_id}: {e}")
+            return False
+
+    def _get_webhook_url_from_workflow_json(self, workflow_json: Dict[str, Any]) -> Optional[str]:
+        """Helper to extract webhookId from the chatTrigger node in the workflow JSON."""
+        nodes = workflow_json.get("nodes", [])
+        for node in nodes:
+            if node.get("type") == "@n8n/n8n-nodes-langchain.chatTrigger":
+                webhook_id = node.get("webhookId")
+                if webhook_id and self.config.url: # self.config.url is the N8N instance base URL
+                    # Construct the full webhook URL
+                    # N8N instance URL might be http://localhost:5678
+                    # Webhook URL is typically N8N_URL/webhook/webhookId or N8N_URL/webhook-test/webhookId
+                    # For production webhooks, it's usually /webhook/
+                    # This needs to be confirmed with N8N documentation or testing.
+                    # Assuming self.config.webhook_url is the base for webhooks (e.g. http://localhost:5678)
+                    if self.config.webhook_url:
+                        return urljoin(self.config.webhook_url, f"webhook/{webhook_id}")
+                    else: # Fallback to base N8N URL if specific webhook_url is not set
+                        return urljoin(self.config.url, f"webhook/{webhook_id}")
+        return None
 
     def configure_and_deploy_chat_workflow(
         self,
-        course_id: int,
-        qdrant_collection_name: str,
-        ollama_config: Dict[str, Any],  # e.g. host, models
-        # Potentially a template workflow ID or definition
-    ) -> Optional[str]:  # Returns the chat webhook URL or None
-        """
-        Configures and deploys/activates a chat workflow for a given course.
-        This is a complex operation and might involve:
-        1. Finding a template workflow.
-        2. Updating its nodes/parameters (e.g., Qdrant collection, Ollama models).
-        3. Activating the workflow.
-        4. Retrieving its webhook URL.
+        course_id: int, # For logging and potential future use in parametrization
+        qdrant_collection_name: str, # For potential future use in parametrization
+        ollama_config_params: Dict[str, Any], # For potential future use in parametrization
+    ) -> Optional[str]:
+        logger.info(f"Configuring and deploying N8N chat workflow for course_id: {course_id}")
 
-        For now, this is a placeholder. A simpler approach might be to assume a workflow
-        is manually created and tagged, and this function just retrieves its details (like webhook URL)
-        based on `self.config.chat_workflow_id` or tags.
-        """
-        logger.info(
-            f"Attempting to configure/deploy N8N chat workflow for course_id: {course_id}"
-        )
+        if not self.config.workflow_json_path:
+            logger.error("N8N_WORKFLOW_JSON_PATH not configured. Cannot load workflow.")
+            return None
+        
+        workflow_file = Path(self.config.workflow_json_path)
+        if not workflow_file.is_file():
+            logger.error(f"N8N workflow JSON file not found at: {workflow_file}")
+            return None
 
-        # Simplistic approach: Use a pre-configured workflow ID from .env
-        if self.config.chat_workflow_id:
-            logger.info(
-                f"Using pre-configured N8N_CHAT_WORKFLOW_ID: {self.config.chat_workflow_id}"
-            )
-            workflow_details = self.get_workflow_details(self.config.chat_workflow_id)
-            if workflow_details and workflow_details.active:
-                # How to get the specific webhook URL for *this* chat instance?
-                # N8N webhook URLs are typically static per trigger node.
-                # If the workflow is designed to handle multiple courses, it needs a way to
-                # differentiate them, e.g., by a path parameter in the webhook or a query param.
-                # The N8N_WEBHOOK_URL in config might be the base, and we append course_id.
-                # This needs to align with the N8N workflow's Webhook node setup.
-                if (
-                    self.config.webhook_url
-                ):  # This is the N8N instance's general webhook URL
-                    # Assume the workflow's trigger webhook URL is the main N8N webhook URL + /workflow-path/course_id
-                    # This is highly dependent on N8N workflow design.
-                    # For a generic chat, it might be just the workflow's trigger URL.
-                    # Let's assume the workflow_details.webhook_url is the direct trigger URL if available.
-                    if workflow_details.webhook_url:
-                        logger.info(
-                            f"Chat workflow '{workflow_details.name}' is active. Webhook URL: {workflow_details.webhook_url}"
-                        )
-                        return str(workflow_details.webhook_url)
-                    else:  # Fallback if model doesn't have webhook_url, construct one (less reliable)
-                        # This part is speculative and depends on N8N setup.
-                        # Often, the webhook URL is the N8N instance URL + /webhook/ + workflow_id or a custom path.
-                        # For a production workflow, the URL is usually static.
-                        # The N8N_WEBHOOK_URL from config is the base URL for N8N's webhooks.
-                        # The actual path is defined in the N8N webhook node.
-                        # If the workflow is meant to be a single endpoint, its URL is static.
-                        # If it's a template to be copied, then it's more complex.
-                        # For now, let's assume the N8N_WEBHOOK_URL in config is the one to use,
-                        # or a specific one for the chat workflow.
-                        # This part needs clarification based on N8N setup.
-                        logger.warning(
-                            f"Webhook URL not directly available in N8NWorkflow model for workflow {self.config.chat_workflow_id}. "
-                            f"Using N8N_WEBHOOK_URL from config: {self.config.webhook_url} as a base. "
-                            f"This might need adjustment based on actual N8N workflow trigger URL."
-                        )
-                        return self.config.webhook_url  # This might be too generic.
-                else:
-                    logger.error(
-                        f"N8N_WEBHOOK_URL not configured, cannot determine chat URL for workflow {self.config.chat_workflow_id}"
-                    )
-                    return None
-            elif workflow_details:
-                logger.warning(
-                    f"Chat workflow '{workflow_details.name}' (ID: {self.config.chat_workflow_id}) found but is not active."
-                )
-                return None
-            else:
-                logger.error(
-                    f"Pre-configured chat workflow with ID '{self.config.chat_workflow_id}' not found."
-                )
+        try:
+            with open(workflow_file, 'r') as f:
+                workflow_json_content = json.load(f)
+        except Exception as e:
+            logger.error(f"Failed to read or parse N8N workflow JSON from {workflow_file}: {e}")
+            return None
+
+        # TODO: Parameterize workflow_json_content here if needed (Option B)
+        # For now, we assume Option A: workflow is generic or configured via N8N UI/env vars.
+        # Example for Option B (modifying Qdrant collection name):
+        # for node in workflow_json_content.get("nodes", []):
+        #     if node.get("type") == "@n8n/n8n-nodes-langchain.vectorStoreQdrant":
+        #         if "parameters" in node and "qdrantCollection" in node["parameters"]:
+        #             node["parameters"]["qdrantCollection"]["value"] = qdrant_collection_name
+        #             node["parameters"]["qdrantCollection"]["cachedResultName"] = qdrant_collection_name
+        #             logger.info(f"Patched Qdrant collection in workflow JSON to: {qdrant_collection_name}")
+        #             break
+        
+        imported_workflow = self.import_workflow(workflow_json_content)
+        if not imported_workflow or not imported_workflow.id:
+            logger.error("Failed to import the N8N workflow from JSON.")
+            return None
+
+        if not imported_workflow.active:
+            logger.info(f"Workflow '{imported_workflow.name}' (ID: {imported_workflow.id}) is not active. Attempting to activate.")
+            if not self.activate_workflow(imported_workflow.id):
+                logger.error(f"Failed to activate workflow ID: {imported_workflow.id}")
                 return None
         else:
-            logger.warning(
-                "N8N_CHAT_WORKFLOW_ID not set in config. Cannot automatically configure chat workflow."
-            )
-            # Here, one might implement logic to find/create a workflow based on tags or a template.
-            # For Phase 2.1, this is out of scope.
-            return None
+            logger.info(f"Workflow '{imported_workflow.name}' (ID: {imported_workflow.id}) is already active.")
+
+        # Extract webhookId from the original JSON to construct the URL,
+        # as the imported_workflow model might not directly expose it in a simple way.
+        webhook_url = self._get_webhook_url_from_workflow_json(workflow_json_content)
+        
+        if webhook_url:
+            logger.info(f"Chat workflow deployed. Webhook URL: {webhook_url}")
+            return webhook_url
+        else:
+            logger.error(f"Could not determine webhook URL for workflow '{imported_workflow.name}'. Check chatTrigger node in JSON.")
+            # Fallback to configured N8N_WEBHOOK_URL if all else fails, though it's less specific.
+            return self.config.webhook_url
 
 
 if __name__ == "__main__":
-    from src.entrenai.config import n8n_config
+    from src.entrenai.config import n8n_config, ollama_config # Added ollama_config for test
 
     if not n8n_config.url:
         print("N8N_URL must be set in .env for this test.")
+    elif not n8n_config.workflow_json_path or not Path(n8n_config.workflow_json_path).is_file():
+        print(f"N8N_WORKFLOW_JSON_PATH is not set or file not found at '{n8n_config.workflow_json_path}'.")
     else:
-        print(
-            f"Attempting to connect to N8N at {n8n_config.url} (API base: {N8NClient(config=n8n_config).base_url})..."
-        )
-        # Note: The N8NClient constructor itself might try to make a call if not handled carefully.
+        print(f"Attempting to connect to N8N at {n8n_config.url} (API base: {N8NClient(config=n8n_config).base_url})...")
         try:
             n8n_client = N8NClient(config=n8n_config)
-            if n8n_client.base_url:  # Check if client initialized properly
+            if n8n_client.base_url:
                 print("N8N client initialized.")
 
-                # Test get_workflows_list
-                print("\nAttempting to get list of workflows (limit 5)...")
-                try:
-                    workflows = n8n_client.get_workflows_list(limit=5)
-                    if workflows:
-                        print(f"Successfully retrieved {len(workflows)} workflows:")
-                        for wf in workflows:
-                            print(
-                                f"  - ID: {wf.id}, Name: {wf.name}, Active: {wf.active}, Webhook: {wf.webhook_url}"
-                            )
-                            # Try to get details for the first one if ID is present
-                            if wf.id:
-                                print(
-                                    f"    Attempting to get details for workflow ID: {wf.id}"
-                                )
-                                details = n8n_client.get_workflow_details(wf.id)
-                                if details:
-                                    print(
-                                        f"      Details: Name: {details.name}, Active: {details.active}"
-                                    )
-                                else:
-                                    print(
-                                        f"      Could not get details for workflow ID: {wf.id}"
-                                    )
-                                break  # Only test one detail call
-                    else:
-                        print("No workflows found or an error occurred.")
-                except N8NClientError as e:
-                    print(f"N8N API Error during get_workflows_list test: {e}")
-                except Exception as e:
-                    print(f"Unexpected error during get_workflows_list test: {e}")
-
-                # Test configure_and_deploy_chat_workflow (using placeholder logic)
-                print(
-                    "\nAttempting to 'configure/deploy' chat workflow (using placeholder logic)..."
+                # Test configure_and_deploy_chat_workflow
+                print("\nAttempting to configure and deploy chat workflow from JSON...")
+                # Dummy OllamaConfig for the test call signature
+                dummy_ollama_cfg_params = {"host": ollama_config.host, "embedding_model": ollama_config.embedding_model, "qa_model": ollama_config.qa_model}
+                chat_webhook_url = n8n_client.configure_and_deploy_chat_workflow(
+                    course_id=999, 
+                    qdrant_collection_name="entrenai_course_999_test",
+                    ollama_config_params=dummy_ollama_cfg_params
                 )
-                if n8n_config.chat_workflow_id:
-                    chat_url = n8n_client.configure_and_deploy_chat_workflow(
-                        course_id=123,
-                        qdrant_collection_name="entrenai_course_123",
-                        ollama_config={
-                            "host": "http://ollama:11434",
-                            "model": "llama3",
-                        },
-                    )
-                    if chat_url:
-                        print(f"Placeholder chat URL obtained: {chat_url}")
-                    else:
-                        print("Could not obtain placeholder chat URL.")
+                if chat_webhook_url:
+                    print(f"Chat workflow deployed/checked. Webhook URL: {chat_webhook_url}")
                 else:
-                    print(
-                        "N8N_CHAT_WORKFLOW_ID not set in .env, skipping configure_and_deploy_chat_workflow test."
-                    )
-
+                    print("Failed to configure/deploy chat workflow or get webhook URL.")
             else:
                 print("Failed to initialize N8N client (base_url is None). Check logs.")
         except N8NClientError as e:
