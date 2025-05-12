@@ -144,7 +144,7 @@ async def setup_ia_for_course(
         n8n_chat_url_str = n8n.configure_and_deploy_chat_workflow(
             course_id=course_id,
             qdrant_collection_name=response_details.qdrant_collection_name,
-            ollama_config_params=ollama_params_for_n8n, # Corrected parameter name
+            ollama_config_params=ollama_params_for_n8n,  # Corrected parameter name
         )
         if not n8n_chat_url_str:
             logger.warning(
