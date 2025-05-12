@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entrenai - Configuración de IA</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Bienvenido a Entrenai</h1>
+        <p>Entrenai te permite crear una IA personalizada para tus cursos de Moodle, utilizando el material que proporciones para responder preguntas de los estudiantes.</p>
+        
+        <h2>Configurar IA para un Curso</h2>
+        
+        <div class="controls">
+            <label for="course-search">Buscar Curso:</label>
+            <input type="text" id="course-search" placeholder="Escribe para filtrar cursos...">
+            
+            <label for="course-select">Selecciona un Curso:</label>
+            <select id="course-select" name="course-select">
+                <option value="">Cargando cursos...</option>
+            </select>
+            
+            <button id="setup-ai-button">Crear IA para este Curso</button>
+        </div>
+        
+        <div id="status-messages">
+            <!-- Los mensajes de estado aparecerán aquí -->
+        </div>
+    </div>
+    
+    <script src="script.js"></script>
+</body>
+</html>

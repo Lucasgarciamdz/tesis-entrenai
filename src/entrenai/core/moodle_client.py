@@ -51,16 +51,21 @@ class MoodleClient:
             )
             self.base_url: Optional[str] = None
         else:
-            self.base_url = urljoin(config.url, "/webservice/rest/server.php")
+            # Ensure URL ends with /webservice/rest/server.php
+            if not config.url.endswith("/"):
+                clean_url = config.url + "/"
+            else:
+                clean_url = config.url
+
+            self.base_url = urljoin(clean_url, "webservice/rest/server.php")
 
         self.session = session or requests.Session()
-        if self.config.token:  # Only update params if token exists
-            self.session.params.update(
-                {  # type: ignore
-                    "wstoken": self.config.token,
-                    "moodlewsrestformat": "json",
-                }
-            )
+        # Initialize session with default params directly
+        if self.config.token:  # Only set params if token exists
+            self.session.params = {
+                "wstoken": self.config.token,
+                "moodlewsrestformat": "json",
+            }
 
         if self.base_url:
             logger.info(
@@ -99,91 +104,87 @@ class MoodleClient:
         payload_params: Optional[Dict[str, Any]] = None,
         http_method: str = "POST",
     ) -> Any:
-        """
-        Helper method to make requests to the Moodle API.
-        Supports POST with form data and GET.
-        """
         if not self.base_url:
-            logger.error(
-                f"MoodleClient is not configured with a base URL. Cannot make request for '{wsfunction}'."
-            )
-            raise MoodleAPIError("MoodleClient not configured with base URL.")
-        if not self.config.token:  # Most Moodle WS require a token
-            logger.error(
-                f"Moodle token not configured. Cannot make authenticated request for '{wsfunction}'."
-            )
-            raise MoodleAPIError("Moodle token not configured.")
+            logger.error("Cannot make request: base_url is not set")
+            raise MoodleAPIError("Moodle base URL is not configured")
 
-        request_params: Dict[str, Any] = {  # For GET requests or common query params
-            "wsfunction": wsfunction,
+        request_url = self.base_url
+
+        # Core Moodle webservice query parameters that go into the URL
+        query_params_for_url = {
             "wstoken": self.config.token,
             "moodlewsrestformat": "json",
+            "wsfunction": wsfunction,  # Ensure wsfunction is part of the query
         }
 
-        data_payload: Optional[Dict[str, Any]] = None  # For POST form data
-
-        if http_method.upper() == "POST":
-            data_payload = (
-                request_params.copy()
-            )  # Start with common params for POST data
-            if payload_params:
-                formatted_payload = self._format_moodle_params(payload_params)
-                data_payload.update(formatted_payload)
-            # For POST, common params like wstoken are part of the data payload, not query string.
-            # So, request_params for session.post should be None or only for URL query if Moodle needs that.
-            # Moodle typically expects all params in the POST body for ws calls.
-            final_url_params = None
-        elif http_method.upper() == "GET":
-            if payload_params:
-                formatted_payload = self._format_moodle_params(payload_params)
-                request_params.update(formatted_payload)
-            final_url_params = request_params
-        else:
-            raise MoodleAPIError(f"Unsupported HTTP method: {http_method}")
+        # Prepare the main payload (e.g., for POST body or complex GET params)
+        formatted_api_payload = (
+            self._format_moodle_params(payload_params) if payload_params else {}
+        )
 
         response: Optional[requests.Response] = None
 
         try:
+            logger.debug(
+                f"Calling Moodle API function '{wsfunction}' with method {http_method.upper()}."
+            )
+            logger.debug(f"  URL: {request_url}")
+            logger.debug(f"  Query Params for URL: {query_params_for_url}")
+
             if http_method.upper() == "POST":
+                logger.debug(f"  POST Data: {formatted_api_payload}")
                 response = self.session.post(
-                    self.base_url, data=data_payload, params=final_url_params
+                    request_url, params=query_params_for_url, data=formatted_api_payload
                 )
             elif http_method.upper() == "GET":
-                response = self.session.get(self.base_url, params=final_url_params)
+                all_get_params = query_params_for_url.copy()
+                if formatted_api_payload:  # Assuming formatted_api_payload is a dict
+                    all_get_params.update(formatted_api_payload)
+                logger.debug(f"  GET Params: {all_get_params}")
+                response = self.session.get(request_url, params=all_get_params)
+            else:
+                logger.error(f"Unsupported HTTP method specified: {http_method}")
+                raise MoodleAPIError(f"Unsupported HTTP method: {http_method}")
 
-            if response is None:  # Should not happen if method is GET/POST
-                raise MoodleAPIError("Response object is None after request attempt.")
+            response.raise_for_status()  # Check for HTTP errors (4xx or 5xx)
 
-            response.raise_for_status()
-            data = response.json()
+            json_data = (
+                response.json()
+            )  # Can raise ValueError if response is not valid JSON
 
-            if isinstance(data, dict) and data.get("exception"):
-                logger.error(f"Moodle API error for function '{wsfunction}': {data}")
-                raise MoodleAPIError(
-                    message=f"Moodle API Exception: {data.get('message', 'Unknown Moodle error')}",
-                    response_data=data,
+            # Check for Moodle specific error structure in the JSON response
+            if isinstance(json_data, dict) and "exception" in json_data:
+                logger.error(
+                    f"Moodle API returned an exception for function '{wsfunction}': "
+                    f"Type: {json_data.get('exception')}, "
+                    f"ErrorCode: {json_data.get('errorcode')}, "
+                    f"Message: {json_data.get('message')}"
                 )
-            if (
-                isinstance(data, list)
-                and data
-                and isinstance(data[0], dict)
-                and data[0].get("exception")
-            ):
-                logger.error(f"Moodle API error for function '{wsfunction}': {data[0]}")
                 raise MoodleAPIError(
-                    message=f"Moodle API Exception: {data[0].get('message', 'Unknown Moodle error')}",
-                    response_data=data[0],
+                    message=json_data.get("message", "Unknown Moodle error"),
+                    status_code=None,  # No HTTP status code for Moodle application errors
+                    response_data=json_data,
                 )
-            return data
+
+            return json_data
+
         except requests.exceptions.HTTPError as http_err:
-            err_msg = f"HTTP error occurred while calling Moodle function '{wsfunction}': {http_err}"
-            resp_text = (
-                response.text if response is not None else "No response text available"
+            # Log more details including the response body if available
+            response_text = (
+                http_err.response.text
+                if http_err.response is not None
+                else "No response text available"
             )
-            status = response.status_code if response is not None else None
-            logger.error(f"{err_msg} - Response: {resp_text}")
+            actual_url_called = http_err.request.url if http_err.request else "N/A"
+            logger.error(
+                f"HTTP error occurred while calling Moodle function '{wsfunction}': {http_err} (URL: {actual_url_called}) - Response: {response_text}"
+            )
             raise MoodleAPIError(
-                message=str(http_err), status_code=status, response_data=resp_text
+                message=f"HTTP error: {http_err.response.status_code if http_err.response is not None else 'Unknown status'} for {actual_url_called}",
+                status_code=http_err.response.status_code
+                if http_err.response is not None
+                else None,
+                response_data=response_text,
             ) from http_err
         except requests.exceptions.RequestException as req_err:
             logger.error(
@@ -204,6 +205,13 @@ class MoodleClient:
             ) from json_err
 
     def get_courses_by_user(self, user_id: int) -> List[MoodleCourse]:
+        # Validate user ID
+        if user_id <= 0:
+            logger.error(f"Invalid user_id: {user_id}. User ID must be greater than 0.")
+            raise ValueError(
+                f"Invalid user_id: {user_id}. User ID must be greater than 0."
+            )
+
         logger.info(f"Fetching courses for user_id: {user_id}")
         payload = {"userid": user_id}
         try:
@@ -236,6 +244,44 @@ class MoodleClient:
                 f"An unexpected error occurred in get_courses_by_user for user {user_id}: {e}"
             )
             raise MoodleAPIError(f"Unexpected error fetching courses: {e}")
+
+    def get_all_courses(self) -> List[MoodleCourse]:
+        """
+        Retrieves all courses available in the Moodle site using core_course_get_courses API.
+
+        Returns:
+            List[MoodleCourse]: A list of MoodleCourse objects for all available courses.
+        """
+        logger.info("Fetching all available courses from Moodle")
+        try:
+            courses_data = self._make_request("core_course_get_courses")
+
+            if not isinstance(courses_data, list):
+                logger.error(
+                    f"Unexpected response type for get_all_courses: {type(courses_data)}. Expected list. Data: {courses_data}"
+                )
+                if (
+                    isinstance(courses_data, dict)
+                    and "courses" in courses_data
+                    and isinstance(courses_data["courses"], list)
+                ):
+                    courses_data = courses_data["courses"]
+                else:
+                    raise MoodleAPIError(
+                        "Courses data is not in expected list format.",
+                        response_data=courses_data,
+                    )
+
+            courses = [MoodleCourse(**course_data) for course_data in courses_data]
+            logger.info(f"Found {len(courses)} courses in total")
+            return courses
+
+        except MoodleAPIError as e:
+            logger.error(f"Failed to get all courses: {e}")
+            raise
+        except Exception as e:
+            logger.exception(f"An unexpected error occurred in get_all_courses: {e}")
+            raise MoodleAPIError(f"Unexpected error fetching all courses: {e}")
 
     def create_module_in_section(
         self,
@@ -606,12 +652,14 @@ class MoodleClient:
             # If file_url already has token, session token might be redundant or conflict.
             # Let's assume file_url is directly usable.
 
-            # Remove wsfunction from params for direct file download if it's in session defaults
-            temp_params = self.session.params.copy()
-            if "wsfunction" in temp_params:  # wsfunction is not for file download
-                del temp_params["wsfunction"]
-
-            with self.session.get(file_url, params=temp_params, stream=True) as r:
+            # Create a direct request without using session params to avoid wsfunction
+            with requests.get(
+                file_url,
+                params={"wstoken": self.config.token}
+                if "wstoken" not in file_url
+                else None,
+                stream=True,
+            ) as r:
                 r.raise_for_status()
                 with open(local_filepath, "wb") as f:
                     shutil.copyfileobj(r.raw, f)
@@ -661,6 +709,26 @@ if __name__ == "__main__":
             print(f"Moodle API Error during testing get_courses_by_user: {e}")
         except Exception as e:
             print(f"Generic error during testing get_courses_by_user: {e}")
+
+        print("\nAttempting to get all courses...")
+        try:
+            all_courses = client.get_all_courses()
+            if all_courses:
+                print(f"Successfully retrieved {len(all_courses)} total courses:")
+                for i, course in enumerate(
+                    all_courses[:5]
+                ):  # Show only first 5 courses
+                    print(
+                        f"  - ID: {course.id}, Name: {course.fullname} (Shortname: {course.shortname})"
+                    )
+                if len(all_courses) > 5:
+                    print(f"  ... and {len(all_courses) - 5} more courses.")
+            else:
+                print("No courses found or an error occurred.")
+        except MoodleAPIError as e:
+            print(f"Moodle API Error during testing get_all_courses: {e}")
+        except Exception as e:
+            print(f"Generic error during testing get_all_courses: {e}")
 
         print("\nAttempting to get site info...")
         try:

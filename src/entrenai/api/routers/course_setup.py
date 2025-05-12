@@ -70,8 +70,12 @@ async def list_moodle_courses(
     ),
     client: MoodleClient = Depends(get_moodle_client),
 ):
-    teacher_id_to_use = moodle_user_id or moodle_config.default_teacher_id
-    if not teacher_id_to_use:
+    teacher_id_to_use = (
+        moodle_user_id
+        if moodle_user_id is not None
+        else moodle_config.default_teacher_id
+    )
+    if teacher_id_to_use is None:
         logger.error(
             "No Moodle teacher ID provided and MOODLE_DEFAULT_TEACHER_ID is not set."
         )
@@ -82,6 +86,7 @@ async def list_moodle_courses(
     logger.info(f"Fetching Moodle courses for teacher ID: {teacher_id_to_use}")
     try:
         courses = client.get_courses_by_user(user_id=teacher_id_to_use)
+        # courses = client.get_all_courses()
         return courses
     except MoodleAPIError as e:
         logger.error(f"Moodle API error while fetching courses: {e}")

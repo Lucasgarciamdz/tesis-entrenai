@@ -4,7 +4,7 @@
 PYTHON = python3
 
 # Virtual environment directory
-VENV_DIR = venv
+VENV_DIR = .venv
 VENV_ACTIVATE = . $(VENV_DIR)/bin/activate
 
 # Default FastAPI run command

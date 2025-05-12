@@ -6,8 +6,9 @@ from src.entrenai.utils.logger import get_logger
 
 # Import specific libraries for file processing
 # For PDF:
-from pdf2image import (
-    convert_from_path,
+from pdf2image import convert_from_path
+
+from pdf2image.exceptions import (
     PDFInfoNotInstalledError,
     PDFPageCountError,
     PDFSyntaxError,

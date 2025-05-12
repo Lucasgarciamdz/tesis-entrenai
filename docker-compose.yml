@@ -4,6 +4,8 @@ services:
     image: postgres:17.5
     container_name: entrenai_moodle_db
     restart: unless-stopped
+    ports:
+      - "${MOODLE_DB_HOST_PORT:-5432}:5432" # PostgreSQL port
     volumes:
       - moodle_db_data:/var/lib/postgresql/data
     environment:

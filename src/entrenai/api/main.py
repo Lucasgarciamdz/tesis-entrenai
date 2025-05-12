@@ -1,4 +1,7 @@
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+
 from src.entrenai.utils.logger import get_logger
 from src.entrenai.config import base_config
 
@@ -10,6 +13,16 @@ app = FastAPI(
     title="Entrenai API",
     description="API para el sistema Entrenai, integrando Moodle, Qdrant, Ollama y N8N.",
     version="0.1.0",
+)
+
+# Configuración de CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Permite todos los orígenes (para desarrollo)
+    # En producción, deberías restringirlo a dominios específicos.
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],  # Especifica los métodos que permites
+    allow_headers=["*"],  # Permite todos los headers
 )
 
 
@@ -48,6 +61,21 @@ async def health_check():
 from src.entrenai.api.routers import course_setup
 
 app.include_router(course_setup.router)
+
+# Montar directorio estático
+# Asume que 'static' está en la raíz del proyecto, y main.py está en src/entrenai/api/
+# Por lo tanto, necesitamos subir dos niveles desde __file__ para llegar a la raíz del proyecto.
+# project_root = Path(__file__).resolve().parent.parent.parent
+# static_files_dir = project_root / "static"
+# app.mount("/ui", StaticFiles(directory=str(static_files_dir), html=True), name="ui")
+
+# Simplificación: Asumir que la aplicación se ejecuta desde la raíz del proyecto
+# donde el directorio 'static' es directamente accesible.
+# Esto es común si usas `uvicorn src.entrenai.api.main:app` desde la raíz.
+# Si `make run` ejecuta uvicorn desde la raíz, "static" es correcto.
+# El Makefile actual ejecuta `uvicorn src.entrenai.api.main:app --reload $(RUN_ARGS)`
+# que se ejecuta desde la raíz del proyecto, por lo que "static" debería ser correcto.
+app.mount("/ui", StaticFiles(directory="static", html=True), name="ui")
 
 
 if __name__ == "__main__":
