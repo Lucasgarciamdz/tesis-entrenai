@@ -177,77 +177,81 @@ async def setup_ia_for_course(
             f"Moodle section '{created_section.name}' (ID: {created_section.id}) created."
         )
 
-        logger.info(
-            f"Creating Moodle folder '{moodle_folder_name}' in section {created_section.id}"
-        )
-        created_folder_module = moodle.create_folder_in_section(
-            course_id, created_section.id, moodle_folder_name
-        )
-        if not created_folder_module or not created_folder_module.id:
-            logger.warning(
-                f"Failed to create Moodle folder '{moodle_folder_name}' in section {created_section.id}. Proceeding."
-            )
-            response_details.message += (
-                f" Warning: Failed to create Moodle folder '{moodle_folder_name}'."
-            )
-        else:
-            response_details.moodle_folder_id = created_folder_module.id
-            logger.info(
-                f"Moodle folder '{created_folder_module.name}' (Module ID: {created_folder_module.id}) created."
-            )
-
-        if response_details.n8n_chat_url:
-            logger.info(
-                f"Creating Moodle link for N8N Chat ('{moodle_chat_link_name}') in section {created_section.id}"
-            )
-            chat_link_module = moodle.create_url_in_section(
-                course_id,
-                created_section.id,
-                moodle_chat_link_name,
-                str(response_details.n8n_chat_url),
-            )
-            if not chat_link_module or not chat_link_module.id:
-                logger.warning(
-                    f"Failed to create Moodle link for N8N Chat in section {created_section.id}. Proceeding."
-                )
-                response_details.message += (
-                    " Warning: Failed to create Moodle link for N8N Chat."
-                )
-            else:
-                response_details.moodle_chat_link_id = chat_link_module.id
-                logger.info(
-                    f"Moodle link for N8N Chat (Module ID: {chat_link_module.id}) created."
-                )
-        else:
-            logger.warning(
-                "No N8N chat URL available, skipping Moodle link creation for chat."
-            )
-            response_details.message += (
-                " N8N chat URL not available, Moodle link for chat not created."
-            )
-
-        refresh_path = router.url_path_for(
-            "refresh_files", course_id=course_id
-        )  # Changed name
+        # Prepare section summary and modules to update via single WS call
+        # Build URLs
+        refresh_path = router.url_path_for("refresh_files", course_id=course_id)
         refresh_files_url = str(request.base_url.replace(path=str(refresh_path)))
-        logger.info(
-            f"Creating Moodle link for Refresh Files ('{moodle_refresh_link_name}') -> {refresh_files_url} in section {created_section.id}"
+        n8n_chat_url = (
+            str(response_details.n8n_chat_url) if response_details.n8n_chat_url else ""
         )
-        refresh_link_module = moodle.create_url_in_section(
-            course_id, created_section.id, moodle_refresh_link_name, refresh_files_url
+        # Build HTML summary
+        html_summary = f"""
+<div>
+  <h4>{moodle_folder_name}</h4>
+  <p>Por favor, cree manualmente una carpeta con el nombre "<strong>{moodle_folder_name}</strong>" dentro de esta sección y suba allí sus archivos de contexto.</p>
+  <hr/>
+  <p><a href=\"{n8n_chat_url}\" target=\"_blank\">{moodle_chat_link_name}</a></p>
+  <p><a href=\"{refresh_files_url}\" target=\"_blank\">{moodle_refresh_link_name}</a></p>
+</div>
+"""
+        # Prepare module entries
+        modules_payload = []
+        # Folder module
+        modules_payload.append(
+            {
+                "modname": "folder",
+                "section": created_section.id,
+                "name": moodle_folder_name,
+                "intro": f"Carpeta para {moodle_folder_name}",
+                "introformat": 1,
+                "display": 0,
+                "showexpanded": 1,
+                "visible": 1,
+            }
         )
-        if not refresh_link_module or not refresh_link_module.id:
-            logger.warning(
-                f"Failed to create Moodle link for Refresh Files in section {created_section.id}. Proceeding."
+        # Chat URL module
+        if n8n_chat_url:
+            modules_payload.append(
+                {
+                    "modname": "url",
+                    "section": created_section.id,
+                    "name": moodle_chat_link_name,
+                    "externalurl": n8n_chat_url,
+                    "intro": f"Enlace a {moodle_chat_link_name}",
+                    "introformat": 1,
+                    "display": 0,
+                    "visible": 1,
+                }
             )
-            response_details.message += (
-                " Warning: Failed to create Moodle link for Refresh Files."
-            )
-        else:
-            response_details.moodle_refresh_link_id = refresh_link_module.id
-            logger.info(
-                f"Moodle link for Refresh Files (Module ID: {refresh_link_module.id}) created."
-            )
+        # Refresh URL module
+        modules_payload.append(
+            {
+                "modname": "url",
+                "section": created_section.id,
+                "name": moodle_refresh_link_name,
+                "externalurl": refresh_files_url,
+                "intro": f"Enlace a {moodle_refresh_link_name}",
+                "introformat": 1,
+                "display": 0,
+                "visible": 1,
+            }
+        )
+        # Combine into update payload
+        update_payload = {
+            "courseid": course_id,
+            "sections": [
+                {
+                    "type": "id",
+                    "section": created_section.id,
+                    "name": created_section.name,
+                    "summary": html_summary,
+                    "summaryformat": 1,
+                    "visible": 1,
+                }
+            ],
+        }
+        # Send update to Moodle WS
+        moodle._make_request("local_wsmanagesections_update_sections", update_payload)
 
         response_details.status = "success"
         response_details.message = (

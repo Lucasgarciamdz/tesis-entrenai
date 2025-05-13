@@ -62,9 +62,8 @@ services:
       - "${QDRANT_HOST_GRPC_PORT:-6334}:6334" # gRPC port
     volumes:
       - qdrant_data:/qdrant/storage
-    # Example for API key (uncomment and set QDRANT_API_KEY in .env if needed)
-    # environment:
-    #   QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
     networks:
       - entrenai_net
 

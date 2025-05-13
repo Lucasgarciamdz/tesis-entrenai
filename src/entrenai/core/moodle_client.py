@@ -239,27 +239,38 @@ class MoodleClient:
                 )
 
             new_section_info = created_data[0]
-            new_section_id = new_section_info.get("id")
+            # Try to get section ID using either 'id' or 'sectionid' field
+            new_section_id = new_section_info.get("id") or new_section_info.get(
+                "sectionid"
+            )
             if new_section_id is None:
                 raise MoodleAPIError(
-                    "Created section data missing 'id'.", response_data=new_section_info
+                    "Created section data missing 'id' or 'sectionid'.",
+                    response_data=new_section_info,
                 )
 
             logger.info(
                 f"Section structure created (ID: {new_section_id}). Updating name to '{section_name}'."
             )
+            # Update the section with new name and visibility
             update_payload = {
                 "courseid": course_id,
                 "sections": [
                     {"id": new_section_id, "name": section_name, "visible": 1}
                 ],
             }
-            self._make_request("local_wsmanagesections_update_sections", update_payload)
-
-            # Verify by fetching the section again
-            return self.get_section_by_name(
-                course_id, section_name
-            )  # Or get by ID if preferred
+            self._make_request(
+                "local_wsmanagesections_update_sections", payload_params=update_payload
+            )
+            # Retrieve created section via plugin get_sections
+            get_payload = {"courseid": course_id, "sectionids": [new_section_id]}
+            sections_data = self._make_request(
+                "local_wsmanagesections_get_sections", payload_params=get_payload
+            )
+            if isinstance(sections_data, list) and sections_data:
+                sec_info = sections_data[0]
+                return MoodleSection(**sec_info)
+            return None
         except MoodleAPIError as e:
             logger.error(f"Error creating section '{section_name}': {e}")
             return None
@@ -276,6 +287,12 @@ class MoodleClient:
         instance_params: Optional[Dict[str, Any]] = None,
         common_module_options: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[MoodleModule]:
+        """Creates or returns an existing module in the specified course section.
+
+        This method uses the local_wsmanagesections plugin to create modules in Moodle.
+        It first checks if the module already exists for idempotency.
+        Currently supports 'url' and 'folder' module types.
+        """
         # Check if module already exists (for idempotency)
         existing_module = self.get_course_module_by_name(
             course_id, section_id, module_name, mod_type
@@ -289,42 +306,69 @@ class MoodleClient:
         logger.info(
             f"Creating module '{module_name}' (type: {mod_type}) in course {course_id}, section {section_id}"
         )
-        module_data: Dict[str, Any] = {
-            "modname": mod_type,
-            "name": module_name,
-            "section": section_id,
-        }
-        options_list: List[Dict[str, Any]] = common_module_options or []
-        if instance_params:
-            for key, value in instance_params.items():
-                options_list.append({"name": key, "value": str(value)})
-        if options_list:
-            module_data["options"] = options_list
-        payload = {"courseid": course_id, "modules": [module_data]}
+
         try:
-            response = self._make_request("core_course_add_module", payload)
-            if not isinstance(response, list) or not response:
-                raise MoodleAPIError(
-                    "Failed to add module or unexpected response.",
-                    response_data=response,
-                )
-            added_info = response[0]
-            if "id" not in added_info or "instance" not in added_info:
-                if "warnings" in added_info and added_info["warnings"]:
-                    logger.warning(
-                        f"Moodle warnings adding module: {added_info['warnings']}"
-                    )
-                raise MoodleAPIError(
-                    "Response missing 'id' or 'instance'.", response_data=added_info
-                )
-            logger.info(
-                f"Module '{module_name}' added with cmid: {added_info['id']}, instanceid: {added_info['instance']}."
+            # Get existing section data to include in the update
+            course_contents = self._make_request(
+                "core_course_get_contents", {"courseid": course_id}
             )
-            return MoodleModule(
-                id=added_info["id"],
-                name=module_name,
-                modname=mod_type,
-                instance=added_info["instance"],
+
+            section_data = None
+            for section in course_contents:
+                if section.get("id") == section_id:
+                    section_data = section
+                    break
+
+            if not section_data:
+                logger.error(
+                    f"Could not find section ID {section_id} in course {course_id}"
+                )
+                return None
+
+            # Prepare the module data based on module type (include target section)
+            module_data = {
+                "modname": mod_type,
+                "section": section_id,
+                "name": module_name,
+            }
+
+            # Add specific parameters based on module type
+            if (
+                mod_type == "url"
+                and instance_params
+                and "externalurl" in instance_params
+            ):
+                module_data["externalurl"] = instance_params["externalurl"]
+                if "intro" in instance_params:
+                    module_data["intro"] = instance_params["intro"]
+                if "display" in instance_params:
+                    module_data["display"] = instance_params["display"]
+            elif mod_type == "folder":
+                if instance_params and "intro" in instance_params:
+                    module_data["intro"] = instance_params["intro"]
+                else:
+                    module_data["intro"] = f"Carpeta para {module_name}"
+
+                if instance_params:
+                    for key, value in instance_params.items():
+                        if key not in module_data:
+                            module_data[key] = value
+
+            # Add common module options if provided
+            if common_module_options:
+                for option in common_module_options:
+                    if "name" in option and "value" in option:
+                        module_data[option["name"]] = option["value"]
+            # Prepare payload for module creation via sections WS
+            update_payload = {
+                "courseid": course_id,
+                "modules": [module_data],
+            }
+            # Send update to create module
+            self._make_request("local_wsmanagesections_update_sections", update_payload)
+            # Retrieve and return created module
+            return self.get_course_module_by_name(
+                course_id, section_id, module_name, mod_type
             )
         except MoodleAPIError as e:
             logger.error(f"API Error adding module '{module_name}': {e}")

@@ -32,6 +32,7 @@ class QdrantWrapper:
                     if config.grpc_port is not None
                     else 6334,  # Default gRPC port
                     api_key=config.api_key,
+                    https=False,  # Disable SSL for local development
                     # prefer_grpc=True, # Can be enabled for performance
                 )
                 # Test connection by getting cluster info
@@ -81,13 +82,9 @@ class QdrantWrapper:
                 UnexpectedResponse,
                 ValueError,
             ) as e:  # ValueError for 404 in older client, UnexpectedResponse in newer
-                if isinstance(e, UnexpectedResponse) and e.status_code == 404:
-                    logger.info(
-                        f"Collection '{collection_name}' does not exist. Attempting to create."
-                    )
-                elif isinstance(e, ValueError) and "Not found" in str(
-                    e
-                ):  # Older client versions
+                if (isinstance(e, UnexpectedResponse) and e.status_code == 404) or (
+                    isinstance(e, ValueError) and "Not found" in str(e)
+                ):
                     logger.info(
                         f"Collection '{collection_name}' does not exist. Attempting to create."
                     )

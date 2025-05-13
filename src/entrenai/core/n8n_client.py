@@ -150,14 +150,31 @@ class N8NClient:
         """Imports a workflow from a JSON content. If a workflow with the same name exists, it might be updated."""
         try:
             # N8N's import endpoint is typically POST /workflows (same as create)
-            # It might update if a workflow with the same ID exists in the JSON, or by name.
-            # For safety, let's assume it creates or updates based on N8N's internal logic.
-            # The provided JSON has an "id", N8N might use this to update if it exists.
+            # According to n8n API, workflow JSON needs to be formatted correctly
+            # We need to ensure the JSON doesn't contain any unnecessary properties
             logger.info(
                 f"Importing workflow '{workflow_json_content.get('name', 'Unknown name')}' to N8N."
             )
+
+            # Create a clean workflow JSON with only the required properties
+            # Based on n8n API documentation
+            workflow_data = {
+                "name": workflow_json_content.get("name", "Imported Workflow"),
+                "nodes": workflow_json_content.get("nodes", []),
+                "connections": workflow_json_content.get("connections", {}),
+                "settings": workflow_json_content.get("settings", {}),
+                # "tags" field is read-only according to N8N API, removing it
+            }
+
+            # Do NOT add 'active' status as it's a read-only property in the N8N API
+            # We'll activate the workflow separately after import if needed
+
+            # Add staticData if it exists in the original JSON
+            if "staticData" in workflow_json_content:
+                workflow_data["staticData"] = workflow_json_content["staticData"]
+
             imported_workflow_data = self._make_request(
-                "POST", "workflows", json_data=workflow_json_content
+                "POST", "workflows", json_data=workflow_data
             )
 
             # The response structure for workflow creation/import can vary.
