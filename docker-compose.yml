@@ -76,6 +76,8 @@ services:
       - "${OLLAMA_HOST_PORT:-11434}:11434"
     volumes:
       - ollama_models:/root/.ollama # Persist models
+    environment:
+      OLLAMA_CONTEXT_LENGTH: 25000
     # To enable GPU support (example for NVIDIA, ensure drivers are installed on host):
     # deploy:
     #   resources:

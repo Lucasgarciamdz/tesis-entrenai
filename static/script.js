@@ -100,7 +100,7 @@ document.addEventListener('DOMContentLoaded', () => {
         courseSelect.disabled = true;
 
         try {
-            const response = await fetch(`${API_BASE_URL}/courses/${selectedCourseId}/setup-ia`, {
+            const response = await fetch(`${API_BASE_URL}/courses/${selectedCourseId}/setup-ia?course_name=${encodeURIComponent(courseDisplayName)}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'

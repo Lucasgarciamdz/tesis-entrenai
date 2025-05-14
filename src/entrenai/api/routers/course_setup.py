@@ -100,11 +100,34 @@ async def list_moodle_courses(
 async def setup_ia_for_course(
     course_id: int,
     request: Request,
+    course_name: str = Query(
+        None, description="Name of the course to display in the IA setup"
+    ),
     moodle: MoodleClient = Depends(get_moodle_client),
     qdrant: QdrantWrapper = Depends(get_qdrant_wrapper),
     n8n: N8NClient = Depends(get_n8n_client),
 ):
     logger.info(f"Starting IA setup for Moodle course ID: {course_id}")
+
+    # Si no se proporciona el nombre del curso, intentamos obtenerlo de Moodle
+    if course_name is None:
+        try:
+            courses = moodle.get_courses_by_user(
+                user_id=moodle_config.default_teacher_id
+            )
+            course = next((c for c in courses if c.id == course_id), None)
+            if course:
+                course_name = course.displayname or course.fullname
+                logger.info(f"Retrieved course name from Moodle: {course_name}")
+            else:
+                course_name = f"Course {course_id}"
+                logger.warning(
+                    f"Could not find course {course_id} in Moodle, using default name"
+                )
+        except Exception as e:
+            logger.warning(f"Could not retrieve course name from Moodle: {e}")
+            course_name = f"Course {course_id}"
+
     vector_size = qdrant_config.default_vector_size
     moodle_section_name = moodle_config.course_folder_name
     moodle_folder_name = "Documentos Entrenai"
@@ -143,6 +166,7 @@ async def setup_ia_for_course(
         }
         n8n_chat_url_str = n8n.configure_and_deploy_chat_workflow(
             course_id=course_id,
+            course_name=course_name,
             qdrant_collection_name=response_details.qdrant_collection_name,
             ollama_config_params=ollama_params_for_n8n,  # Corrected parameter name
         )

@@ -244,6 +244,8 @@ class OllamaWrapper:
     ) -> str:
         """
         Converts the given text content to a well-structured Markdown format using an LLM.
+        Handles various input formats (plain text, OCR output, etc.) and ensures proper
+        markdown structure while preserving the original content's meaning.
 
         Args:
             text_content: The raw text to convert to markdown
@@ -265,18 +267,26 @@ class OllamaWrapper:
             logger.error("Markdown formatting model name not configured.")
             raise OllamaWrapperError("Markdown formatting model name not configured.")
 
+        # Preprocess the text to remove any <think> sections
+        cleaned_text = self._preprocess_text_content(text_content)
+
         system_prompt = (
-            "You are an expert text processing assistant. Your task is to convert the given text content "
-            "into a clean, well-structured Markdown format. "
-            "Preserve all factual information, lists, headings, and code blocks if present. "
-            "Ensure the Markdown is readable and accurately represents the original content structure. "
-            "Do not add any introductory phrases, summaries, or comments that are not part of the original text. "
-            "Output only the Markdown content."
+            "You are an expert text formatter specializing in converting raw text to clean Markdown. "
+            "Your task is to transform the given content into properly structured Markdown format. Follow these rules strictly:\n\n"
+            "1. Maintain the original content's meaning and factual information\n"
+            "2. Create appropriate headings and structure based on content hierarchy\n"
+            "3. Properly format lists, tables, code blocks, and other elements\n"
+            "4. Fix obvious typos and formatting issues while preserving meaning\n"
+            "5. DO NOT add any new content, introductions, summaries, or conclusions\n"
+            "6. DO NOT include any meta-commentary or notes about the formatting process\n"
+            "7. DO NOT include any text enclosed in <think> tags or similar metadata\n"
+            "8. ONLY output the properly formatted Markdown content, nothing else\n\n"
+            "The goal is clean, well-structured Markdown that accurately represents the original content."
         )
 
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": text_content},
+            {"role": "user", "content": cleaned_text},
         ]
 
         try:
@@ -287,6 +297,9 @@ class OllamaWrapper:
 
             # Extract markdown content from response
             markdown_content = self._extract_markdown_content(response)
+
+            # Post-process the markdown content to ensure it's clean
+            markdown_content = self._postprocess_markdown_content(markdown_content)
 
             if markdown_content:
                 logger.info(
@@ -306,6 +319,63 @@ class OllamaWrapper:
                 f"Error formatting text to Markdown with model '{model_to_use}': {e}"
             )
             raise OllamaWrapperError(f"Failed to format text to Markdown: {e}") from e
+
+    def _preprocess_text_content(self, text: str) -> str:
+        """
+        Preprocesses the input text before sending it to the LLM.
+        Removes any <think> sections and other unwanted metadata.
+
+        Args:
+            text: The raw input text
+
+        Returns:
+            Cleaned text ready for markdown conversion
+        """
+        import re
+
+        # Remove <think>...</think> blocks
+        cleaned_text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+
+        # Remove other common metadata patterns that might appear in OCR or extracted text
+        cleaned_text = re.sub(
+            r"^\s*\[.*?\]\s*$", "", cleaned_text, flags=re.MULTILINE
+        )  # Remove [metadata] lines
+        cleaned_text = re.sub(
+            r"^\s*#\s*metadata:.*$", "", cleaned_text, flags=re.MULTILINE
+        )  # Remove #metadata lines
+
+        return cleaned_text.strip()
+
+    def _postprocess_markdown_content(self, markdown: str) -> str:
+        """
+        Performs final cleanup on the generated markdown.
+
+        Args:
+            markdown: The markdown content returned by the LLM
+
+        Returns:
+            Clean, well-formatted markdown
+        """
+        import re
+
+        # Remove any lingering <think> tags that might have been generated
+        cleaned_markdown = re.sub(r"<think>.*?</think>", "", markdown, flags=re.DOTALL)
+
+        # Remove any "I've converted this to markdown..." explanatory text at the beginning
+        cleaned_markdown = re.sub(
+            r"^.*?(#|---|```)", r"\1", cleaned_markdown, flags=re.DOTALL, count=1
+        )
+
+        # Fix common formatting issues
+        # Ensure proper spacing after headings
+        cleaned_markdown = re.sub(r"(#{1,6}.*?)(\n(?!\n))", r"\1\n\n", cleaned_markdown)
+
+        # Ensure code blocks are properly formatted with newlines
+        cleaned_markdown = re.sub(
+            r"```(\w*)\n?([^`]+)```", r"```\1\n\2\n```", cleaned_markdown
+        )
+
+        return cleaned_markdown.strip()
 
     # add_context_to_chunk will be handled by EmbeddingManager for now.
 

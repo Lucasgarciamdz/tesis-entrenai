@@ -214,7 +214,7 @@ class MoodleClient:
             return None
 
     def create_course_section(
-        self, course_id: int, section_name: str, position: int = 0
+        self, course_id: int, section_name: str, position: int = 1
     ) -> Optional[MoodleSection]:
         logger.info(
             f"Ensuring section '{section_name}' in course {course_id} at position {position}"
@@ -258,9 +258,7 @@ class MoodleClient:
                     {"id": new_section_id, "name": section_name, "visible": 1}
                 ],
             }
-            self._make_request(
-                "local_wsmanagesections_update_sections", payload_params=update_payload
-            )
+
             # Retrieve created section via plugin get_sections
             get_payload = {"courseid": course_id, "sectionids": [new_section_id]}
             sections_data = self._make_request(

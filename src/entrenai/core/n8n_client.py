@@ -214,6 +214,21 @@ class N8NClient:
             )
             return False
 
+    def delete_workflow(self, workflow_id: str) -> bool:
+        """Deletes a workflow by its ID."""
+        try:
+            self._make_request("DELETE", f"workflows/{workflow_id}")
+            logger.info(f"Successfully deleted workflow ID: {workflow_id}")
+            return True
+        except N8NClientError as e:
+            logger.error(f"Failed to delete workflow ID {workflow_id}: {e}")
+            return False
+        except Exception as e:
+            logger.exception(
+                f"Unexpected error deleting N8N workflow ID {workflow_id}: {e}"
+            )
+            return False
+
     def _get_webhook_url_from_workflow_json(
         self, workflow_json: Dict[str, Any]
     ) -> Optional[str]:
@@ -237,9 +252,146 @@ class N8NClient:
                         return urljoin(self.config.url, f"webhook/{webhook_id}")
         return None
 
+    def get_workflow_webhooks(self, workflow_id: str) -> Optional[List[Dict[str, Any]]]:
+        """Get all webhook URLs for a workflow directly from the N8N API."""
+        try:
+            # Approach 1: Try to get the workflow execution data which might contain webhook info
+            # This endpoint is more likely to exist in different versions of n8n
+            workflow_details = self.get_workflow_details(workflow_id)
+            if not workflow_details:
+                return None
+
+            # Manual extraction of webhook information from workflow nodes
+            webhook_nodes = []
+            if hasattr(workflow_details, "nodes") and workflow_details.nodes:
+                for node in workflow_details.nodes:
+                    # Check for webhook nodes
+                    if (
+                        getattr(node, "type", "").endswith("Trigger")
+                        or "webhook" in getattr(node, "type", "").lower()
+                    ):
+                        webhook_data = {
+                            "nodeId": getattr(node, "id", None),
+                            "name": getattr(node, "name", None),
+                            "webhookId": getattr(node, "webhookId", None),
+                            "type": getattr(node, "type", None),
+                        }
+                        webhook_nodes.append(webhook_data)
+
+            if webhook_nodes:
+                logger.info(
+                    f"Found {len(webhook_nodes)} webhook nodes in workflow {workflow_id}"
+                )
+                return webhook_nodes
+
+            # Approach 2: If we can't directly extract from nodes, try using the model_dump() method
+            if hasattr(workflow_details, "model_dump"):
+                workflow_data = workflow_details.model_dump()
+                if "nodes" in workflow_data:
+                    webhook_nodes = []
+                    for node in workflow_data["nodes"]:
+                        if (
+                            node.get("type", "").endswith("Trigger")
+                            or "webhook" in node.get("type", "").lower()
+                        ):
+                            webhook_data = {
+                                "nodeId": node.get("id"),
+                                "name": node.get("name"),
+                                "webhookId": node.get("webhookId"),
+                                "type": node.get("type"),
+                            }
+                            webhook_nodes.append(webhook_data)
+
+                    if webhook_nodes:
+                        logger.info(
+                            f"Found {len(webhook_nodes)} webhook nodes in workflow {workflow_id} using model_dump"
+                        )
+                        return webhook_nodes
+
+            # If no webhooks found, return None
+            logger.warning(f"No webhook nodes found in workflow {workflow_id}")
+            return None
+
+        except N8NClientError as e:
+            logger.error(f"Failed to get webhooks for workflow ID {workflow_id}: {e}")
+            return None
+        except Exception as e:
+            logger.exception(
+                f"Unexpected error getting webhooks for workflow ID {workflow_id}: {e}"
+            )
+            return None
+
+    def get_webhook_url_for_workflow(self, workflow_id: str) -> Optional[str]:
+        """Try different methods to get the webhook URL for a workflow."""
+        # Método 1: Intentar obtener webhooks de los detalles del workflow
+        webhooks = self.get_workflow_webhooks(workflow_id)
+        if webhooks:
+            for webhook in webhooks:
+                # Buscar webhooks con un ID
+                webhook_id = webhook.get("webhookId")
+                if webhook_id:
+                    # Construir la URL del webhook
+                    if self.config.webhook_url:
+                        webhook_url = urljoin(
+                            self.config.webhook_url, f"webhook/{webhook_id}"
+                        )
+                        logger.info(f"Found webhook URL using node ID: {webhook_url}")
+                        return webhook_url
+                    elif self.config.url:
+                        # Extraer la base URL (sin /api/v1/)
+                        base_url = self.config.url
+                        if "/api/v1" in base_url:
+                            base_url = base_url.split("/api/v1")[0]
+                        webhook_url = urljoin(base_url, f"webhook/{webhook_id}")
+                        logger.info(f"Found webhook URL using node ID: {webhook_url}")
+                        return webhook_url
+
+        # Método 2: Intentar usar la configuración por defecto con la plantilla de workflow
+        if self.config.workflow_json_path:
+            try:
+                with open(Path(self.config.workflow_json_path), "r") as f:
+                    template_json = json.load(f)
+                    # Buscar nodos de tipo webhook o trigger
+                    for node in template_json.get("nodes", []):
+                        # Verificar si es un nodo de webhook
+                        if (
+                            node.get("type", "").endswith("Trigger")
+                            or "webhook" in node.get("type", "").lower()
+                        ):
+                            webhook_id = node.get("webhookId")
+                            if webhook_id:
+                                if self.config.webhook_url:
+                                    webhook_url = urljoin(
+                                        self.config.webhook_url, f"webhook/{webhook_id}"
+                                    )
+                                    logger.info(
+                                        f"Generated webhook URL from template: {webhook_url}"
+                                    )
+                                    return webhook_url
+                                elif self.config.url:
+                                    # Extraer la base URL (sin /api/v1/)
+                                    base_url = self.config.url
+                                    if "/api/v1" in base_url:
+                                        base_url = base_url.split("/api/v1")[0]
+                                    webhook_url = urljoin(
+                                        base_url, f"webhook/{webhook_id}"
+                                    )
+                                    logger.info(
+                                        f"Generated webhook URL from template: {webhook_url}"
+                                    )
+                                    return webhook_url
+            except Exception as e:
+                logger.error(
+                    f"Error attempting to generate webhook URL from template: {e}"
+                )
+
+        # No se pudo obtener el webhook por ningún método
+        return None
+
     def configure_and_deploy_chat_workflow(
         self,
         course_id: int,  # For logging and potential future use in parametrization
+        course_name: str,  # For logging and potential future use in parametrization
         qdrant_collection_name: str,  # For potential future use in parametrization
         ollama_config_params: Dict[
             str, Any
@@ -248,6 +400,113 @@ class N8NClient:
         logger.info(
             f"Configuring and deploying N8N chat workflow for course_id: {course_id}"
         )
+
+        # Buscar si ya existe un workflow para este curso
+        try:
+            logger.info(f"Checking for existing workflows for course {course_id}...")
+            existing_workflows = self.get_workflows_list()
+            if not existing_workflows:
+                logger.info("No existing workflows found.")
+            else:
+                logger.info(f"Found {len(existing_workflows)} total workflows.")
+
+            workflow_prefix = f"Entrenai - {course_id}"
+            active_workflow = None
+
+            # Primero buscar un workflow activo con el nombre exacto
+            exact_name = f"Entrenai - {course_id} - {course_name}"
+            for workflow in existing_workflows:
+                if workflow.name == exact_name:
+                    if workflow.active:
+                        logger.info(
+                            f"Found exact match active workflow: {workflow.name}"
+                        )
+                        webhook_url = (
+                            self.get_webhook_url_for_workflow(workflow.id)
+                            if workflow.id
+                            else None
+                        )
+                        if webhook_url:
+                            logger.info(
+                                f"Using existing workflow. Webhook URL: {webhook_url}"
+                            )
+                            return webhook_url
+                    active_workflow = workflow
+                    break
+
+            # Si no encontramos uno con el nombre exacto, buscar cualquier workflow activo para este curso
+            if not active_workflow:
+                for workflow in existing_workflows:
+                    if workflow.name and workflow.name.startswith(workflow_prefix):
+                        if workflow.active:
+                            logger.info(
+                                f"Found active workflow for course: {workflow.name}"
+                            )
+                            webhook_url = (
+                                self.get_webhook_url_for_workflow(workflow.id)
+                                if workflow.id
+                                else None
+                            )
+                            if webhook_url:
+                                logger.info(
+                                    f"Using existing workflow. Webhook URL: {webhook_url}"
+                                )
+                                return webhook_url
+                        active_workflow = workflow
+                        break
+
+            # Si encontramos un workflow pero no pudimos obtener su webhook URL, intentar activarlo
+            if active_workflow and active_workflow.id:
+                logger.info(
+                    f"Found workflow {active_workflow.name}, attempting to activate it..."
+                )
+                if self.activate_workflow(active_workflow.id):
+                    logger.info(
+                        f"Successfully activated workflow ID: {active_workflow.id}"
+                    )
+                    # Intentar obtener webhook URL después de activación
+                    webhook_url = self.get_webhook_url_for_workflow(active_workflow.id)
+                    if webhook_url:
+                        logger.info(
+                            f"Successfully activated workflow. Webhook URL: {webhook_url}"
+                        )
+                        return webhook_url
+
+                    # Si aún no se puede obtener el webhook después de activar, intenta leer el workflow template
+                    # y extraer la estructura del nodo para generar la URL
+                    if self.config.workflow_json_path:
+                        try:
+                            with open(Path(self.config.workflow_json_path), "r") as f:
+                                template_json = json.load(f)
+                                # Construir una URL basada en la plantilla y el ID del workflow
+                                for node in template_json.get("nodes", []):
+                                    if (
+                                        node.get("type")
+                                        == "@n8n/n8n-nodes-langchain.chatTrigger"
+                                    ):
+                                        webhook_id = node.get("webhookId")
+                                        if webhook_id and self.config.webhook_url:
+                                            webhook_url = urljoin(
+                                                self.config.webhook_url,
+                                                f"webhook/{webhook_id}",
+                                            )
+                                            logger.info(
+                                                f"Generated webhook URL from template: {webhook_url}"
+                                            )
+                                            return webhook_url
+                        except Exception as e:
+                            logger.error(
+                                f"Error attempting to generate webhook URL from template: {e}"
+                            )
+
+                # Si llegamos aquí, significa que no pudimos obtener el webhook URL del workflow existente
+                logger.warning(
+                    f"Could not get webhook URL from existing workflow {active_workflow.name}. Creating new one."
+                )
+
+        except Exception as e:
+            logger.error(f"Error checking existing workflows: {e}")
+            # Continuamos con la creación de un nuevo workflow
 
         if not self.config.workflow_json_path:
             logger.error("N8N_WORKFLOW_JSON_PATH not configured. Cannot load workflow.")
@@ -278,6 +537,7 @@ class N8NClient:
         #             logger.info(f"Patched Qdrant collection in workflow JSON to: {qdrant_collection_name}")
         #             break
 
+        workflow_json_content["name"] = f"Entrenai - {course_id} - {course_name}"
         imported_workflow = self.import_workflow(workflow_json_content)
         if not imported_workflow or not imported_workflow.id:
             logger.error("Failed to import the N8N workflow from JSON.")
@@ -344,6 +604,7 @@ if __name__ == "__main__":
                 }
                 chat_webhook_url = n8n_client.configure_and_deploy_chat_workflow(
                     course_id=999,
+                    course_name="Test Course",
                     qdrant_collection_name="entrenai_course_999_test",
                     ollama_config_params=dummy_ollama_cfg_params,
                 )
