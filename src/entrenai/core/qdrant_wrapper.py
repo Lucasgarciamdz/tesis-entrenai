@@ -1,4 +1,12 @@
 from qdrant_client import QdrantClient as QC, models
+
+from qdrant_client.models import (
+    VectorParams,
+    HnswConfigDiff,
+    OptimizersConfigDiff,
+    ScalarType,
+)
+
 from qdrant_client.http.exceptions import UnexpectedResponse
 from typing import List, Optional
 
@@ -94,8 +102,20 @@ class QdrantWrapper:
             # If it doesn't exist, create it
             self.client.create_collection(
                 collection_name=collection_name,
-                vectors_config=models.VectorParams(
-                    size=vector_size, distance=distance_metric
+                vectors_config=VectorParams(
+                    size=vector_size,
+                    distance=distance_metric,
+                    hnsw_config=HnswConfigDiff(m=64, ef_construct=200),
+                    quantization_config=models.ScalarQuantization(
+                        scalar=models.ScalarQuantizationConfig(
+                            type=ScalarType.INT8, quantile=0.99, always_ram=True
+                        )
+                    ),
+                ),
+                optimizers_config=OptimizersConfigDiff(
+                    indexing_threshold=20000,
+                    memmap_threshold=50000,
+                    default_segment_number=2,
                 ),
             )
             logger.info(

@@ -1,10 +1,13 @@
 import ollama
-from typing import List, Optional  # Added Dict, Any
+from typing import List, Optional, Any
 
 from src.entrenai.config import OllamaConfig
 from src.entrenai.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Common error messages as constants
+CLIENT_NOT_INITIALIZED = "Ollama client not initialized."
 
 
 class OllamaWrapperError(Exception):
@@ -51,13 +54,18 @@ class OllamaWrapper:
             return
 
         try:
-            available_models_data = self.client.list()  # Store the full response
-            available_models = available_models_data.get(
-                "models", []
-            )  # Safely get models list
-            available_model_names = [
-                model["name"] for model in available_models if "name" in model
-            ]
+            response = self.client.list()  # Get the ListResponse object
+
+            # Get models from the response object
+            available_models = []
+            if hasattr(response, "models"):
+                available_models = response.models
+
+            # Extract model names - models have a 'model' attribute (not 'name')
+            available_model_names = []
+            for model in available_models:
+                if hasattr(model, "model"):
+                    available_model_names.append(model.model)
 
             required_models = {
                 "embedding": self.config.embedding_model,
@@ -74,7 +82,11 @@ class OllamaWrapper:
                     continue
 
                 base_model_name = model_name.split(":")[0]
-                is_present = any(base_model_name in an for an in available_model_names)
+
+                # Check if any available model starts with the base name
+                is_present = any(
+                    model.startswith(base_model_name) for model in available_model_names
+                )
 
                 if not is_present:
                     logger.warning(
@@ -95,8 +107,8 @@ class OllamaWrapper:
         Generates an embedding for the given text using the configured embedding model.
         """
         if not self.client:
-            logger.error("Ollama client not initialized. Cannot generate embedding.")
-            raise OllamaWrapperError("Ollama client not initialized.")
+            logger.error(f"{CLIENT_NOT_INITIALIZED} Cannot generate embedding.")
+            raise OllamaWrapperError(CLIENT_NOT_INITIALIZED)
 
         model_to_use = model or self.config.embedding_model
         if not model_to_use:
@@ -122,10 +134,8 @@ class OllamaWrapper:
         Can include a system message and context chunks for RAG.
         """
         if not self.client:
-            logger.error(
-                "Ollama client not initialized. Cannot generate chat completion."
-            )
-            raise OllamaWrapperError("Ollama client not initialized.")
+            logger.error(f"{CLIENT_NOT_INITIALIZED} Cannot generate chat completion.")
+            raise OllamaWrapperError(CLIENT_NOT_INITIALIZED)
 
         model_to_use = model or self.config.qa_model
         if not model_to_use:
@@ -148,32 +158,107 @@ class OllamaWrapper:
                 logger.warning(
                     "Streaming is not fully implemented in this basic wrapper. Returning full response."
                 )
-                # This part would need to accumulate chunks from the stream
-                # response_stream = self.client.chat(model=model_to_use, messages=messages, stream=True)
-                # full_response_content = ""
-                # for chunk in response_stream:
-                #     if 'message' in chunk and 'content' in chunk['message']:
-                #         full_response_content += chunk['message']['content']
-                # return full_response_content
-                pass
+                # Implement streaming in a future version
 
             response = self.client.chat(
                 model=model_to_use, messages=messages, stream=False
             )
-            return response["message"]["content"]
+            # Handle both dict response and object response with message attribute
+            response_content = ""
+            if (
+                isinstance(response, dict)
+                and "message" in response
+                and "content" in response["message"]
+            ):
+                response_content = str(response["message"]["content"])
+            elif hasattr(response, "message") and hasattr(response.message, "content"):
+                response_content = str(response.message.content)
+            else:
+                raise OllamaWrapperError("Unexpected response format from Ollama API")
+
+            # Ensure we return a non-empty string
+            if not response_content:
+                logger.warning("Chat completion returned empty content")
+                response_content = ""
+
+            return response_content
+
         except Exception as e:
             logger.error(
                 f"Error generating chat completion with model '{model_to_use}': {e}"
             )
             raise OllamaWrapperError(f"Failed to generate chat completion: {e}") from e
 
-    def format_to_markdown(self, text_content: str, model: Optional[str] = None) -> str:
+    def _extract_markdown_content(self, response: Any) -> str:
+        """
+        Extract markdown content from Ollama API response.
+        """
+        if (
+            isinstance(response, dict)
+            and "message" in response
+            and "content" in response["message"]
+        ):
+            return str(response["message"]["content"])
+        elif hasattr(response, "message"):
+            message = getattr(response, "message")
+            if hasattr(message, "content"):
+                return str(message.content)
+
+        # If we got here, we couldn't extract the content
+        raise OllamaWrapperError("Unexpected response format from Ollama API")
+
+    def _save_markdown_to_file(self, markdown_content: str, save_path: str) -> None:
+        """
+        Save markdown content to a file at the specified path.
+        """
+        try:
+            import os
+            from datetime import datetime
+
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+            # If save_path is a directory, generate a filename based on timestamp
+            if os.path.isdir(save_path):
+                filename = f"markdown_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+                full_path = os.path.join(save_path, filename)
+            else:
+                # Ensure file has .md extension
+                if not save_path.endswith(".md"):
+                    save_path += ".md"
+                full_path = save_path
+
+            # Write content to file
+            with open(full_path, "w", encoding="utf-8") as f:
+                f.write(markdown_content)
+
+            logger.info(f"Markdown content saved to {full_path}")
+        except Exception as e:
+            logger.error(f"Failed to save markdown content to {save_path}: {e}")
+
+    def format_to_markdown(
+        self,
+        text_content: str,
+        model: Optional[str] = None,
+        save_path: Optional[str] = None,
+    ) -> str:
         """
         Converts the given text content to a well-structured Markdown format using an LLM.
+
+        Args:
+            text_content: The raw text to convert to markdown
+            model: Optional override for the markdown model to use
+            save_path: Optional path to save the resulting markdown file. Can be:
+                       - A full file path (ending with .md or not)
+                       - A directory path (will generate a timestamped filename)
+                       - None (default, will not save to file)
+
+        Returns:
+            The formatted markdown text
         """
         if not self.client:
-            logger.error("Ollama client not initialized. Cannot format to Markdown.")
-            raise OllamaWrapperError("Ollama client not initialized.")
+            logger.error(f"{CLIENT_NOT_INITIALIZED} Cannot format to Markdown.")
+            raise OllamaWrapperError(CLIENT_NOT_INITIALIZED)
 
         model_to_use = model or self.config.markdown_model
         if not model_to_use:
@@ -199,10 +284,22 @@ class OllamaWrapper:
             response = self.client.chat(
                 model=model_to_use, messages=messages, stream=False
             )
-            markdown_content = response["message"]["content"]
-            logger.info(
-                f"Successfully formatted text to Markdown (length: {len(markdown_content)})."
-            )
+
+            # Extract markdown content from response
+            markdown_content = self._extract_markdown_content(response)
+
+            if markdown_content:
+                logger.info(
+                    f"Successfully formatted text to Markdown (length: {len(markdown_content)})."
+                )
+
+                # Save to file if a path was provided
+                if save_path:
+                    self._save_markdown_to_file(markdown_content, save_path)
+            else:
+                logger.warning("Markdown formatting returned empty content.")
+                markdown_content = ""  # Ensure we return a string even if it's empty
+
             return markdown_content
         except Exception as e:
             logger.error(
@@ -296,10 +393,29 @@ if __name__ == "__main__":
                             f"\nFormatting text to Markdown using {ollama_wrapper.config.markdown_model}..."
                         )
                         sample_text_for_md = "This is a heading.\n\nThis is a paragraph with a list:\n- Item 1\n- Item 2\n\nAnd some **bold** text."
+
+                        # Format and print without saving
                         markdown_output = ollama_wrapper.format_to_markdown(
                             sample_text_for_md
                         )
                         print(f"Markdown output:\n{markdown_output}")
+
+                        # Format and save to file
+                        import os
+
+                        save_path = os.path.join(
+                            os.path.dirname(
+                                os.path.dirname(
+                                    os.path.dirname(os.path.abspath(__file__))
+                                )
+                            ),
+                            "data",
+                            "markdown",
+                        )
+                        print(f"\nSaving formatted Markdown to {save_path}...")
+                        ollama_wrapper.format_to_markdown(
+                            sample_text_for_md, save_path=save_path
+                        )
                     except OllamaWrapperError as e:
                         print(f"Error during Markdown formatting test: {e}")
                     except Exception as e:

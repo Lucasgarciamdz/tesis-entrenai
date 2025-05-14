@@ -60,14 +60,57 @@ class TxtFileProcessor(BaseFileProcessor):
 
     def extract_text(self, file_path: Path) -> str:
         logger.info(f"Extracting text from TXT file: {file_path}")
+        # Try different encodings if utf-8 fails
+        encodings_to_try = [
+            "utf-8",
+            "latin-1",
+            "iso-8859-1",
+            "cp1252",
+            "ascii",
+            "binary",
+        ]
+        errors = []
+
+        # First try reading in binary mode to check if it's a compressed file
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                return f.read()
-        except Exception as e:
-            logger.error(f"Error processing TXT file {file_path}: {e}")
-            raise FileProcessingError(
-                f"Failed to extract text from TXT file {file_path}: {e}"
-            ) from e
+            with open(file_path, "rb") as f:
+                magic_bytes = f.read(4)
+                # Check for gzip (starts with 1F 8B)
+                if magic_bytes[:2] == b"\x1f\x8b":
+                    import gzip
+
+                    with gzip.open(file_path, "rt") as gz_file:
+                        return gz_file.read()
+                # Check for zip (starts with PK)
+                elif magic_bytes[:2] == b"PK":
+                    import zipfile
+
+                    with zipfile.ZipFile(file_path) as zip_file:
+                        file_contents = []
+                        for file_info in zip_file.infolist():
+                            with zip_file.open(file_info) as inner_file:
+                                file_contents.append(
+                                    inner_file.read().decode("utf-8", errors="replace")
+                                )
+                        return "\n\n".join(file_contents)
+        except Exception as bin_e:
+            errors.append(f"Binary detection failed: {bin_e}")
+
+        # Try different text encodings
+        for encoding in encodings_to_try:
+            try:
+                with open(file_path, "r", encoding=encoding) as f:
+                    text = f.read()
+                    logger.info(f"Successfully read file with encoding: {encoding}")
+                    return text
+            except Exception as e:
+                errors.append(f"Failed with encoding {encoding}: {e}")
+                continue
+
+        # If we got here, none of the encodings worked
+        error_msg = f"Failed to extract text from TXT file {file_path} with any encoding. Errors: {', '.join(errors)}"
+        logger.error(error_msg)
+        raise FileProcessingError(error_msg)
 
 
 class MarkdownFileProcessor(BaseFileProcessor):

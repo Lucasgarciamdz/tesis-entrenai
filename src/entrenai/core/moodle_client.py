@@ -1,5 +1,4 @@
 import requests
-import shutil
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from urllib.parse import urljoin
@@ -470,36 +469,39 @@ class MoodleClient:
             return None
 
     def get_folder_files(self, folder_cmid: int) -> List[MoodleFile]:
+        """Retrieves all files from a Moodle folder module.
+
+        Args:
+            folder_cmid: The course module ID of the folder.
+
+        Returns:
+            A list of MoodleFile objects representing files in the folder.
+        """
         logger.info(f"Fetching files for folder module ID (cmid): {folder_cmid}")
         try:
+            # First get module details to verify it's a folder and get the course ID
             module_details = self._make_request(
                 "core_course_get_course_module", {"cmid": folder_cmid}
             )
             if not module_details or "cm" not in module_details:
-                return []
-            cm_info = module_details["cm"]
-            if cm_info.get("modname") != "folder":
+                logger.error(f"Could not retrieve module with cmid {folder_cmid}")
                 return []
 
-            files_data = []
-            if "contents" in cm_info and isinstance(cm_info["contents"], list):
-                for file_info in cm_info["contents"]:
-                    if file_info.get("type") == "file" and all(
-                        k in file_info
-                        for k in (
-                            "filename",
-                            "filepath",
-                            "filesize",
-                            "fileurl",
-                            "timemodified",
-                        )
-                    ):
-                        files_data.append(MoodleFile(**file_info))
-                    else:
-                        logger.warning(
-                            f"Skipping file due to missing fields in folder {folder_cmid}: {file_info}"
-                        )
-            return files_data
+            cm_info = module_details["cm"]
+            logger.debug(f"Module details: {module_details}")
+
+            if cm_info.get("modname") != "folder":
+                logger.error(f"Module with ID {folder_cmid} is not a folder")
+                return []
+
+            # Get the course ID from module details
+            course_id = cm_info.get("course")
+            if not course_id:
+                logger.error(f"Could not determine course ID for module {folder_cmid}")
+                return []
+
+            return self._extract_folder_files(course_id, folder_cmid)
+
         except MoodleAPIError as e:
             logger.error(f"API Error fetching files for folder {folder_cmid}: {e}")
             return []
@@ -509,6 +511,70 @@ class MoodleClient:
             )
             return []
 
+    def _extract_folder_files(
+        self, course_id: int, folder_cmid: int
+    ) -> List[MoodleFile]:
+        """Helper method to extract files from a folder module in course contents.
+
+        Args:
+            course_id: The ID of the course containing the folder.
+            folder_cmid: The course module ID of the folder.
+
+        Returns:
+            List of MoodleFile objects.
+        """
+        try:
+            # Get all contents for this course
+            course_contents = self._make_request(
+                "core_course_get_contents", {"courseid": course_id}
+            )
+
+            for section in course_contents:
+                for module in section.get("modules", []):
+                    if module.get("id") == folder_cmid:
+                        return self._parse_folder_contents(module, folder_cmid)
+
+            logger.warning(
+                f"Folder module {folder_cmid} not found in course {course_id}"
+            )
+            return []
+        except Exception as e:
+            logger.exception(f"Error extracting folder files: {e}")
+            return []
+
+    def _parse_folder_contents(
+        self, module: dict, folder_cmid: int
+    ) -> List[MoodleFile]:
+        """Parse the contents of a folder module to extract file information.
+
+        Args:
+            module: The module data containing contents.
+            folder_cmid: The folder module ID for logging.
+
+        Returns:
+            List of MoodleFile objects.
+        """
+        files_data = []
+        for content in module.get("contents", []):
+            required_fields = (
+                "filename",
+                "filepath",
+                "filesize",
+                "fileurl",
+                "timemodified",
+            )
+
+            if content.get("type") == "file" and all(
+                k in content for k in required_fields
+            ):
+                files_data.append(MoodleFile(**content))
+                logger.debug(f"Found file: {content.get('filename')}")
+            else:
+                logger.warning(f"Skipping content in folder {folder_cmid}: {content}")
+
+        logger.info(f"Found {len(files_data)} files in folder {folder_cmid}")
+        return files_data
+
     def download_file(self, file_url: str, download_dir: Path, filename: str) -> Path:
         if not self.config.token:
             raise MoodleAPIError("Moodle token not configured.")
@@ -516,13 +582,21 @@ class MoodleClient:
         local_filepath = download_dir / filename
         logger.info(f"Downloading Moodle file from {file_url} to {local_filepath}")
         try:
-            params = (
-                {"wstoken": self.config.token} if "wstoken" not in file_url else None
-            )
-            with requests.get(file_url, params=params, stream=True) as r:
-                r.raise_for_status()
+            # Only add token if not already in URL
+            if "token=" not in file_url and "wstoken=" not in file_url:
+                file_url = file_url + (
+                    f"&token={self.config.token}"
+                    if "?" in file_url
+                    else f"?token={self.config.token}"
+                )
+
+            # Make the request and stream the response directly to file
+            with requests.get(file_url, stream=True) as response:
+                response.raise_for_status()
                 with open(local_filepath, "wb") as f:
-                    shutil.copyfileobj(r.raw, f)
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+
             logger.info(f"Successfully downloaded {filename}")
             return local_filepath
         except requests.exceptions.HTTPError as http_err:

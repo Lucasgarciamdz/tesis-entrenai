@@ -298,6 +298,21 @@ async def refresh_course_files(
     ] = []  # Ensure type allows mixed values
 
     try:
+        # Ensure the Qdrant collection exists before processing files
+        vector_size = qdrant_config.default_vector_size
+        logger.info(
+            f"Ensuring Qdrant collection exists for course {course_id} with vector size {vector_size}"
+        )
+        if not qdrant.ensure_collection(course_id, vector_size):
+            logger.error(f"Failed to ensure Qdrant collection for course {course_id}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to ensure Qdrant collection for course {course_id}",
+            )
+        logger.info(
+            f"Qdrant collection '{qdrant.get_collection_name(course_id)}' ensured."
+        )
+
         all_course_contents = moodle._make_request(
             "core_course_get_contents", payload_params={"courseid": course_id}
         )
@@ -393,7 +408,10 @@ async def refresh_course_files(
                             f"Text extraction failed for {mf.filename}"
                         )
 
-                    markdown_text = ollama.format_to_markdown(raw_text)
+                    markdown_text = ollama.format_to_markdown(
+                        raw_text,
+                        save_path="/Users/lucas/facultad/tesis_entrenai/data/markdown",
+                    )
                     logger.info(
                         f"Formatted to Markdown for {mf.filename} (length: {len(markdown_text)})"
                     )
@@ -468,14 +486,14 @@ async def refresh_course_files(
                         or file_summary["status"] == "skipped_unchanged"
                     ):  # if not already set by a more specific error
                         file_summary["status"] = f"error: {str(e)}"
-                finally:
-                    if downloaded_path and downloaded_path.exists():
-                        try:
-                            downloaded_path.unlink()
-                        except OSError as e_unlink:
-                            logger.error(
-                                f"Error deleting temp file {downloaded_path}: {e_unlink}"
-                            )
+                # finally:
+                #     if downloaded_path and downloaded_path.exists():
+                #         try:
+                #             downloaded_path.unlink()
+                #         except OSError as e_unlink:
+                #             logger.error(
+                #                 f"Error deleting temp file {downloaded_path}: {e_unlink}"
+                #             )
             processed_files_summary.append(file_summary)
 
         msg = (
