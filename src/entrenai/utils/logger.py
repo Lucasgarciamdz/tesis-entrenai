@@ -32,16 +32,3 @@ def get_logger(name: str) -> logging.Logger:
 # Example of a global logger for the application if needed,
 # though it's often better to get loggers per module: logging.getLogger(__name__)
 # app_logger = get_logger("entrenai_app")
-
-if __name__ == "__main__":
-    # Example usage:
-    test_logger = get_logger("TestLogger")
-    test_logger.debug("This is a debug message.")
-    test_logger.info("This is an info message.")
-    test_logger.warning("This is a warning message.")
-    test_logger.error("This is an error message.")
-    test_logger.critical("This is a critical message.")
-
-    # Test another logger to ensure they are distinct or configured as expected
-    another_logger = get_logger("AnotherModule")
-    another_logger.info("Info message from another logger.")

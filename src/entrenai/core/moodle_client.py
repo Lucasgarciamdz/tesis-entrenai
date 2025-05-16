@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 
 
 class MoodleAPIError(Exception):
-    """Custom exception for Moodle API errors."""
+    """Excepción personalizada para errores de la API de Moodle."""
 
     def __init__(
         self,
@@ -29,13 +29,13 @@ class MoodleAPIError(Exception):
         self.response_data = response_data
 
     def __str__(self):
-        return f"{super().__str__()} (Status Code: {self.status_code}, Response: {self.response_data})"
+        return f"{super().__str__()} (Código de Estado: {self.status_code}, Respuesta: {self.response_data})"
 
 
 class MoodleClient:
-    """Client for interacting with the Moodle Web Services API."""
+    """Cliente para interactuar con la API de Web Services de Moodle."""
 
-    base_url: Optional[str]  # Class annotation for base_url
+    base_url: Optional[str]
 
     def __init__(
         self, config: MoodleConfig, session: Optional[requests.Session] = None
@@ -43,7 +43,7 @@ class MoodleClient:
         self.config = config
         if not config.url:
             logger.error(
-                "Moodle URL is not configured. MoodleClient will not be functional."
+                "URL de Moodle no configurada. MoodleClient no será funcional."
             )
             self.base_url = None
         else:
@@ -59,14 +59,15 @@ class MoodleClient:
 
         if self.base_url:
             logger.info(
-                f"MoodleClient initialized for URL: {self.base_url.rsplit('/', 1)[0]}"
+                f"MoodleClient inicializado para URL: {self.base_url.rsplit('/', 1)[0]}"
             )
         else:
-            logger.warning("MoodleClient initialized without a valid base URL.")
+            logger.warning("MoodleClient inicializado sin una URL base válida.")
 
     def _format_moodle_params(
         self, in_args: Any, prefix: str = "", out_dict: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
+        """Transforma una estructura de diccionario/lista a un diccionario plano para la API de Moodle."""
         if out_dict is None:
             out_dict = {}
         if not isinstance(in_args, (list, dict)):
@@ -88,8 +89,9 @@ class MoodleClient:
         payload_params: Optional[Dict[str, Any]] = None,
         http_method: str = "POST",
     ) -> Any:
+        """Realiza una petición a la API de Moodle."""
         if not self.base_url:
-            raise MoodleAPIError("Moodle base URL is not configured")
+            raise MoodleAPIError("URL base de Moodle no configurada.")
 
         query_params_for_url = {
             "wstoken": self.config.token,
@@ -103,7 +105,7 @@ class MoodleClient:
 
         try:
             logger.debug(
-                f"Calling Moodle API '{wsfunction}' method {http_method.upper()}. URL: {self.base_url}"
+                f"Llamando a la función API de Moodle '{wsfunction}' con método {http_method.upper()}. URL: {self.base_url}"
             )
             if http_method.upper() == "POST":
                 response = self.session.post(
@@ -115,13 +117,13 @@ class MoodleClient:
                 all_get_params = {**query_params_for_url, **formatted_api_payload}
                 response = self.session.get(self.base_url, params=all_get_params)
             else:
-                raise MoodleAPIError(f"Unsupported HTTP method: {http_method}")
+                raise MoodleAPIError(f"Método HTTP no soportado: {http_method}")
             response.raise_for_status()
             json_data = response.json()
             if isinstance(json_data, dict) and "exception" in json_data:
-                err_msg = json_data.get("message", "Unknown Moodle error")
+                err_msg = json_data.get("message", "Error desconocido de Moodle")
                 logger.error(
-                    f"Moodle API error for '{wsfunction}': {json_data.get('errorcode')} - {err_msg}"
+                    f"Error de la API de Moodle para '{wsfunction}': {json_data.get('errorcode')} - {err_msg}"
                 )
                 raise MoodleAPIError(message=err_msg, response_data=json_data)
             return json_data
@@ -129,40 +131,40 @@ class MoodleClient:
             resp_text = (
                 http_err.response.text
                 if http_err.response is not None
-                else "No response"
+                else "Sin respuesta"
             )
             status = (
                 http_err.response.status_code if http_err.response is not None else None
             )
             logger.error(
-                f"HTTP error for '{wsfunction}': {http_err} - Response: {resp_text}"
+                f"Error HTTP para '{wsfunction}': {http_err} - Respuesta: {resp_text}"
             )
             raise MoodleAPIError(
-                f"HTTP error: {status}", status_code=status, response_data=resp_text
+                f"Error HTTP: {status}", status_code=status, response_data=resp_text
             ) from http_err
         except requests.exceptions.RequestException as req_err:
-            logger.error(f"Request exception for '{wsfunction}': {req_err}")
+            logger.error(f"Excepción de petición para '{wsfunction}': {req_err}")
             raise MoodleAPIError(str(req_err)) from req_err
-        except ValueError as json_err:  # JSONDecodeError
-            resp_text = response.text if response is not None else "No response"
+        except ValueError as json_err:
+            resp_text = response.text if response is not None else "Sin respuesta"
             logger.error(
-                f"JSON decode error for '{wsfunction}': {json_err} - Response: {resp_text}"
+                f"Error de decodificación JSON para '{wsfunction}': {json_err} - Respuesta: {resp_text}"
             )
             raise MoodleAPIError(
-                f"Failed to decode JSON: {json_err}", response_data=resp_text
+                f"Falló la decodificación de la respuesta JSON: {json_err}",
+                response_data=resp_text,
             ) from json_err
 
     def get_courses_by_user(self, user_id: int) -> List[MoodleCourse]:
+        """Obtiene los cursos de un usuario específico."""
         if user_id <= 0:
-            raise ValueError("Invalid user_id.")
-        logger.info(f"Fetching courses for user_id: {user_id}")
+            raise ValueError("ID de usuario inválido.")
+        logger.info(f"Obteniendo cursos para user_id: {user_id}")
         try:
             courses_data = self._make_request(
                 "core_enrol_get_users_courses", {"userid": user_id}
             )
-            if not isinstance(
-                courses_data, list
-            ):  # Handle cases where Moodle might wrap in 'courses'
+            if not isinstance(courses_data, list):
                 if (
                     isinstance(courses_data, dict)
                     and "courses" in courses_data
@@ -171,62 +173,63 @@ class MoodleClient:
                     courses_data = courses_data["courses"]
                 else:
                     raise MoodleAPIError(
-                        "Courses data not in expected list format.",
+                        "Los datos de cursos no están en el formato de lista esperado.",
                         response_data=courses_data,
                     )
             return [MoodleCourse(**cd) for cd in courses_data]
         except MoodleAPIError as e:
-            logger.error(f"Failed to get courses for user {user_id}: {e}")
+            logger.error(f"Falló la obtención de cursos para el usuario {user_id}: {e}")
             raise
         except Exception as e:
             logger.exception(
-                f"Unexpected error in get_courses_by_user for user {user_id}: {e}"
+                f"Error inesperado en get_courses_by_user para el usuario {user_id}: {e}"
             )
-            raise MoodleAPIError(f"Unexpected error fetching courses: {e}")
+            raise MoodleAPIError(f"Error inesperado obteniendo cursos: {e}")
 
     def get_section_by_name(
         self, course_id: int, section_name: str
     ) -> Optional[MoodleSection]:
-        """Retrieves a specific section by its name within a course."""
-        logger.info(f"Searching for section '{section_name}' in course {course_id}")
+        """Recupera una sección específica por su nombre dentro de un curso."""
+        logger.info(f"Buscando sección '{section_name}' en curso {course_id}")
         try:
             course_contents = self._make_request(
                 "core_course_get_contents", {"courseid": course_id}
             )
             if not isinstance(course_contents, list):
-                logger.error(f"Expected list of sections, got {type(course_contents)}")
+                logger.error(
+                    f"Se esperaba una lista de secciones, se obtuvo {type(course_contents)}"
+                )
                 return None
             for section_data in course_contents:
                 if section_data.get("name") == section_name:
                     logger.info(
-                        f"Found section '{section_name}' with ID: {section_data.get('id')}"
+                        f"Sección '{section_name}' encontrada con ID: {section_data.get('id')}"
                     )
                     return MoodleSection(**section_data)
-            logger.info(f"Section '{section_name}' not found in course {course_id}.")
+            logger.info(f"Sección '{section_name}' no encontrada en curso {course_id}.")
             return None
         except MoodleAPIError as e:
-            logger.error(f"API error searching for section '{section_name}': {e}")
+            logger.error(f"Error de API buscando sección '{section_name}': {e}")
             return None
         except Exception as e:
-            logger.exception(
-                f"Unexpected error searching for section '{section_name}': {e}"
-            )
+            logger.exception(f"Error inesperado buscando sección '{section_name}': {e}")
             return None
 
     def create_course_section(
         self, course_id: int, section_name: str, position: int = 1
     ) -> Optional[MoodleSection]:
+        """Asegura la existencia de una sección en un curso, creándola si es necesario."""
         logger.info(
-            f"Ensuring section '{section_name}' in course {course_id} at position {position}"
+            f"Asegurando sección '{section_name}' en curso {course_id} en posición {position}"
         )
         existing_section = self.get_section_by_name(course_id, section_name)
         if existing_section:
             logger.info(
-                f"Section '{section_name}' already exists with ID {existing_section.id}. Using existing."
+                f"Sección '{section_name}' ya existe con ID {existing_section.id}. Usando existente."
             )
             return existing_section
 
-        logger.info(f"Section '{section_name}' not found. Attempting to create.")
+        logger.info(f"Sección '{section_name}' no encontrada. Intentando crear.")
         try:
             create_payload = {"courseid": course_id, "position": position, "number": 1}
             created_data = self._make_request(
@@ -234,45 +237,54 @@ class MoodleClient:
             )
             if not isinstance(created_data, list) or not created_data:
                 raise MoodleAPIError(
-                    "Failed to create section structure.", response_data=created_data
+                    "Falló la creación de la estructura de la sección.",
+                    response_data=created_data,
                 )
 
             new_section_info = created_data[0]
-            # Try to get section ID using either 'id' or 'sectionid' field
             new_section_id = new_section_info.get("id") or new_section_info.get(
                 "sectionid"
             )
             if new_section_id is None:
                 raise MoodleAPIError(
-                    "Created section data missing 'id' or 'sectionid'.",
+                    "Datos de sección creada no contienen 'id' o 'sectionid'.",
                     response_data=new_section_info,
                 )
 
             logger.info(
-                f"Section structure created (ID: {new_section_id}). Updating name to '{section_name}'."
+                f"Estructura de sección creada con ID: {new_section_id}. Obteniendo detalles..."
             )
-            # Update the section with new name and visibility
-            update_payload = {
-                "courseid": course_id,
-                "sections": [
-                    {"id": new_section_id, "name": section_name, "visible": 1}
-                ],
-            }
-
-            # Retrieve created section via plugin get_sections
+            # Obtener los detalles de la sección recién creada (tendrá un nombre por defecto)
             get_payload = {"courseid": course_id, "sectionids": [new_section_id]}
             sections_data = self._make_request(
                 "local_wsmanagesections_get_sections", payload_params=get_payload
             )
             if isinstance(sections_data, list) and sections_data:
-                sec_info = sections_data[0]
-                return MoodleSection(**sec_info)
-            return None
+                # El nombre de la sección aquí será el nombre por defecto asignado por Moodle
+                # El renombrado se hará en una llamada posterior desde el router si es necesario.
+                section_info_retrieved = sections_data[0]
+                logger.info(
+                    f"Sección creada y recuperada: ID {section_info_retrieved.get('id')}, Nombre por defecto '{section_info_retrieved.get('name')}'"
+                )
+                return MoodleSection(**section_info_retrieved)
+            else:
+                logger.error(
+                    f"No se pudieron obtener los detalles de la sección recién creada ID {new_section_id}."
+                )
+                # Devolver un objeto MoodleSection con los datos conocidos si la obtención falla
+                return MoodleSection(
+                    id=new_section_id,
+                    name=f"Sección {new_section_id} (Nombre Pendiente)",
+                    section=new_section_info.get("section", position),
+                )
+
         except MoodleAPIError as e:
-            logger.error(f"Error creating section '{section_name}': {e}")
+            logger.error(
+                f"Error creando sección '{section_name}' (nombre deseado, no necesariamente el actual): {e}"
+            )
             return None
         except Exception as e:
-            logger.exception(f"Unexpected error creating section '{section_name}': {e}")
+            logger.exception(f"Error inesperado creando sección '{section_name}': {e}")
             return None
 
     def create_module_in_section(
@@ -284,115 +296,71 @@ class MoodleClient:
         instance_params: Optional[Dict[str, Any]] = None,
         common_module_options: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[MoodleModule]:
-        """Creates or returns an existing module in the specified course section.
-
-        This method uses the local_wsmanagesections plugin to create modules in Moodle.
-        It first checks if the module already exists for idempotency.
-        Currently supports 'url' and 'folder' module types.
-        """
-        # Check if module already exists (for idempotency)
+        """Crea o devuelve un módulo existente en la sección especificada del curso."""
         existing_module = self.get_course_module_by_name(
             course_id, section_id, module_name, mod_type
         )
         if existing_module:
             logger.info(
-                f"Module '{module_name}' (type: {mod_type}) already exists in section {section_id}. Using existing ID: {existing_module.id}"
+                f"Módulo '{module_name}' (tipo: {mod_type}) ya existe en sección {section_id}. Usando ID existente: {existing_module.id}"
             )
             return existing_module
 
         logger.info(
-            f"Creating module '{module_name}' (type: {mod_type}) in course {course_id}, section {section_id}"
+            f"Creando módulo '{module_name}' (tipo: {mod_type}) en curso {course_id}, sección {section_id}"
         )
-
         try:
-            # Get existing section data to include in the update
-            course_contents = self._make_request(
-                "core_course_get_contents", {"courseid": course_id}
-            )
-
-            section_data = None
-            for section in course_contents:
-                if section.get("id") == section_id:
-                    section_data = section
-                    break
-
-            if not section_data:
-                logger.error(
-                    f"Could not find section ID {section_id} in course {course_id}"
-                )
-                return None
-
-            # Prepare the module data based on module type (include target section)
-            module_data = {
+            module_data_for_api: Dict[str, Any] = {
                 "modname": mod_type,
-                "section": section_id,
                 "name": module_name,
+                "section": section_id,  # Moodle necesita el ID de la sección donde se creará el módulo
             }
 
-            # Add specific parameters based on module type
-            if (
-                mod_type == "url"
-                and instance_params
-                and "externalurl" in instance_params
-            ):
-                module_data["externalurl"] = instance_params["externalurl"]
-                if "intro" in instance_params:
-                    module_data["intro"] = instance_params["intro"]
-                if "display" in instance_params:
-                    module_data["display"] = instance_params["display"]
-            elif mod_type == "folder":
-                if instance_params and "intro" in instance_params:
-                    module_data["intro"] = instance_params["intro"]
-                else:
-                    module_data["intro"] = f"Carpeta para {module_name}"
+            # Incorporar instance_params y common_module_options en module_data_for_api
+            # La API local_wsmanagesections_update_sections espera los parámetros del módulo directamente
+            if instance_params:
+                module_data_for_api.update(instance_params)
+            if common_module_options:  # Estos son usualmente para core_course_add_module, adaptar si es necesario
+                for opt in common_module_options:
+                    module_data_for_api[opt["name"]] = opt["value"]
 
-                if instance_params:
-                    for key, value in instance_params.items():
-                        if key not in module_data:
-                            module_data[key] = value
+            payload = {"courseid": course_id, "modules": [module_data_for_api]}
 
-            # Add common module options if provided
-            if common_module_options:
-                for option in common_module_options:
-                    if "name" in option and "value" in option:
-                        module_data[option["name"]] = option["value"]
-            # Prepare payload for module creation via sections WS
-            update_payload = {
-                "courseid": course_id,
-                "modules": [module_data],
-            }
-            # Send update to create module
-            self._make_request("local_wsmanagesections_update_sections", update_payload)
-            # Retrieve and return created module
+            # Usar local_wsmanagesections_update_sections para añadir/actualizar módulos en una sección
+            # Esta función es más flexible si el plugin está instalado.
+            # Si no, se debería usar core_course_add_module que tiene una estructura de payload diferente.
+            # Asumiendo que el plugin está y es el método preferido.
+            self._make_request("local_wsmanagesections_update_sections", payload)
+
+            # Después de crear/actualizar, obtener el módulo para devolverlo con su ID
             return self.get_course_module_by_name(
                 course_id, section_id, module_name, mod_type
             )
+
         except MoodleAPIError as e:
-            logger.error(f"API Error adding module '{module_name}': {e}")
+            logger.error(f"Error de API añadiendo módulo '{module_name}': {e}")
             return None
         except Exception as e:
-            logger.exception(f"Unexpected error adding module '{module_name}': {e}")
+            logger.exception(f"Error inesperado añadiendo módulo '{module_name}': {e}")
             return None
 
     def create_folder_in_section(
         self, course_id: int, section_id: int, folder_name: str, intro: str = ""
     ) -> Optional[MoodleModule]:
+        """Asegura la existencia de una carpeta en una sección, creándola si es necesario."""
         logger.info(
-            f"Ensuring folder '{folder_name}' in course {course_id}, section {section_id}"
+            f"Asegurando carpeta '{folder_name}' en curso {course_id}, sección {section_id}"
         )
         instance_params = {
             "intro": intro or f"Carpeta para {folder_name}",
-            "introformat": 1,
-            "display": 0,
-            "showexpanded": 1,
+            "introformat": 1,  # Formato HTML para la intro
+            "display": 0,  # 0 para mostrar en página de curso, 1 para página separada
+            "showexpanded": 1,  # 1 para mostrar expandido por defecto
         }
+        # common_module_options para visibilidad, etc.
+        common_opts = [{"name": "visible", "value": "1"}]
         return self.create_module_in_section(
-            course_id,
-            section_id,
-            folder_name,
-            "folder",
-            instance_params,
-            [{"name": "visible", "value": "1"}],
+            course_id, section_id, folder_name, "folder", instance_params, common_opts
         )
 
     def create_url_in_section(
@@ -402,10 +370,11 @@ class MoodleClient:
         url_name: str,
         external_url: str,
         description: str = "",
-        display_mode: int = 0,
+        display_mode: int = 0,  # 0: Automático, 1: Embebido, 2: Abrir, 3: En pop-up
     ) -> Optional[MoodleModule]:
+        """Asegura la existencia de un recurso URL en una sección, creándolo si es necesario."""
         logger.info(
-            f"Ensuring URL '{url_name}' -> '{external_url}' in course {course_id}, section {section_id}"
+            f"Asegurando URL '{url_name}' -> '{external_url}' en curso {course_id}, sección {section_id}"
         )
         instance_params = {
             "externalurl": external_url,
@@ -413,13 +382,9 @@ class MoodleClient:
             "introformat": 1,
             "display": display_mode,
         }
+        common_opts = [{"name": "visible", "value": "1"}]
         return self.create_module_in_section(
-            course_id,
-            section_id,
-            url_name,
-            "url",
-            instance_params,
-            [{"name": "visible", "value": "1"}],
+            course_id, section_id, url_name, "url", instance_params, common_opts
         )
 
     def get_course_module_by_name(
@@ -429,14 +394,18 @@ class MoodleClient:
         target_module_name: str,
         target_mod_type: Optional[str] = None,
     ) -> Optional[MoodleModule]:
+        """Encuentra un módulo específico por nombre dentro de una sección de un curso."""
         logger.info(
-            f"Searching for module '{target_module_name}' (type: {target_mod_type or 'any'}) in course {course_id}, section {target_section_id}"
+            f"Buscando módulo '{target_module_name}' (tipo: {target_mod_type or 'cualquiera'}) en curso {course_id}, sección {target_section_id}"
         )
         try:
             course_contents = self._make_request(
                 "core_course_get_contents", {"courseid": course_id}
             )
             if not isinstance(course_contents, list):
+                logger.error(
+                    f"Se esperaba lista de contenidos del curso, se obtuvo {type(course_contents)}"
+                )
                 return None
             for section_data in course_contents:
                 if section_data.get("id") == target_section_id:
@@ -448,26 +417,28 @@ class MoodleClient:
                         )
                         if name_match and type_match:
                             logger.info(
-                                f"Found module '{target_module_name}' (ID: {module_data.get('id')})"
+                                f"Módulo '{target_module_name}' encontrado (ID: {module_data.get('id')})"
                             )
                             return MoodleModule(**module_data)
                     logger.info(
-                        f"Module '{target_module_name}' not found in section {target_section_id}."
+                        f"Módulo '{target_module_name}' no encontrado en sección {target_section_id}."
                     )
-                    return None
-            logger.info(f"Section {target_section_id} not found in course {course_id}.")
-            return None
+                    return None  # Módulo no encontrado en la sección objetivo
+            logger.info(
+                f"Sección {target_section_id} no encontrada en curso {course_id}."
+            )
+            return None  # Sección objetivo no encontrada
         except MoodleAPIError as e:
-            logger.error(f"API Error searching for module '{target_module_name}': {e}")
+            logger.error(f"Error de API buscando módulo '{target_module_name}': {e}")
             return None
         except Exception as e:
             logger.exception(
-                f"Unexpected error searching for module '{target_module_name}': {e}"
+                f"Error inesperado buscando módulo '{target_module_name}': {e}"
             )
             return None
 
     def get_folder_files(self, folder_cmid: int) -> List[MoodleFile]:
-        """Retrieves all files from a Moodle folder module.
+        """Recupera todos los archivos de un módulo de carpeta de Moodle.
 
         Args:
             folder_cmid: The course module ID of the folder.
@@ -475,37 +446,48 @@ class MoodleClient:
         Returns:
             A list of MoodleFile objects representing files in the folder.
         """
-        logger.info(f"Fetching files for folder module ID (cmid): {folder_cmid}")
+        logger.info(
+            f"Obteniendo archivos para el módulo de carpeta ID (cmid): {folder_cmid}"
+        )
         try:
             # First get module details to verify it's a folder and get the course ID
             module_details = self._make_request(
                 "core_course_get_course_module", {"cmid": folder_cmid}
             )
+            print(module_details)
             if not module_details or "cm" not in module_details:
-                logger.error(f"Could not retrieve module with cmid {folder_cmid}")
+                logger.error(
+                    f"No se pudieron obtener detalles para el módulo con cmid {folder_cmid}"
+                )
                 return []
 
             cm_info = module_details["cm"]
-            logger.debug(f"Module details: {module_details}")
+            logger.debug(f"Detalles del módulo: {module_details}")
 
             if cm_info.get("modname") != "folder":
-                logger.error(f"Module with ID {folder_cmid} is not a folder")
+                logger.error(
+                    f"Módulo con ID {folder_cmid} no es una carpeta, es un '{cm_info.get('modname')}'"
+                )
                 return []
 
             # Get the course ID from module details
             course_id = cm_info.get("course")
             if not course_id:
-                logger.error(f"Could not determine course ID for module {folder_cmid}")
+                logger.error(
+                    f"No se pudo determinar el ID del curso para el módulo {folder_cmid}"
+                )
                 return []
 
             return self._extract_folder_files(course_id, folder_cmid)
 
         except MoodleAPIError as e:
-            logger.error(f"API Error fetching files for folder {folder_cmid}: {e}")
+            logger.error(
+                f"Error de API obteniendo archivos para carpeta {folder_cmid}: {e}"
+            )
             return []
         except Exception as e:
             logger.exception(
-                f"Unexpected error fetching files for folder {folder_cmid}: {e}"
+                f"Error inesperado obteniendo archivos para carpeta {folder_cmid}: {e}"
             )
             return []
 
@@ -533,11 +515,11 @@ class MoodleClient:
                         return self._parse_folder_contents(module, folder_cmid)
 
             logger.warning(
-                f"Folder module {folder_cmid} not found in course {course_id}"
+                f"Módulo de carpeta {folder_cmid} no encontrado en curso {course_id}"
             )
             return []
         except Exception as e:
-            logger.exception(f"Error extracting folder files: {e}")
+            logger.exception(f"Error extrayendo archivos de carpeta: {e}")
             return []
 
     def _parse_folder_contents(
@@ -566,52 +548,90 @@ class MoodleClient:
                 k in content for k in required_fields
             ):
                 files_data.append(MoodleFile(**content))
-                logger.debug(f"Found file: {content.get('filename')}")
+                logger.debug(f"Archivo encontrado: {content.get('filename')}")
             else:
-                logger.warning(f"Skipping content in folder {folder_cmid}: {content}")
+                logger.warning(
+                    f"Omitiendo contenido en carpeta {folder_cmid}: {content}"
+                )
 
-        logger.info(f"Found {len(files_data)} files in folder {folder_cmid}")
+        logger.info(
+            f"Se encontraron {len(files_data)} archivos en la carpeta {folder_cmid}"
+        )
         return files_data
 
     def download_file(self, file_url: str, download_dir: Path, filename: str) -> Path:
+        """Descarga un archivo desde una URL de Moodle a un directorio local."""
         if not self.config.token:
-            raise MoodleAPIError("Moodle token not configured.")
+            raise MoodleAPIError(
+                "Token de Moodle no configurado, no se pueden descargar archivos de forma segura."
+            )
+
         download_dir.mkdir(parents=True, exist_ok=True)
         local_filepath = download_dir / filename
-        logger.info(f"Downloading Moodle file from {file_url} to {local_filepath}")
+        logger.info(
+            f"Descargando archivo de Moodle desde {file_url} a {local_filepath}"
+        )
         try:
-            # Only add token if not already in URL
-            if "token=" not in file_url and "wstoken=" not in file_url:
-                file_url = file_url + (
+            # Asegurar que el token esté en la URL si es necesario
+            # Las URLs de Moodle a veces ya lo incluyen, otras no.
+            effective_file_url = file_url
+            if (
+                "token=" not in file_url
+                and "wstoken=" not in file_url
+                and self.config.token
+            ):
+                effective_file_url = file_url + (
                     f"&token={self.config.token}"
                     if "?" in file_url
                     else f"?token={self.config.token}"
                 )
 
-            # Make the request and stream the response directly to file
-            with requests.get(file_url, stream=True) as response:
-                response.raise_for_status()
-                with open(local_filepath, "wb") as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
+            # Configurar headers específicos para evitar compresión automática
+            headers = {
+                "Accept-Encoding": "identity",  # Evitar compresión automática
+            }
 
-            logger.info(f"Successfully downloaded {filename}")
+            # Descargar el archivo con stream=True para evitar cargar todo en memoria
+            with requests.get(effective_file_url, stream=True, headers=headers) as r:
+                r.raise_for_status()
+                # Verificar el tipo de contenido para determinar si es binario o texto
+                content_type = r.headers.get("Content-Type", "")
+
+                # Modo de escritura basado en el tipo de contenido
+                if "text/" in content_type or content_type.endswith(
+                    ("/markdown", "/md")
+                ):
+                    # Para archivos de texto, guardar con codificación adecuada
+                    content = r.content.decode("utf-8", errors="replace")
+                    with open(local_filepath, "w", encoding="utf-8") as f:
+                        f.write(content)
+                else:
+                    # Para archivos binarios, guardar en modo binario
+                    with open(local_filepath, "wb") as f:
+                        for chunk in r.iter_content(chunk_size=8192):
+                            if chunk:  # Filtrar keepalive chunks vacíos
+                                f.write(chunk)
+
+            logger.info(f"Archivo '{filename}' descargado exitosamente.")
             return local_filepath
         except requests.exceptions.HTTPError as http_err:
-            logger.error(f"HTTP error downloading {filename}: {http_err}")
+            logger.error(
+                f"Error HTTP descargando '{filename}': {http_err} (URL: {file_url})"
+            )
             raise MoodleAPIError(
-                f"Failed to download file '{filename}': {http_err}"
+                f"Falló la descarga del archivo '{filename}': {http_err}"
             ) from http_err
         except Exception as e:
-            logger.exception(f"Error downloading file {filename}: {e}")
+            logger.exception(
+                f"Error descargando archivo '{filename}' desde {file_url}: {e}"
+            )
             raise MoodleAPIError(
-                f"Unexpected error downloading file '{filename}': {e}"
+                f"Error inesperado descargando archivo '{filename}': {e}"
             ) from e
 
-    # get_all_courses and __main__ block remain unchanged from previous version.
-    # For brevity, they are omitted here but should be part of the final file.
     def get_all_courses(self) -> List[MoodleCourse]:
-        logger.info("Fetching all available courses from Moodle")
+        """Recupera todos los cursos disponibles en el sitio Moodle."""
+        logger.info("Obteniendo todos los cursos disponibles de Moodle")
         try:
             courses_data = self._make_request("core_course_get_courses")
             if not isinstance(courses_data, list):
@@ -623,131 +643,13 @@ class MoodleClient:
                     courses_data = courses_data["courses"]
                 else:
                     raise MoodleAPIError(
-                        "Courses data not in expected list format.",
+                        "Los datos de cursos no están en el formato de lista esperado.",
                         response_data=courses_data,
                     )
             return [MoodleCourse(**cd) for cd in courses_data]
         except MoodleAPIError as e:
-            logger.error(f"Failed to get all courses: {e}")
+            logger.error(f"Falló la obtención de todos los cursos: {e}")
             raise
         except Exception as e:
-            logger.exception(f"An unexpected error occurred in get_all_courses: {e}")
-            raise MoodleAPIError(f"Unexpected error fetching all courses: {e}")
-
-
-if __name__ == "__main__":
-    from src.entrenai.config import moodle_config
-
-    if not moodle_config.url or not moodle_config.token:
-        print("MOODLE_URL and MOODLE_TOKEN must be set in .env for this test.")
-    else:
-        client = MoodleClient(config=moodle_config)
-        test_user_id = moodle_config.default_teacher_id or 2
-        print(f"\nAttempting to get courses for user ID: {test_user_id}...")
-        try:
-            courses = client.get_courses_by_user(test_user_id)
-            if courses:
-                print(f"Successfully retrieved {len(courses)} courses:")
-                for course in courses:
-                    print(
-                        f"  - ID: {course.id}, Name: {course.fullname} (Shortname: {course.shortname})"
-                    )
-
-                # Test section and module creation on the first course found
-                if courses:
-                    test_course_id = courses[0].id
-                    print(f"\n--- Testing on Course ID: {test_course_id} ---")
-
-                    # Test get_section_by_name (non-existent)
-                    print(
-                        "Searching for non-existent section 'Test Section NonExistent'..."
-                    )
-                    non_existent_section = client.get_section_by_name(
-                        test_course_id, "Test Section NonExistent"
-                    )
-                    print(f"Result: {non_existent_section}")
-
-                    # Test create_course_section (idempotent)
-                    section_name_to_create = "Entrenai Test Section"
-                    print(f"Ensuring section '{section_name_to_create}'...")
-                    created_section = client.create_course_section(
-                        test_course_id, section_name_to_create, position=2
-                    )
-                    if created_section:
-                        print(
-                            f"Section ensured: ID {created_section.id}, Name '{created_section.name}'"
-                        )
-
-                        # Test get_section_by_name (existent)
-                        print(
-                            f"Searching for existing section '{section_name_to_create}'..."
-                        )
-                        found_section = client.get_section_by_name(
-                            test_course_id, section_name_to_create
-                        )
-                        print(f"Result: {found_section}")
-
-                        # Test create_folder_in_section (idempotent)
-                        folder_name_to_create = "Test Auto Folder"
-                        print(
-                            f"Ensuring folder '{folder_name_to_create}' in section {created_section.id}..."
-                        )
-                        created_folder = client.create_folder_in_section(
-                            test_course_id,
-                            created_section.id,
-                            folder_name_to_create,
-                            "Test folder intro.",
-                        )
-                        if created_folder:
-                            print(
-                                f"Folder ensured: ID {created_folder.id}, Name '{created_folder.name}'"
-                            )
-                        else:
-                            print(f"Failed to ensure folder '{folder_name_to_create}'.")
-
-                        # Test create_url_in_section (idempotent)
-                        url_name_to_create = "Test Auto URL"
-                        print(
-                            f"Ensuring URL '{url_name_to_create}' in section {created_section.id}..."
-                        )
-                        created_url = client.create_url_in_section(
-                            test_course_id,
-                            created_section.id,
-                            url_name_to_create,
-                            "http://example.com/test-url",
-                            "Test URL description.",
-                        )
-                        if created_url:
-                            print(
-                                f"URL ensured: ID {created_url.id}, Name '{created_url.name}'"
-                            )
-                        else:
-                            print(f"Failed to ensure URL '{url_name_to_create}'.")
-
-                        # Test get_folder_files (on a potentially empty folder)
-                        if created_folder and created_folder.id is not None:
-                            print(
-                                f"Getting files from folder cmid: {created_folder.id}..."
-                            )
-                            folder_files = client.get_folder_files(created_folder.id)
-                            print(
-                                f"Found {len(folder_files)} files in '{created_folder.name}'."
-                            )
-                            for f in folder_files:
-                                print(f"  - {f.filename} (URL: {f.fileurl})")
-                        else:
-                            print(
-                                "Skipping get_folder_files test as folder was not created/retrieved."
-                            )
-
-                    else:
-                        print(f"Failed to ensure section '{section_name_to_create}'.")
-
-            else:
-                print(
-                    f"No courses found for user ID: {test_user_id} or an error occurred."
-                )
-        except MoodleAPIError as e:
-            print(f"Moodle API Error during testing: {e}")
-        except Exception as e:
-            print(f"Generic error during testing: {e}")
+            logger.exception(f"Error inesperado en get_all_courses: {e}")
+            raise MoodleAPIError(f"Error inesperado obteniendo todos los cursos: {e}")

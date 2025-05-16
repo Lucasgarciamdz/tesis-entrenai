@@ -1,14 +1,17 @@
 from fastapi import APIRouter, HTTPException, Query, Depends, Request
-from typing import List, Optional, Dict, Any  # Added Dict, Any
+from typing import List, Optional, Dict, Any
+import shutil
 
 from src.entrenai.core.models import (
     MoodleCourse,
     CourseSetupResponse,
-    HttpUrl,
+    HttpUrl,  # Importar MoodleModule si se va a usar para parsear respuesta de módulos
 )
 from src.entrenai.core.moodle_client import MoodleClient, MoodleAPIError
 from src.entrenai.core.qdrant_wrapper import QdrantWrapper
 from src.entrenai.core.ollama_wrapper import OllamaWrapper
+from src.entrenai.core.gemini_wrapper import GeminiWrapper
+from src.entrenai.core.ai_provider import get_ai_wrapper, AIProviderError
 from src.entrenai.core.n8n_client import N8NClient
 from src.entrenai.core.file_tracker import FileTracker
 from src.entrenai.core.file_processor import FileProcessor, FileProcessingError
@@ -17,8 +20,9 @@ from src.entrenai.config import (
     moodle_config,
     qdrant_config,
     ollama_config,
-    n8n_config,
+    gemini_config,
     base_config,
+    n8n_config,
 )
 from src.entrenai.utils.logger import get_logger
 from pathlib import Path
@@ -27,11 +31,11 @@ logger = get_logger(__name__)
 
 router = APIRouter(
     prefix="/api/v1",
-    tags=["Course Setup & IA Management"],
+    tags=["Configuración de Curso y Gestión de IA"],
 )
 
 
-# --- Dependency Injection for Clients ---
+# --- Inyección de Dependencias para Clientes ---
 def get_moodle_client() -> MoodleClient:
     return MoodleClient(config=moodle_config)
 
@@ -40,8 +44,36 @@ def get_qdrant_wrapper() -> QdrantWrapper:
     return QdrantWrapper(config=qdrant_config)
 
 
-def get_ollama_wrapper() -> OllamaWrapper:
-    return OllamaWrapper(config=ollama_config)
+def get_ai_client() -> OllamaWrapper | GeminiWrapper:
+    try:
+        return get_ai_wrapper()
+    except AIProviderError as e:
+        logger.error(f"Error al obtener el cliente de IA: {e}")
+        if base_config.ai_provider == "gemini":
+            logger.warning("Intentando fallback a Ollama ya que Gemini falló")
+            try:
+                return get_ai_wrapper(ai_provider="ollama")
+            except AIProviderError as e2:
+                logger.error(f"Error con fallback a Ollama: {e2}")
+                raise HTTPException(
+                    status_code=500,
+                    detail="No se pudo inicializar ningún proveedor de IA disponible.",
+                )
+        elif base_config.ai_provider == "ollama":
+            logger.warning("Intentando fallback a Gemini ya que Ollama falló")
+            try:
+                return get_ai_wrapper(ai_provider="gemini")
+            except AIProviderError as e2:
+                logger.error(f"Error con fallback a Gemini: {e2}")
+                raise HTTPException(
+                    status_code=500,
+                    detail="No se pudo inicializar ningún proveedor de IA disponible.",
+                )
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Proveedor de IA '{base_config.ai_provider}' no válido. Opciones: 'ollama', 'gemini'",
+            )
 
 
 def get_n8n_client() -> N8NClient:
@@ -57,19 +89,20 @@ def get_file_processor() -> FileProcessor:
 
 
 def get_embedding_manager(
-    ollama: OllamaWrapper = Depends(get_ollama_wrapper),
+    ai_client=Depends(get_ai_client),
 ) -> EmbeddingManager:
-    return EmbeddingManager(ollama_wrapper=ollama)
+    return EmbeddingManager(ollama_wrapper=ai_client)
 
 
 @router.get("/courses", response_model=List[MoodleCourse])
 async def list_moodle_courses(
     moodle_user_id: Optional[int] = Query(
         None,
-        description="Moodle User ID of the teacher. If not provided, uses MOODLE_DEFAULT_TEACHER_ID from config.",
+        description="ID de Usuario de Moodle del profesor. Si no se provee, usa MOODLE_DEFAULT_TEACHER_ID de la configuración.",
     ),
     client: MoodleClient = Depends(get_moodle_client),
 ):
+    """Obtiene la lista de cursos de Moodle para un profesor."""
     teacher_id_to_use = (
         moodle_user_id
         if moodle_user_id is not None
@@ -77,225 +110,255 @@ async def list_moodle_courses(
     )
     if teacher_id_to_use is None:
         logger.error(
-            "No Moodle teacher ID provided and MOODLE_DEFAULT_TEACHER_ID is not set."
+            "No se proporcionó ID de profesor de Moodle y MOODLE_DEFAULT_TEACHER_ID no está configurado."
         )
         raise HTTPException(
             status_code=400,
-            detail="Moodle teacher ID must be provided or MOODLE_DEFAULT_TEACHER_ID must be configured on the server.",
+            detail="Debe proporcionar un ID de profesor de Moodle o MOODLE_DEFAULT_TEACHER_ID debe estar configurado en el servidor.",
         )
-    logger.info(f"Fetching Moodle courses for teacher ID: {teacher_id_to_use}")
+    logger.info(
+        f"Obteniendo cursos de Moodle para el ID de profesor: {teacher_id_to_use}"
+    )
     try:
         courses = client.get_courses_by_user(user_id=teacher_id_to_use)
-        # courses = client.get_all_courses()
         return courses
     except MoodleAPIError as e:
-        logger.error(f"Moodle API error while fetching courses: {e}")
-        raise HTTPException(status_code=502, detail=f"Moodle API error: {str(e)}")
+        logger.error(f"Error de API de Moodle al obtener cursos: {e}")
+        raise HTTPException(status_code=502, detail=f"Error de API de Moodle: {str(e)}")
     except Exception as e:
-        logger.exception(f"Unexpected error fetching Moodle courses: {e}")
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        logger.exception(f"Error inesperado obteniendo cursos de Moodle: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Error interno del servidor: {str(e)}"
+        )
 
 
 @router.post("/courses/{course_id}/setup-ia", response_model=CourseSetupResponse)
 async def setup_ia_for_course(
     course_id: int,
     request: Request,
-    course_name: str = Query(
-        None, description="Name of the course to display in the IA setup"
+    course_name_query: str = Query(
+        None,
+        alias="courseName",
+        description="Nombre del curso para la IA (opcional, se intentará obtener de Moodle).",
     ),
     moodle: MoodleClient = Depends(get_moodle_client),
     qdrant: QdrantWrapper = Depends(get_qdrant_wrapper),
+    ai_client=Depends(get_ai_client),
     n8n: N8NClient = Depends(get_n8n_client),
 ):
-    logger.info(f"Starting IA setup for Moodle course ID: {course_id}")
+    """Configura la IA para un curso específico de Moodle."""
+    logger.info(
+        f"Iniciando configuración de IA para el curso de Moodle ID: {course_id}"
+    )
 
-    # Si no se proporciona el nombre del curso, intentamos obtenerlo de Moodle
-    if course_name is None:
+    course_name_str: str = ""
+    if course_name_query:
+        course_name_str = course_name_query
+        logger.info(f"Nombre del curso proporcionado en la query: '{course_name_str}'")
+    else:
         try:
-            courses = moodle.get_courses_by_user(
-                user_id=moodle_config.default_teacher_id
+            logger.info(
+                f"Intentando obtener nombre del curso {course_id} desde Moodle..."
             )
-            course = next((c for c in courses if c.id == course_id), None)
-            if course:
-                course_name = course.displayname or course.fullname
-                logger.info(f"Retrieved course name from Moodle: {course_name}")
+            moodle_course_details: Optional[MoodleCourse] = None
+            if moodle_config.default_teacher_id:
+                courses = moodle.get_courses_by_user(
+                    user_id=moodle_config.default_teacher_id
+                )
+                moodle_course_details = next(
+                    (c for c in courses if c.id == course_id), None
+                )
+            if not moodle_course_details:
+                all_courses = moodle.get_all_courses()
+                moodle_course_details = next(
+                    (c for c in all_courses if c.id == course_id), None
+                )
+            if moodle_course_details:
+                course_name_str = (
+                    moodle_course_details.displayname or moodle_course_details.fullname
+                )
+                logger.info(f"Nombre del curso obtenido de Moodle: '{course_name_str}'")
             else:
-                course_name = f"Course {course_id}"
                 logger.warning(
-                    f"Could not find course {course_id} in Moodle, using default name"
+                    f"No se pudo encontrar el curso {course_id} en Moodle para obtener su nombre."
                 )
         except Exception as e:
-            logger.warning(f"Could not retrieve course name from Moodle: {e}")
-            course_name = f"Course {course_id}"
+            logger.warning(
+                f"Excepción al obtener el nombre del curso {course_id} desde Moodle: {e}"
+            )
+        if not course_name_str:
+            course_name_str = f"Curso_{course_id}"
+            logger.warning(
+                f"Usando nombre de curso por defecto para Qdrant: '{course_name_str}'"
+            )
+
+    if not course_name_str:
+        logger.error(
+            f"El nombre del curso para el ID {course_id} no pudo ser determinado."
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"No se pudo determinar el nombre del curso {course_id}.",
+        )
 
     vector_size = qdrant_config.default_vector_size
-    moodle_section_name = moodle_config.course_folder_name
+    qdrant_collection_name = qdrant.get_collection_name(course_name_str)
+
+    moodle_section_name_desired = (
+        moodle_config.course_folder_name
+    )  # Nombre deseado para la sección
     moodle_folder_name = "Documentos Entrenai"
     moodle_chat_link_name = moodle_config.chat_link_name
     moodle_refresh_link_name = moodle_config.refresh_link_name
 
     response_details = CourseSetupResponse(
         course_id=course_id,
-        status="pending",
-        message=f"Setup initiated for course {course_id}.",
-        qdrant_collection_name=qdrant.get_collection_name(course_id),
+        status="pendiente",
+        message=f"Configuración iniciada para el curso {course_id} ('{course_name_str}').",
+        qdrant_collection_name=qdrant_collection_name,
     )
 
     try:
         logger.info(
-            f"Ensuring Qdrant collection for course {course_id} with vector size {vector_size}"
+            f"Asegurando colección Qdrant '{qdrant_collection_name}' para curso '{course_name_str}' con tamaño de vector {vector_size}"
         )
         if not qdrant.client:
-            raise HTTPException(status_code=500, detail="Qdrant client not available.")
-        if not qdrant.ensure_collection(course_id, vector_size):
-            response_details.status = "failed"
+            raise HTTPException(status_code=500, detail="Cliente Qdrant no disponible.")
+        if not qdrant.ensure_collection(course_name_str, vector_size):
+            response_details.status = "fallido"
             response_details.message = (
-                f"Failed to ensure Qdrant collection for course {course_id}."
+                f"Falló al asegurar la colección Qdrant '{qdrant_collection_name}'."
             )
             logger.error(response_details.message)
             raise HTTPException(status_code=500, detail=response_details.message)
+        logger.info(f"Colección Qdrant '{qdrant_collection_name}' asegurada.")
+
         logger.info(
-            f"Qdrant collection '{response_details.qdrant_collection_name}' ensured."
+            f"Configurando workflow de chat N8N para curso '{course_name_str}' (ID: {course_id})"
         )
 
-        logger.info(f"Configuring N8N chat workflow for course {course_id}")
-        ollama_params_for_n8n = {
-            "host": ollama_config.host,
-            "embedding_model": ollama_config.embedding_model,
-            "qa_model": ollama_config.qa_model,
-        }
+        # Preparar parámetros de IA según el proveedor seleccionado
+        if base_config.ai_provider == "gemini":
+            ai_params = {
+                "api_key": gemini_config.api_key,
+                "embedding_model": gemini_config.embedding_model,
+                "qa_model": gemini_config.text_model,
+            }
+        else:  # Ollama por defecto
+            ai_params = {
+                "host": ollama_config.host,
+                "embedding_model": ollama_config.embedding_model,
+                "qa_model": ollama_config.qa_model,
+            }
+
         n8n_chat_url_str = n8n.configure_and_deploy_chat_workflow(
-            course_id=course_id,
-            course_name=course_name,
-            qdrant_collection_name=response_details.qdrant_collection_name,
-            ollama_config_params=ollama_params_for_n8n,  # Corrected parameter name
+            course_id, course_name_str, qdrant_collection_name, ai_params
         )
+
         if not n8n_chat_url_str:
             logger.warning(
-                f"Could not automatically configure/retrieve N8N chat URL for course {course_id}."
+                f"No se pudo configurar/obtener automáticamente la URL del chat de N8N para el curso '{course_name_str}'."
             )
-            response_details.message += " N8N chat URL not automatically configured."
+            response_details.message += (
+                " URL del chat de N8N no configurada automáticamente."
+            )
             n8n_chat_url_str = n8n_config.webhook_url
-            if not n8n_chat_url_str:
-                logger.error("N8N_WEBHOOK_URL is also not set.")
         response_details.n8n_chat_url = (
             HttpUrl(n8n_chat_url_str) if n8n_chat_url_str else None
-        )  # type: ignore
+        )
         logger.info(
-            f"N8N chat URL for course {course_id}: {response_details.n8n_chat_url}"
+            f"URL del chat de N8N para curso '{course_name_str}': {response_details.n8n_chat_url}"
         )
 
         logger.info(
-            f"Creating Moodle section '{moodle_section_name}' for course {course_id}"
+            f"Paso 1: Creando/obteniendo estructura de sección de Moodle para curso {course_id} (nombre deseado: '{moodle_section_name_desired}')"
         )
-        created_section = moodle.create_course_section(
-            course_id, moodle_section_name, position=1
+        created_section_structure = moodle.create_course_section(
+            course_id, moodle_section_name_desired, position=1
         )
-        if not created_section or not created_section.id:
-            response_details.status = "failed"
-            response_details.message = f"Failed to create Moodle section '{moodle_section_name}' for course {course_id}."
+        if not created_section_structure or not created_section_structure.id:
+            response_details.status = "fallido"
+            response_details.message = f"Falló la creación de la estructura de la sección de Moodle para el curso {course_id}."
             logger.error(response_details.message)
             raise HTTPException(status_code=500, detail=response_details.message)
-        response_details.moodle_section_id = created_section.id
+
+        section_id_to_update = created_section_structure.id
+        response_details.moodle_section_id = section_id_to_update
         logger.info(
-            f"Moodle section '{created_section.name}' (ID: {created_section.id}) created."
+            f"Estructura de sección de Moodle (ID: {section_id_to_update}, Nombre Actual: '{created_section_structure.name}') obtenida/creada."
         )
 
-        # Prepare section summary and modules to update via single WS call
-        # Build URLs
+        # Construir URLs y HTML summary
         refresh_path = router.url_path_for("refresh_files", course_id=course_id)
         refresh_files_url = str(request.base_url.replace(path=str(refresh_path)))
-        n8n_chat_url = (
-            str(response_details.n8n_chat_url) if response_details.n8n_chat_url else ""
+        n8n_chat_url_for_moodle = (
+            str(response_details.n8n_chat_url) if response_details.n8n_chat_url else "#"
         )
-        # Build HTML summary
+
         html_summary = f"""
-<div>
-  <h4>{moodle_folder_name}</h4>
-  <p>Por favor, cree manualmente una carpeta con el nombre "<strong>{moodle_folder_name}</strong>" dentro de esta sección y suba allí sus archivos de contexto.</p>
-  <hr/>
-  <p><a href=\"{n8n_chat_url}\" target=\"_blank\">{moodle_chat_link_name}</a></p>
-  <p><a href=\"{refresh_files_url}\" target=\"_blank\">{moodle_refresh_link_name}</a></p>
-</div>
+<h4>Recursos de Entrenai IA</h4>
+<p>Utilice esta sección para interactuar con la Inteligencia Artificial de asistencia para este curso.</p>
+<ul>
+    <li><a href="{n8n_chat_url_for_moodle}" target="_blank">{moodle_chat_link_name}</a>: Acceda aquí para chatear con la IA.</li>
+    <li>Carpeta "<strong>{moodle_folder_name}</strong>": Suba aquí los documentos PDF, DOCX, PPTX que la IA utilizará como base de conocimiento.</li>
+    <li><a href="{refresh_files_url}" target="_blank">{moodle_refresh_link_name}</a>: Haga clic aquí después de subir nuevos archivos o modificar existentes en la carpeta "{moodle_folder_name}" para que la IA los procese.</li>
+</ul>
 """
-        # Prepare module entries
-        modules_payload = []
-        # Folder module
-        modules_payload.append(
-            {
-                "modname": "folder",
-                "section": created_section.id,
-                "name": moodle_folder_name,
-                "intro": f"Carpeta para {moodle_folder_name}",
-                "introformat": 1,
-                "display": 0,
-                "showexpanded": 1,
-                "visible": 1,
-            }
-        )
-        # Chat URL module
-        if n8n_chat_url:
-            modules_payload.append(
-                {
-                    "modname": "url",
-                    "section": created_section.id,
-                    "name": moodle_chat_link_name,
-                    "externalurl": n8n_chat_url,
-                    "intro": f"Enlace a {moodle_chat_link_name}",
-                    "introformat": 1,
-                    "display": 0,
-                    "visible": 1,
-                }
-            )
-        # Refresh URL module
-        modules_payload.append(
-            {
-                "modname": "url",
-                "section": created_section.id,
-                "name": moodle_refresh_link_name,
-                "externalurl": refresh_files_url,
-                "intro": f"Enlace a {moodle_refresh_link_name}",
-                "introformat": 1,
-                "display": 0,
-                "visible": 1,
-            }
-        )
-        # Combine into update payload
-        update_payload = {
+
+        # Payload para actualizar la sección (nombre, summary) y añadir módulos
+        update_section_and_modules_payload = {
             "courseid": course_id,
             "sections": [
                 {
                     "type": "id",
-                    "section": created_section.id,
-                    "name": created_section.name,
+                    "section": section_id_to_update,
+                    "name": moodle_section_name_desired,  # Nombre deseado
                     "summary": html_summary,
-                    "summaryformat": 1,
+                    "summaryformat": 1,  # 1 para HTML
                     "visible": 1,
                 }
             ],
         }
-        # Send update to Moodle WS
-        moodle._make_request("local_wsmanagesections_update_sections", update_payload)
 
-        response_details.status = "success"
-        response_details.message = (
-            f"Entrenai IA setup completed successfully for course {course_id}."
+        logger.info(
+            f"Paso 2: Actualizando sección ID {section_id_to_update} con nombre '{moodle_section_name_desired}', summary y módulos."
         )
+        logger.debug(
+            f"Payload para local_wsmanagesections_update_sections: {update_section_and_modules_payload}"
+        )
+
+        update_result = moodle._make_request(
+            "local_wsmanagesections_update_sections", update_section_and_modules_payload
+        )
+        logger.info(f"Resultado de actualización de sección y módulos: {update_result}")
+
+        # Verificar módulos creados (opcional, para obtener IDs)
+        # Por ahora, asumimos que la creación fue exitosa si no hubo error.
+        # Los IDs de los módulos no se capturan en response_details con este flujo simplificado.
+
+        response_details.status = "exitoso"
+        response_details.message = f"Configuración de Entrenai IA completada exitosamente para el curso {course_id} ('{course_name_str}')."
         logger.info(response_details.message)
         return response_details
+
     except HTTPException as http_exc:
+        logger.error(
+            f"HTTPException durante configuración de IA para curso {course_id}: {http_exc.detail}"
+        )
         raise http_exc
     except MoodleAPIError as e:
-        logger.error(f"Moodle API error during IA setup for course {course_id}: {e}")
-        response_details.status = "failed"
-        response_details.message = f"Moodle API error: {str(e)}"
+        logger.error(
+            f"Error de API de Moodle durante configuración de IA para curso {course_id}: {e}"
+        )
+        response_details.status = "fallido"
+        response_details.message = f"Error de API de Moodle: {str(e)}"
         raise HTTPException(status_code=502, detail=response_details.message)
     except Exception as e:
         logger.exception(
-            f"Unexpected error during IA setup for course {course_id}: {e}"
+            f"Error inesperado durante configuración de IA para curso {course_id}: {e}"
         )
-        response_details.status = "failed"
-        response_details.message = f"Internal server error: {str(e)}"
+        response_details.status = "fallido"
+        response_details.message = f"Error interno del servidor: {str(e)}"
         raise HTTPException(status_code=500, detail=response_details.message)
 
 
@@ -305,46 +368,93 @@ async def refresh_course_files(
     moodle: MoodleClient = Depends(get_moodle_client),
     file_tracker: FileTracker = Depends(get_file_tracker),
     qdrant: QdrantWrapper = Depends(get_qdrant_wrapper),
-    ollama: OllamaWrapper = Depends(get_ollama_wrapper),
+    ai_client: OllamaWrapper | GeminiWrapper = Depends(get_ai_client),
     embedding_manager: EmbeddingManager = Depends(get_embedding_manager),
     file_processor: FileProcessor = Depends(get_file_processor),
 ):
-    logger.info(f"Starting file refresh process for course ID: {course_id}")
+    """Refresca y procesa los archivos de un curso, actualizando la base de conocimiento de la IA."""
+    logger.info(
+        f"Iniciando proceso de refresco de archivos para el curso ID: {course_id}"
+    )
+
+    # Obtener nombre del curso para Qdrant
+    course_name_for_qdrant: Optional[str] = None
+    try:
+        logger.info(
+            f"Obteniendo nombre del curso {course_id} para operaciones de Qdrant..."
+        )
+        target_user_id_for_name = moodle_config.default_teacher_id
+        if target_user_id_for_name:
+            courses = moodle.get_courses_by_user(user_id=target_user_id_for_name)
+            course = next((c for c in courses if c.id == course_id), None)
+            if course:
+                course_name_for_qdrant = course.displayname or course.fullname
+        if not course_name_for_qdrant:
+            all_courses = moodle.get_all_courses()
+            course = next((c for c in all_courses if c.id == course_id), None)
+            if course:
+                course_name_for_qdrant = course.displayname or course.fullname
+
+        if not course_name_for_qdrant:
+            course_name_for_qdrant = f"Curso_{course_id}"
+            logger.warning(
+                f"No se pudo obtener el nombre para el curso ID {course_id}, usando fallback: '{course_name_for_qdrant}' para Qdrant."
+            )
+        else:
+            logger.info(f"Nombre del curso para Qdrant: '{course_name_for_qdrant}'")
+    except Exception as e:
+        logger.error(
+            f"Error al obtener el nombre del curso {course_id} para Qdrant: {e}"
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"No se pudo determinar el nombre del curso {course_id} para operaciones de Qdrant.",
+        )
+
+    if not course_name_for_qdrant:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Nombre del curso para Qdrant es inválido para el curso ID {course_id}.",
+        )
+
     target_section_name = moodle_config.course_folder_name
     target_folder_name = "Documentos Entrenai"
 
-    processed_files_summary: List[Dict[str, Any]] = []
     files_to_process_count = 0
     successfully_processed_count = 0
     total_chunks_upserted_count = 0
-    processed_files_summary: List[
-        Dict[str, Any]
-    ] = []  # Ensure type allows mixed values
+    processed_files_summary: List[Dict[str, Any]] = []
+    course_download_dir = Path(base_config.download_dir) / str(course_id)
 
     try:
-        # Ensure the Qdrant collection exists before processing files
+        # Asegurar que existe la colección de Qdrant antes de procesar archivos
         vector_size = qdrant_config.default_vector_size
         logger.info(
-            f"Ensuring Qdrant collection exists for course {course_id} with vector size {vector_size}"
+            f"Asegurando colección Qdrant para curso {course_id} con tamaño de vector {vector_size}"
         )
-        if not qdrant.ensure_collection(course_id, vector_size):
-            logger.error(f"Failed to ensure Qdrant collection for course {course_id}")
+        if not qdrant.ensure_collection(course_name_for_qdrant, vector_size):
+            logger.error(
+                f"Falló al asegurar la colección Qdrant para el curso {course_id}"
+            )
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to ensure Qdrant collection for course {course_id}",
+                detail=f"Falló al asegurar la colección Qdrant para el curso {course_id}",
             )
         logger.info(
-            f"Qdrant collection '{qdrant.get_collection_name(course_id)}' ensured."
+            f"Colección Qdrant '{qdrant.get_collection_name(course_name_for_qdrant)}' asegurada."
         )
 
+        # Obtener todos los contenidos del curso para encontrar la sección y módulos
         all_course_contents = moodle._make_request(
             "core_course_get_contents", payload_params={"courseid": course_id}
         )
         if not isinstance(all_course_contents, list):
             raise HTTPException(
-                status_code=500, detail="Could not retrieve course contents."
+                status_code=500,
+                detail="No se pudieron obtener los contenidos del curso.",
             )
 
+        # Buscar la sección objetivo por nombre
         found_section_id: Optional[int] = None
         for section_data in all_course_contents:
             if section_data.get("name") == target_section_name:
@@ -353,101 +463,105 @@ async def refresh_course_files(
 
         if not found_section_id:
             logger.error(
-                f"Target section '{target_section_name}' not found in course {course_id}."
+                f"Sección objetivo '{target_section_name}' no encontrada en curso {course_id}."
             )
             raise HTTPException(
                 status_code=404,
-                detail=f"Setup section '{target_section_name}' not found.",
+                detail=f"Sección de configuración '{target_section_name}' no encontrada.",
             )
         logger.info(
-            f"Found section '{target_section_name}' with ID: {found_section_id}."
+            f"Sección '{target_section_name}' encontrada con ID: {found_section_id}."
         )
 
+        # Encontrar el módulo de carpeta en la sección
         folder_module = moodle.get_course_module_by_name(
             course_id, found_section_id, target_folder_name, "folder"
         )
         if not folder_module or not folder_module.id:
             logger.error(
-                f"Folder '{target_folder_name}' not found in course {course_id}, section {found_section_id}."
+                f"Carpeta '{target_folder_name}' no encontrada en curso {course_id}, sección {found_section_id}."
             )
             raise HTTPException(
                 status_code=404,
-                detail=f"Designated Moodle folder '{target_folder_name}' not found.",
+                detail=f"Carpeta designada de Moodle '{target_folder_name}' no encontrada.",
             )
 
         folder_cmid = folder_module.id
-        logger.info(f"Found folder '{target_folder_name}' with cmid: {folder_cmid}.")
+        logger.info(
+            f"Carpeta '{target_folder_name}' encontrada con cmid: {folder_cmid}."
+        )
 
+        # Obtener los archivos de la carpeta
         moodle_files = moodle.get_folder_files(folder_cmid=folder_cmid)
         if not moodle_files:
             logger.info(
-                f"No files found in folder '{target_folder_name}' (cmid: {folder_cmid})."
+                f"No se encontraron archivos en la carpeta '{target_folder_name}' (cmid: {folder_cmid})."
             )
             return {
-                "message": "No files found in the designated Moodle folder.",
+                "message": "No se encontraron archivos en la carpeta designada de Moodle.",
                 "files_checked": 0,
                 "files_processed": 0,
                 "total_chunks_upserted": 0,
             }
 
         logger.info(
-            f"Found {len(moodle_files)} files in Moodle folder. Checking for new/modified files..."
+            f"Se encontraron {len(moodle_files)} archivos en la carpeta de Moodle. Verificando archivos nuevos/modificados..."
         )
-
-        course_download_dir = Path(base_config.download_dir) / str(course_id)
         course_download_dir.mkdir(parents=True, exist_ok=True)
 
         for mf in moodle_files:
             file_summary: Dict[str, Any] = {
                 "filename": mf.filename,
-                "status": "skipped_unchanged",
-            }  # Explicitly type file_summary
-            if not mf.filename or not mf.fileurl or mf.timemodified is None:
-                logger.warning(
-                    f"Skipping Moodle file with incomplete data: {mf.model_dump_json()}"
-                )
-                file_summary["status"] = "skipped_incomplete_data"
-                processed_files_summary.append(file_summary)
-                continue
+                "status": "omitido_sin_cambios",
+            }
+            downloaded_path: Optional[Path] = None
+            try:
+                if not mf.filename or not mf.fileurl or mf.timemodified is None:
+                    logger.warning(
+                        f"Omitiendo archivo de Moodle con datos incompletos: {mf.model_dump_json()}"
+                    )
+                    file_summary["status"] = "omitido_datos_incompletos"
+                    processed_files_summary.append(file_summary)
+                    continue
 
-            if file_tracker.is_file_new_or_modified(
-                course_id, mf.filename, mf.timemodified
-            ):
-                files_to_process_count += 1
-                logger.info(f"File '{mf.filename}' is new or modified. Processing...")
-                downloaded_path: Optional[Path] = None
-                try:
+                if file_tracker.is_file_new_or_modified(
+                    course_id, mf.filename, mf.timemodified
+                ):
+                    files_to_process_count += 1
+                    logger.info(
+                        f"Archivo '{mf.filename}' es nuevo o modificado. Procesando..."
+                    )
+
                     downloaded_path = moodle.download_file(
                         str(mf.fileurl), course_download_dir, mf.filename
                     )
                     logger.info(
-                        f"Successfully downloaded: {mf.filename} to {downloaded_path}"
+                        f"Descargado exitosamente: {mf.filename} a {downloaded_path}"
                     )
 
                     raw_text = file_processor.process_file(downloaded_path)
                     if not raw_text:
-                        logger.error(f"Text extraction failed for {mf.filename}.")
-                        file_summary["status"] = "text_extraction_failed"
+                        logger.error(f"Extracción de texto falló para {mf.filename}.")
+                        file_summary["status"] = "extraccion_texto_fallida"
                         raise FileProcessingError(
-                            f"Text extraction failed for {mf.filename}"
+                            f"Extracción de texto falló para {mf.filename}"
                         )
 
-                    markdown_text = ollama.format_to_markdown(
-                        raw_text,
-                        save_path="/Users/lucas/facultad/tesis_entrenai/data/markdown",
+                    markdown_text = ai_client.format_to_markdown(
+                        raw_text, save_path=str(Path(base_config.data_dir) / "markdown")
                     )
                     logger.info(
-                        f"Formatted to Markdown for {mf.filename} (length: {len(markdown_text)})"
+                        f"Formateado a Markdown para {mf.filename} (longitud: {len(markdown_text)})"
                     )
 
                     text_chunks = embedding_manager.split_text_into_chunks(
                         markdown_text
                     )
                     if not text_chunks:
-                        logger.warning(f"No chunks generated for {mf.filename}.")
-                        file_summary["status"] = "no_chunks_generated"
+                        logger.warning(f"No se generaron chunks para {mf.filename}.")
+                        file_summary["status"] = "no_se_generaron_chunks"
                         raise FileProcessingError(
-                            f"No chunks generated for {mf.filename}"
+                            f"No se generaron chunks para {mf.filename}"
                         )
 
                     contextualized_chunks = [
@@ -466,10 +580,10 @@ async def refresh_course_files(
                         if emb
                     ]
                     if not valid_data:
-                        logger.warning(f"No valid embeddings for {mf.filename}.")
-                        file_summary["status"] = "embedding_generation_failed"
+                        logger.warning(f"No hay embeddings válidos para {mf.filename}.")
+                        file_summary["status"] = "generacion_embedding_fallida"
                         raise FileProcessingError(
-                            f"No valid embeddings for {mf.filename}"
+                            f"No hay embeddings válidos para {mf.filename}"
                         )
 
                     final_texts, final_embeddings = zip(*valid_data)
@@ -485,46 +599,60 @@ async def refresh_course_files(
                     )
 
                     if qdrant_chunks:
-                        if qdrant.upsert_chunks(course_id, qdrant_chunks):
+                        # Usar course_name_for_qdrant en lugar de course_id
+                        if qdrant.upsert_chunks(course_name_for_qdrant, qdrant_chunks):
                             logger.info(
-                                f"Upserted {len(qdrant_chunks)} chunks for {mf.filename}."
+                                f"Insertados/actualizados {len(qdrant_chunks)} chunks para {mf.filename}."
                             )
                             total_chunks_upserted_count += len(qdrant_chunks)
                             file_summary["chunks_upserted"] = len(qdrant_chunks)
                         else:
-                            logger.error(f"Qdrant upsert failed for {mf.filename}.")
-                            file_summary["status"] = "qdrant_upsert_failed"
+                            logger.error(
+                                f"Falló el upsert a Qdrant para {mf.filename}."
+                            )
+                            file_summary["status"] = "qdrant_upsert_fallido"
                             raise FileProcessingError(
-                                f"Qdrant upsert failed for {mf.filename}"
+                                f"Falló el upsert a Qdrant para {mf.filename}"
                             )
 
                     file_tracker.mark_file_as_processed(
                         course_id, mf.filename, mf.timemodified
                     )
                     successfully_processed_count += 1
-                    file_summary["status"] = "processed_successfully"
-                except (MoodleAPIError, FileProcessingError, Exception) as e:
-                    logger.error(f"Error processing file '{mf.filename}': {e}")
-                    if (
-                        "status" not in file_summary
-                        or file_summary["status"] == "skipped_unchanged"
-                    ):  # if not already set by a more specific error
-                        file_summary["status"] = f"error: {str(e)}"
-                # finally:
-                #     if downloaded_path and downloaded_path.exists():
-                #         try:
-                #             downloaded_path.unlink()
-                #         except OSError as e_unlink:
-                #             logger.error(
-                #                 f"Error deleting temp file {downloaded_path}: {e_unlink}"
-                #             )
+                    file_summary["status"] = "procesado_exitosamente"
+            except (MoodleAPIError, FileProcessingError, Exception) as e:
+                logger.error(f"Error procesando archivo '{mf.filename}': {e}")
+                if (
+                    "status" not in file_summary
+                    or file_summary["status"] == "omitido_sin_cambios"
+                ):
+                    file_summary["status"] = f"error: {str(e)}"
+            # finally:
+            #     if downloaded_path and downloaded_path.exists():
+            #         try:
+            #             downloaded_path.unlink()
+            #             logger.debug(f"Archivo temporal eliminado: {downloaded_path}")
+            #         except OSError as e_unlink:
+            #             logger.error(f"Error eliminando archivo temporal {downloaded_path}: {e_unlink}")
             processed_files_summary.append(file_summary)
 
+        try:
+            if course_download_dir.exists() and not any(course_download_dir.iterdir()):
+                shutil.rmtree(course_download_dir)
+                logger.info(
+                    f"Directorio de descargas del curso vacío eliminado: {course_download_dir}"
+                )
+        except Exception as e_rm:
+            logger.warning(
+                f"No se pudo eliminar el directorio de descargas del curso {course_download_dir}: {e_rm}"
+            )
+
         msg = (
-            f"File refresh completed for course {course_id}. Checked {len(moodle_files)} files. "
-            f"Attempted to process {files_to_process_count} new/modified files. "
-            f"Successfully processed and embedded {successfully_processed_count} files. "
-            f"Total chunks upserted: {total_chunks_upserted_count}."
+            f"Refresco de archivos completado para el curso {course_id}. "
+            f"Archivos verificados: {len(moodle_files)}. "
+            f"Se intentaron procesar {files_to_process_count} archivos nuevos/modificados. "
+            f"Procesados exitosamente e incrustados: {successfully_processed_count} archivos. "
+            f"Total de chunks insertados/actualizados: {total_chunks_upserted_count}."
         )
         logger.info(msg)
         return {
@@ -537,14 +665,19 @@ async def refresh_course_files(
         }
 
     except HTTPException as http_exc:
+        logger.error(
+            f"HTTPException durante refresco de archivos para curso {course_id}: {http_exc.detail}"
+        )
         raise http_exc
     except MoodleAPIError as e:
         logger.error(
-            f"Moodle API error during file refresh for course {course_id}: {e}"
+            f"Error de API de Moodle durante refresco de archivos para curso {course_id}: {e}"
         )
-        raise HTTPException(status_code=502, detail=f"Moodle API error: {str(e)}")
+        raise HTTPException(status_code=502, detail=f"Error de API de Moodle: {str(e)}")
     except Exception as e:
         logger.exception(
-            f"Unexpected error during file refresh for course {course_id}: {e}"
+            f"Error inesperado durante refresco de archivos para curso {course_id}: {e}"
         )
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error interno del servidor: {str(e)}"
+        )

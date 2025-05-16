@@ -35,7 +35,7 @@ $(VENV_DIR)/bin/activate: requirements.txt
 
 run: $(VENV_DIR)/bin/activate .env
 	@echo "Starting FastAPI application..."
-	$(VENV_ACTIVATE); uvicorn src.entrenai.api.main:app --reload $(RUN_ARGS)
+	$(VENV_ACTIVATE); uvicorn src.entrenai.api.main:app $(RUN_ARGS)
 
 test: $(VENV_DIR)/bin/activate
 	@echo "Running tests..."

@@ -95,22 +95,3 @@ class CourseSetupResponse(BaseModel):
 
 
 # Add other models as needed for API interactions, internal data structures, etc.
-
-if __name__ == "__main__":
-    # Example usage for quick validation
-    course_example = MoodleCourse(
-        id=1,
-        shortname="CS101",
-        fullname="Introduction to Computer Science",
-        displayname="CS101 Intro",
-    )
-    print(course_example.model_dump_json(indent=2))
-
-    chunk_example = DocumentChunk(
-        id="chunk_123",
-        course_id=101,
-        document_id="doc_abc",
-        text="This is a sample chunk of text.",
-        metadata={"page": 1, "source": "lecture1.pdf"},
-    )
-    print(chunk_example.model_dump_json(indent=2))

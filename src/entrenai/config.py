@@ -1,6 +1,7 @@
 import os
 from dotenv import load_dotenv
 from typing import Optional
+import logging  # Import standard logging to get a logger instance
 
 # Load environment variables from .env file
 # This should be called once when the application starts.
@@ -30,6 +31,11 @@ class BaseConfig:
         self.download_dir: str = os.path.join(
             self.data_dir, os.getenv("DOWNLOAD_SUBDIR", "downloads")
         )
+
+        # AI provider settings
+        self.ai_provider: str = os.getenv(
+            "AI_PROVIDER", "ollama"
+        ).lower()  # "ollama" o "gemini"
 
         # Ensure data directories exist
         os.makedirs(self.data_dir, exist_ok=True)
@@ -62,12 +68,13 @@ class MoodleConfig(BaseConfig):
         )
 
         if not self.url or not self.token:
-            # Or raise an error, or log a warning, depending on how critical these are at startup
-            print("Warning: MOODLE_URL or MOODLE_TOKEN is not set in the environment.")
+            logging.warning(
+                "Advertencia: MOODLE_URL o MOODLE_TOKEN no están configurados en el entorno."
+            )
 
         if self.default_teacher_id is None:
-            print(
-                "Warning: MOODLE_DEFAULT_TEACHER_ID is not set or not a valid integer in the environment."
+            logging.warning(
+                "Advertencia: MOODLE_DEFAULT_TEACHER_ID no está configurado o no es un entero válido en el entorno."
             )
 
 
@@ -86,7 +93,9 @@ class QdrantConfig(BaseConfig):
         self.default_vector_size: int = int(os.getenv("DEFAULT_VECTOR_SIZE", "384"))
 
         if not self.host:
-            print("Warning: QDRANT_HOST is not set in the environment.")
+            logging.warning(
+                "Advertencia: QDRANT_HOST no está configurado en el entorno."
+            )
 
 
 class OllamaConfig(BaseConfig):
@@ -103,7 +112,35 @@ class OllamaConfig(BaseConfig):
         self.context_model: str = os.getenv("OLLAMA_CONTEXT_MODEL", "llama3")
 
         if not self.host:
-            print("Warning: OLLAMA_HOST is not set in the environment.")
+            logging.warning(
+                "Advertencia: OLLAMA_HOST no está configurado en el entorno."
+            )
+
+
+class GeminiConfig(BaseConfig):
+    """Google Gemini API specific configurations."""
+
+    def __init__(self):
+        super().__init__()
+        self.api_key: Optional[str] = os.getenv("GEMINI_API_KEY")
+        self.embedding_model: str = os.getenv("GEMINI_EMBEDDING_MODEL", "embedding-001")
+        self.text_model: str = os.getenv("GEMINI_TEXT_MODEL", "gemini-1.5-flash")
+        self.vision_model: str = os.getenv(
+            "GEMINI_VISION_MODEL", "gemini-1.5-pro-vision"
+        )
+        self.embedding_dimension: int = int(
+            os.getenv("GEMINI_EMBEDDING_DIMENSION", "1024")
+        )
+
+        # Configuración de safety settings (opcional, usando valores por defecto)
+        self.safety_settings_enabled: bool = (
+            os.getenv("GEMINI_SAFETY_SETTINGS_ENABLED", "True").lower() == "true"
+        )
+
+        if not self.api_key:
+            logging.warning(
+                "Advertencia: GEMINI_API_KEY no está configurado en el entorno. El proveedor Gemini no estará disponible."
+            )
 
 
 class N8NConfig(BaseConfig):
@@ -127,7 +164,7 @@ class N8NConfig(BaseConfig):
         # N8N_ENCRYPTION_KEY is used by N8N itself, not directly by our app typically
 
         if not self.url:
-            print("Warning: N8N_URL is not set in the environment.")
+            logging.warning("Advertencia: N8N_URL no está configurado en el entorno.")
 
 
 # Instantiate configurations for easy import elsewhere
@@ -136,15 +173,9 @@ base_config = BaseConfig()
 moodle_config = MoodleConfig()
 qdrant_config = QdrantConfig()
 ollama_config = OllamaConfig()
+gemini_config = GeminiConfig()
 n8n_config = N8NConfig()
 
 # Example of how to use:
 # from entrenai.config import moodle_config
 # print(moodle_config.url)
-
-if __name__ == "__main__":
-    print("Base Config:", vars(base_config))
-    print("Moodle Config:", vars(moodle_config))
-    print("Qdrant Config:", vars(qdrant_config))
-    print("Ollama Config:", vars(ollama_config))
-    print("N8N Config:", vars(n8n_config))

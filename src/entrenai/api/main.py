@@ -28,29 +28,29 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    logger.info("Entrenai API starting up...")
-    logger.info(f"Log level set to: {base_config.log_level}")
-    logger.info(f"FastAPI Host: {base_config.fastapi_host}")
-    logger.info(f"FastAPI Port: {base_config.fastapi_port}")
-    # Here you could add initial checks, like trying to connect to Qdrant, Ollama, etc.
-    # For now, just logging.
+    logger.info("Iniciando API de Entrenai...")
+    logger.info(f"Nivel de log configurado en: {base_config.log_level}")
+    logger.info(f"Host de FastAPI: {base_config.fastapi_host}")
+    logger.info(f"Puerto de FastAPI: {base_config.fastapi_port}")
+    # Aquí se podrían añadir verificaciones iniciales, como intentar conectar a Qdrant, Ollama, etc.
+    # Por ahora, solo se registra.
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    logger.info("Entrenai API shutting down...")
+    logger.info("Cerrando API de Entrenai...")
 
 
 @app.get("/")
 async def read_root():
-    logger.info("Root endpoint '/' was called.")
-    return {"message": "Welcome to Entrenai API!"}
+    logger.info("Endpoint raíz '/' fue llamado.")
+    return {"message": "¡Bienvenido a la API de Entrenai!"}
 
 
 @app.get("/health")
 async def health_check():
-    logger.debug("Health check endpoint '/health' was called.")
-    return {"status": "healthy"}
+    logger.debug("Endpoint de estado '/health' fue llamado.")
+    return {"status": "healthy"}  # "healthy" es un término técnico común, se mantiene.
 
 
 # Placeholder for future routers
@@ -58,9 +58,10 @@ async def health_check():
 # app.include_router(some_router.router, prefix="/items", tags=["items"])
 
 # Import and include routers
-from src.entrenai.api.routers import course_setup
+from src.entrenai.api.routers import course_setup, search
 
 app.include_router(course_setup.router)
+app.include_router(search.router)
 
 # Montar directorio estático
 # Asume que 'static' está en la raíz del proyecto, y main.py está en src/entrenai/api/
@@ -76,19 +77,3 @@ app.include_router(course_setup.router)
 # El Makefile actual ejecuta `uvicorn src.entrenai.api.main:app --reload $(RUN_ARGS)`
 # que se ejecuta desde la raíz del proyecto, por lo que "static" debería ser correcto.
 app.mount("/ui", StaticFiles(directory="static", html=True), name="ui")
-
-
-if __name__ == "__main__":
-    # This part is for direct execution (e.g., python src/entrenai/api/main.py)
-    # Uvicorn is typically used for production or via the Makefile.
-    import uvicorn
-
-    logger.info(
-        "Running FastAPI app directly using Uvicorn (for development/debugging)."
-    )
-    uvicorn.run(
-        app,
-        host=base_config.fastapi_host,
-        port=base_config.fastapi_port,
-        log_level=base_config.log_level.lower(),
-    )

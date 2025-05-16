@@ -7,7 +7,7 @@ from src.entrenai.utils.logger import get_logger
 logger = get_logger(__name__)
 
 # Common error messages as constants
-CLIENT_NOT_INITIALIZED = "Ollama client not initialized."
+CLIENT_NOT_INITIALIZED = "Cliente Ollama no inicializado."
 
 
 class OllamaWrapperError(Exception):
@@ -30,25 +30,25 @@ class OllamaWrapper:
                 # Test connection by listing local models
                 self.client.list()
                 logger.info(
-                    f"Ollama client initialized and connected to host: {config.host}"
+                    f"Cliente Ollama inicializado y conectado al host: {config.host}"
                 )
                 self._ensure_models_available()  # Check for specific models
             else:
                 logger.error(
-                    "Ollama host not configured. OllamaWrapper will not be functional."
+                    "Host de Ollama no configurado. OllamaWrapper no será funcional."
                 )
-                raise OllamaWrapperError("Ollama host not configured.")
+                raise OllamaWrapperError("Host de Ollama no configurado.")
         except Exception as e:
             logger.error(
-                f"Failed to connect or initialize Ollama client at {config.host}: {e}"
+                f"Falló la conexión o inicialización del cliente Ollama en {config.host}: {e}"
             )
             self.client = None
             # raise OllamaWrapperError(f"Failed to initialize Ollama client: {e}") from e
 
     def _ensure_models_available(self):
         """
-        Checks if the configured models are available in Ollama, and logs a warning if not.
-        Does not attempt to pull them automatically to avoid long startup times without user consent.
+        Verifica si los modelos configurados están disponibles en Ollama y registra una advertencia si no lo están.
+        No intenta descargarlos automáticamente para evitar largos tiempos de inicio sin consentimiento del usuario.
         """
         if not self.client:
             return
@@ -77,7 +77,7 @@ class OllamaWrapper:
             for model_type, model_name in required_models.items():
                 if not model_name:  # Skip if a model name is not configured
                     logger.info(
-                        f"Ollama model for {model_type} is not configured. Skipping check."
+                        f"Modelo Ollama para {model_type} no está configurado. Omitiendo verificación."
                     )
                     continue
 
@@ -90,36 +90,36 @@ class OllamaWrapper:
 
                 if not is_present:
                     logger.warning(
-                        f"Ollama model for {model_type} ('{model_name}') "
-                        f"not found in available models: {available_model_names}. "
-                        f"Please ensure it is pulled using 'ollama pull {model_name}'."
+                        f"Modelo Ollama para {model_type} ('{model_name}') "
+                        f"no encontrado en los modelos disponibles: {available_model_names}. "
+                        f"Por favor, asegúrese de que esté descargado usando 'ollama pull {model_name}'."
                     )
                 else:
                     logger.info(
-                        f"Ollama model for {model_type} ('{model_name}') is available."
+                        f"Modelo Ollama para {model_type} ('{model_name}') está disponible."
                     )
 
         except Exception as e:
-            logger.error(f"Error checking available Ollama models: {e}")
+            logger.error(f"Error al verificar los modelos Ollama disponibles: {e}")
 
     def generate_embedding(self, text: str, model: Optional[str] = None) -> List[float]:
         """
-        Generates an embedding for the given text using the configured embedding model.
+        Genera un embedding para el texto dado usando el modelo de embedding configurado.
         """
         if not self.client:
-            logger.error(f"{CLIENT_NOT_INITIALIZED} Cannot generate embedding.")
+            logger.error(f"{CLIENT_NOT_INITIALIZED} No se puede generar el embedding.")
             raise OllamaWrapperError(CLIENT_NOT_INITIALIZED)
 
         model_to_use = model or self.config.embedding_model
         if not model_to_use:
-            logger.error("Embedding model name not configured.")
-            raise OllamaWrapperError("Embedding model name not configured.")
+            logger.error("Nombre del modelo de embedding no configurado.")
+            raise OllamaWrapperError("Nombre del modelo de embedding no configurado.")
         try:
             response = self.client.embeddings(model=model_to_use, prompt=text)
             return response["embedding"]
         except Exception as e:
-            logger.error(f"Error generating embedding with model '{model_to_use}': {e}")
-            raise OllamaWrapperError(f"Failed to generate embedding: {e}") from e
+            logger.error(f"Error generando embedding con modelo '{model_to_use}': {e}")
+            raise OllamaWrapperError(f"Falló la generación del embedding: {e}") from e
 
     def generate_chat_completion(
         self,
@@ -130,17 +130,19 @@ class OllamaWrapper:
         stream: bool = False,
     ) -> str:
         """
-        Generates a chat completion (response) for a given prompt.
-        Can include a system message and context chunks for RAG.
+        Genera una completación de chat (respuesta) para un prompt dado.
+        Puede incluir un mensaje de sistema y chunks de contexto para RAG.
         """
         if not self.client:
-            logger.error(f"{CLIENT_NOT_INITIALIZED} Cannot generate chat completion.")
+            logger.error(
+                f"{CLIENT_NOT_INITIALIZED} No se puede generar la completación de chat."
+            )
             raise OllamaWrapperError(CLIENT_NOT_INITIALIZED)
 
         model_to_use = model or self.config.qa_model
         if not model_to_use:
-            logger.error("QA model name not configured.")
-            raise OllamaWrapperError("QA model name not configured.")
+            logger.error("Nombre del modelo QA no configurado.")
+            raise OllamaWrapperError("Nombre del modelo QA no configurado.")
 
         messages = []
         if system_message:
@@ -148,7 +150,7 @@ class OllamaWrapper:
 
         if context_chunks:
             context_str = "\n\n".join(context_chunks)
-            full_prompt = f"Context:\n{context_str}\n\nQuestion: {prompt}"
+            full_prompt = f"Contexto:\n{context_str}\n\nPregunta: {prompt}"  # User-facing, so Spanish
             messages.append({"role": "user", "content": full_prompt})
         else:
             messages.append({"role": "user", "content": prompt})
@@ -156,7 +158,7 @@ class OllamaWrapper:
         try:
             if stream:
                 logger.warning(
-                    "Streaming is not fully implemented in this basic wrapper. Returning full response."
+                    "El streaming no está completamente implementado en este wrapper básico. Devolviendo respuesta completa."
                 )
                 # Implement streaming in a future version
 
@@ -174,24 +176,28 @@ class OllamaWrapper:
             elif hasattr(response, "message") and hasattr(response.message, "content"):
                 response_content = str(response.message.content)
             else:
-                raise OllamaWrapperError("Unexpected response format from Ollama API")
+                raise OllamaWrapperError(
+                    "Formato de respuesta inesperado de la API de Ollama"
+                )
 
             # Ensure we return a non-empty string
             if not response_content:
-                logger.warning("Chat completion returned empty content")
+                logger.warning("La completación de chat devolvió contenido vacío.")
                 response_content = ""
 
             return response_content
 
         except Exception as e:
             logger.error(
-                f"Error generating chat completion with model '{model_to_use}': {e}"
+                f"Error generando completación de chat con modelo '{model_to_use}': {e}"
             )
-            raise OllamaWrapperError(f"Failed to generate chat completion: {e}") from e
+            raise OllamaWrapperError(
+                f"Falló la generación de la completación de chat: {e}"
+            ) from e
 
     def _extract_markdown_content(self, response: Any) -> str:
         """
-        Extract markdown content from Ollama API response.
+        Extrae contenido markdown de la respuesta de la API de Ollama.
         """
         if (
             isinstance(response, dict)
@@ -205,11 +211,11 @@ class OllamaWrapper:
                 return str(message.content)
 
         # If we got here, we couldn't extract the content
-        raise OllamaWrapperError("Unexpected response format from Ollama API")
+        raise OllamaWrapperError("Formato de respuesta inesperado de la API de Ollama")
 
     def _save_markdown_to_file(self, markdown_content: str, save_path: str) -> None:
         """
-        Save markdown content to a file at the specified path.
+        Guarda contenido markdown en un archivo en la ruta especificada.
         """
         try:
             import os
@@ -228,13 +234,13 @@ class OllamaWrapper:
                     save_path += ".md"
                 full_path = save_path
 
-            # Write content to file
-            with open(full_path, "w", encoding="utf-8") as f:
-                f.write(markdown_content)
+            # Write content to file usando modo binario para preservar codificación
+            with open(full_path, "wb") as f:
+                f.write(markdown_content.encode("utf-8"))
 
-            logger.info(f"Markdown content saved to {full_path}")
+            logger.info(f"Contenido Markdown guardado en {full_path}")
         except Exception as e:
-            logger.error(f"Failed to save markdown content to {save_path}: {e}")
+            logger.error(f"Falló al guardar contenido Markdown en {save_path}: {e}")
 
     def format_to_markdown(
         self,
@@ -243,45 +249,46 @@ class OllamaWrapper:
         save_path: Optional[str] = None,
     ) -> str:
         """
-        Converts the given text content to a well-structured Markdown format using an LLM.
-        Handles various input formats (plain text, OCR output, etc.) and ensures proper
-        markdown structure while preserving the original content's meaning.
+        Convierte el contenido de texto dado a un formato Markdown bien estructurado usando un LLM.
+        Maneja varios formatos de entrada (texto plano, salida OCR, etc.) y asegura
+        una estructura markdown adecuada preservando el significado del contenido original.
 
         Args:
-            text_content: The raw text to convert to markdown
-            model: Optional override for the markdown model to use
-            save_path: Optional path to save the resulting markdown file. Can be:
-                       - A full file path (ending with .md or not)
-                       - A directory path (will generate a timestamped filename)
-                       - None (default, will not save to file)
+            text_content: El texto crudo a convertir a markdown.
+            model: Sobrescritura opcional para el modelo de markdown a usar.
+            save_path: Ruta opcional para guardar el archivo markdown resultante. Puede ser:
+                       - Una ruta de archivo completa (terminando en .md o no).
+                       - Una ruta de directorio (generará un nombre de archivo con marca de tiempo).
+                       - None (por defecto, no guardará en archivo).
 
         Returns:
-            The formatted markdown text
+            El texto markdown formateado.
         """
         if not self.client:
-            logger.error(f"{CLIENT_NOT_INITIALIZED} Cannot format to Markdown.")
+            logger.error(f"{CLIENT_NOT_INITIALIZED} No se puede formatear a Markdown.")
             raise OllamaWrapperError(CLIENT_NOT_INITIALIZED)
 
         model_to_use = model or self.config.markdown_model
         if not model_to_use:
-            logger.error("Markdown formatting model name not configured.")
-            raise OllamaWrapperError("Markdown formatting model name not configured.")
+            logger.error("Nombre del modelo de formateo a Markdown no configurado.")
+            raise OllamaWrapperError(
+                "Nombre del modelo de formateo a Markdown no configurado."
+            )
 
-        # Preprocess the text to remove any <think> sections
         cleaned_text = self._preprocess_text_content(text_content)
 
         system_prompt = (
-            "You are an expert text formatter specializing in converting raw text to clean Markdown. "
-            "Your task is to transform the given content into properly structured Markdown format. Follow these rules strictly:\n\n"
-            "1. Maintain the original content's meaning and factual information\n"
-            "2. Create appropriate headings and structure based on content hierarchy\n"
-            "3. Properly format lists, tables, code blocks, and other elements\n"
-            "4. Fix obvious typos and formatting issues while preserving meaning\n"
-            "5. DO NOT add any new content, introductions, summaries, or conclusions\n"
-            "6. DO NOT include any meta-commentary or notes about the formatting process\n"
-            "7. DO NOT include any text enclosed in <think> tags or similar metadata\n"
-            "8. ONLY output the properly formatted Markdown content, nothing else\n\n"
-            "The goal is clean, well-structured Markdown that accurately represents the original content."
+            "Eres un experto formateador de texto especializado en convertir texto crudo a Markdown limpio. "
+            "Tu tarea es transformar el contenido dado a un formato Markdown estructurado adecuadamente. Sigue estas reglas estrictamente:\n\n"
+            "1. Mantén el significado y la información factual del contenido original.\n"
+            "2. Crea encabezados y estructura apropiados basados en la jerarquía del contenido.\n"
+            "3. Formatea correctamente listas, tablas, bloques de código y otros elementos.\n"
+            "4. Corrige errores tipográficos y de formato obvios mientras preservas el significado.\n"
+            "5. NO añadas ningún contenido nuevo, introducciones, resúmenes o conclusiones.\n"
+            "6. NO incluyas ningún meta-comentario o notas sobre el proceso de formateo.\n"
+            "7. NO incluyas ningún texto encerrado en etiquetas <think> o metadatos similares.\n"
+            "8. SOLO devuelve el contenido Markdown formateado correctamente, nada más.\n\n"
+            "El objetivo es un Markdown limpio y bien estructurado que represente con precisión el contenido original."
         )
 
         messages = [
@@ -290,46 +297,45 @@ class OllamaWrapper:
         ]
 
         try:
-            logger.info(f"Formatting text to Markdown using model '{model_to_use}'...")
+            logger.info(
+                f"Formateando texto a Markdown usando el modelo '{model_to_use}'..."
+            )
             response = self.client.chat(
                 model=model_to_use, messages=messages, stream=False
             )
 
-            # Extract markdown content from response
             markdown_content = self._extract_markdown_content(response)
-
-            # Post-process the markdown content to ensure it's clean
             markdown_content = self._postprocess_markdown_content(markdown_content)
 
             if markdown_content:
                 logger.info(
-                    f"Successfully formatted text to Markdown (length: {len(markdown_content)})."
+                    f"Texto formateado a Markdown exitosamente (longitud: {len(markdown_content)})."
                 )
-
-                # Save to file if a path was provided
                 if save_path:
                     self._save_markdown_to_file(markdown_content, save_path)
             else:
-                logger.warning("Markdown formatting returned empty content.")
-                markdown_content = ""  # Ensure we return a string even if it's empty
+                logger.warning("El formateo a Markdown devolvió contenido vacío.")
+                markdown_content = ""
 
             return markdown_content
         except Exception as e:
             logger.error(
-                f"Error formatting text to Markdown with model '{model_to_use}': {e}"
+                f"Error formateando texto a Markdown con modelo '{model_to_use}': {e}"
             )
-            raise OllamaWrapperError(f"Failed to format text to Markdown: {e}") from e
+            raise OllamaWrapperError(
+                f"Falló el formateo de texto a Markdown: {e}"
+            ) from e
 
     def _preprocess_text_content(self, text: str) -> str:
         """
-        Preprocesses the input text before sending it to the LLM.
-        Removes any <think> sections and other unwanted metadata.
+        Preprocesa el texto de entrada antes de enviarlo al LLM.
+        Elimina cualquier sección <think> y otros metadatos no deseados.
 
         Args:
-            text: The raw input text
+            text: El texto de entrada crudo.
 
         Returns:
-            Cleaned text ready for markdown conversion
+            Texto limpio listo para la conversión a markdown.
         """
         import re
 
@@ -354,7 +360,7 @@ class OllamaWrapper:
             markdown: The markdown content returned by the LLM
 
         Returns:
-            Clean, well-formatted markdown
+            Markdown limpio y bien formateado.
         """
         import re
 
@@ -377,128 +383,4 @@ class OllamaWrapper:
 
         return cleaned_markdown.strip()
 
-    # add_context_to_chunk will be handled by EmbeddingManager for now.
-
-
-if __name__ == "__main__":
-    from src.entrenai.config import ollama_config
-
-    if not ollama_config.host:
-        print("OLLAMA_HOST must be set in .env for this test.")
-    else:
-        print(f"Attempting to connect to Ollama at {ollama_config.host}...")
-        try:
-            ollama_wrapper = OllamaWrapper(config=ollama_config)
-            if ollama_wrapper.client:
-                print("Ollama client initialized successfully.")
-
-                # Test embedding (ensure embedding_model is configured and pulled)
-                if ollama_config.embedding_model:
-                    try:
-                        print(
-                            f"\nGenerating embedding for 'Hello, world!' using {ollama_wrapper.config.embedding_model}..."
-                        )
-                        embedding = ollama_wrapper.generate_embedding("Hello, world!")
-                        print(
-                            f"Embedding (first 5 dims): {embedding[:5]}... (Length: {len(embedding)})"
-                        )
-                    except OllamaWrapperError as e:
-                        print(f"Error during embedding test: {e}")
-                    except Exception as e:
-                        print(f"Unexpected error during embedding test: {e}")
-                else:
-                    print(
-                        "\nSkipping embedding test: OLLAMA_EMBEDDING_MODEL not configured."
-                    )
-
-                # Test chat completion (ensure qa_model is configured and pulled)
-                if ollama_config.qa_model:
-                    try:
-                        print(
-                            f"\nGenerating chat completion for 'Why is the sky blue?' using {ollama_wrapper.config.qa_model}..."
-                        )
-                        chat_response = ollama_wrapper.generate_chat_completion(
-                            "Why is the sky blue?"
-                        )
-                        print(f"Chat response: {chat_response}")
-                    except OllamaWrapperError as e:
-                        print(f"Error during chat completion test: {e}")
-                    except Exception as e:
-                        print(f"Unexpected error during chat completion test: {e}")
-                else:
-                    print(
-                        "\nSkipping chat completion test: OLLAMA_QA_MODEL not configured."
-                    )
-
-                # Test RAG-style chat completion (ensure qa_model is configured and pulled)
-                if ollama_config.qa_model:
-                    try:
-                        print(
-                            f"\nGenerating RAG chat completion using {ollama_wrapper.config.qa_model}..."
-                        )
-                        rag_prompt = "What is the capital of France?"
-                        rag_context = [
-                            "France is a country in Europe.",
-                            "Paris is a famous city known for the Eiffel Tower.",
-                        ]
-                        rag_response = ollama_wrapper.generate_chat_completion(
-                            prompt=rag_prompt,
-                            context_chunks=rag_context,
-                            system_message="You are a helpful assistant. Answer based on the provided context.",
-                        )
-                        print(f"RAG Chat response: {rag_response}")
-                    except OllamaWrapperError as e:
-                        print(f"Error during RAG chat completion test: {e}")
-                    except Exception as e:
-                        print(f"Unexpected error during RAG chat completion test: {e}")
-                else:
-                    print(
-                        "\nSkipping RAG chat completion test: OLLAMA_QA_MODEL not configured."
-                    )
-
-                # Test Markdown formatting (ensure markdown_model is configured and pulled)
-                if ollama_config.markdown_model:
-                    try:
-                        print(
-                            f"\nFormatting text to Markdown using {ollama_wrapper.config.markdown_model}..."
-                        )
-                        sample_text_for_md = "This is a heading.\n\nThis is a paragraph with a list:\n- Item 1\n- Item 2\n\nAnd some **bold** text."
-
-                        # Format and print without saving
-                        markdown_output = ollama_wrapper.format_to_markdown(
-                            sample_text_for_md
-                        )
-                        print(f"Markdown output:\n{markdown_output}")
-
-                        # Format and save to file
-                        import os
-
-                        save_path = os.path.join(
-                            os.path.dirname(
-                                os.path.dirname(
-                                    os.path.dirname(os.path.abspath(__file__))
-                                )
-                            ),
-                            "data",
-                            "markdown",
-                        )
-                        print(f"\nSaving formatted Markdown to {save_path}...")
-                        ollama_wrapper.format_to_markdown(
-                            sample_text_for_md, save_path=save_path
-                        )
-                    except OllamaWrapperError as e:
-                        print(f"Error during Markdown formatting test: {e}")
-                    except Exception as e:
-                        print(f"Unexpected error during Markdown formatting test: {e}")
-                else:
-                    print(
-                        "\nSkipping Markdown formatting test: OLLAMA_MARKDOWN_MODEL not configured."
-                    )
-            else:
-                print(
-                    "Failed to initialize Ollama client (client is None). Check logs for errors."
-                )
-        except OllamaWrapperError as e:
-            print(f"OllamaWrapperError during initialization: {e}")
-        except Exception as e:
-            print(f"An unexpected error occurred during OllamaWrapper test: {e}")
+    # add_context_to_chunk será manejado por EmbeddingManager por ahora.

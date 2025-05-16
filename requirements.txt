@@ -15,6 +15,9 @@ qdrant-client
 # Ollama client
 ollama
 
+# Google Gemini
+google-genai
+
 # Testing
 pytest
 pytest-asyncio # For testing async code with pytest
@@ -27,6 +30,7 @@ python-docx
 beautifulsoup4
 pandas
 lxml # Often a faster parser for BeautifulSoup
+chardet
 
 # Moodle (No client library specified, will use requests. Add if a specific client is found/needed)
 
