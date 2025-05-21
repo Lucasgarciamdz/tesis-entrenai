@@ -1,7 +1,7 @@
 from typing import Optional, Union, Dict, Any, List, cast
 
-from src.entrenai.core.ollama_wrapper import OllamaWrapper, OllamaWrapperError
-from src.entrenai.core.gemini_wrapper import GeminiWrapper, GeminiWrapperError
+from src.entrenai.core.ai.ollama_wrapper import OllamaWrapper, OllamaWrapperError
+from src.entrenai.core.ai.gemini_wrapper import GeminiWrapper, GeminiWrapperError
 from src.entrenai.config import (
     BaseConfig,
     OllamaConfig,
@@ -9,10 +9,9 @@ from src.entrenai.config import (
     ollama_config,
     gemini_config,
 )
-from src.entrenai.utils.logger import get_logger
+from src.entrenai.config.logger import get_logger
 
 logger = get_logger(__name__)
-
 
 class AIProviderError(Exception):
     """Excepción personalizada para errores relacionados con el proveedor de IA."""
@@ -55,8 +54,7 @@ class AIProvider:
         """Retorna el wrapper apropiado según la configuración."""
         if not self._wrapper:
             self._initialize_wrapper()
-        # Usamos cast para asegurar el tipo correcto, ya que sabemos que después de
-        # _initialize_wrapper, _wrapper no es None
+
         return cast(Union[OllamaWrapper, GeminiWrapper], self._wrapper)
 
     def generate_embedding(self, text: str, model: Optional[str] = None) -> List[float]:

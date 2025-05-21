@@ -2,20 +2,20 @@ from fastapi import APIRouter, HTTPException, Query, Depends, Request
 from typing import List, Optional, Dict, Any
 import shutil
 
-from src.entrenai.core.models import (
+from src.entrenai.api.models import (
     MoodleCourse,
     CourseSetupResponse,
     HttpUrl,  # Importar MoodleModule si se va a usar para parsear respuesta de módulos
 )
-from src.entrenai.core.moodle_client import MoodleClient, MoodleAPIError
-from src.entrenai.core.qdrant_wrapper import QdrantWrapper
-from src.entrenai.core.ollama_wrapper import OllamaWrapper
-from src.entrenai.core.gemini_wrapper import GeminiWrapper
-from src.entrenai.core.ai_provider import get_ai_wrapper, AIProviderError
-from src.entrenai.core.n8n_client import N8NClient
-from src.entrenai.core.file_tracker import FileTracker
-from src.entrenai.core.file_processor import FileProcessor, FileProcessingError
-from src.entrenai.core.embedding_manager import EmbeddingManager
+from src.entrenai.core.clients.moodle_client import MoodleClient, MoodleAPIError
+from src.entrenai.core.db.qdrant_wrapper import QdrantWrapper
+from src.entrenai.core.ai.ollama_wrapper import OllamaWrapper
+from src.entrenai.core.ai.gemini_wrapper import GeminiWrapper
+from src.entrenai.core.ai.ai_provider import get_ai_wrapper, AIProviderError
+from src.entrenai.core.clients.n8n_client import N8NClient
+from src.entrenai.core.files.file_tracker import FileTracker
+from src.entrenai.core.files.file_processor import FileProcessor, FileProcessingError
+from src.entrenai.core.ai.embedding_manager import EmbeddingManager
 from src.entrenai.config import (
     moodle_config,
     qdrant_config,
@@ -24,7 +24,7 @@ from src.entrenai.config import (
     base_config,
     n8n_config,
 )
-from src.entrenai.utils.logger import get_logger
+from src.entrenai.config.logger import get_logger
 from pathlib import Path
 
 logger = get_logger(__name__)

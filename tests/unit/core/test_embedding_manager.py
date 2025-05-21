@@ -3,9 +3,9 @@ import uuid
 from typing import List, Optional, Dict, Any
 from unittest.mock import MagicMock
 
-from src.entrenai.core.embedding_manager import EmbeddingManager
-from src.entrenai.core.ollama_wrapper import OllamaWrapperError
-from src.entrenai.core.models import DocumentChunk
+from src.entrenai.core.ai.embedding_manager import EmbeddingManager
+from src.entrenai.core.ai.ollama_wrapper import OllamaWrapperError
+from src.entrenai.api.models import DocumentChunk
 from src.entrenai.config import OllamaConfig  # For MockOllamaWrapper config
 
 

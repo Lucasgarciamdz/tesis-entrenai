@@ -1,10 +1,10 @@
 import uuid
 from typing import List, Optional, Dict, Any, Union
 
-from src.entrenai.core.ollama_wrapper import OllamaWrapper
-from src.entrenai.core.gemini_wrapper import GeminiWrapper
-from src.entrenai.core.models import DocumentChunk
-from src.entrenai.utils.logger import get_logger
+from src.entrenai.core.ai.ollama_wrapper import OllamaWrapper
+from src.entrenai.core.ai.gemini_wrapper import GeminiWrapper
+from src.entrenai.api.models import DocumentChunk
+from src.entrenai.config.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -49,10 +49,6 @@ class EmbeddingManager:
         co = chunk_overlap or self.default_chunk_overlap
 
         if co >= cs:
-            # User-facing error message, should be in Spanish if this exception is caught and shown.
-            # However, ValueError messages are often kept in English for developers.
-            # For consistency with other error messages that might bubble up, let's keep it English for now.
-            # If this specific message needs to be user-facing, it should be handled at a higher level.
             raise ValueError(
                 "El solapamiento del chunk debe ser menor que el tamaño del chunk."
             )

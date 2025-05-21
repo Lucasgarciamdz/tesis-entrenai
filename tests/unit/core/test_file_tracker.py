@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 from typing import Iterator  # Corrected import for fixture type hint
 
-from src.entrenai.core.file_tracker import FileTracker, FileTrackerError
+from src.entrenai.core.files.file_tracker import FileTracker, FileTrackerError
 
 
 @pytest.fixture

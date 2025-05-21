@@ -2,8 +2,8 @@ import pytest
 from unittest.mock import patch, MagicMock
 from qdrant_client.http.models import Distance, VectorParams, PointStruct, UpdateStatus
 
-from src.entrenai.core.qdrant_wrapper import QdrantWrapper, QdrantWrapperError
-from src.entrenai.core.models import DocumentChunk  # For creating test data
+from src.entrenai.core.db.qdrant_wrapper import QdrantWrapper, QdrantWrapperError
+from src.entrenai.api.models import DocumentChunk  # For creating test data
 from src.entrenai.config import QdrantConfig
 
 

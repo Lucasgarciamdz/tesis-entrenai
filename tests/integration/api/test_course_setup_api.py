@@ -5,7 +5,7 @@ from unittest.mock import patch  # Added for mocking config
 # Adjust the import path to your FastAPI application instance
 # Assuming your FastAPI app instance is named 'app' in 'src.entrenai.api.main'
 from src.entrenai.api.main import app
-from src.entrenai.core.models import MoodleCourse  # For response validation
+from src.entrenai.api.models import MoodleCourse  # For response validation
 from src.entrenai.config import moodle_config  # To check if default teacher ID is set
 
 
@@ -124,11 +124,11 @@ def test_list_moodle_courses_no_teacher_id_and_no_default(test_app_client: TestC
 
 
 # --- Additional imports for setup-ia test ---
-from src.entrenai.core.models import CourseSetupResponse
+from src.entrenai.api.models import CourseSetupResponse
 from src.entrenai.config import qdrant_config, n8n_config
-from src.entrenai.core.qdrant_wrapper import QdrantWrapper
-from src.entrenai.core.moodle_client import MoodleClient
-from src.entrenai.core.n8n_client import N8NClient
+from src.entrenai.core.db.qdrant_wrapper import QdrantWrapper
+from src.entrenai.core.clients.moodle_client import MoodleClient
+from src.entrenai.core.clients.n8n_client import N8NClient
 from urllib.parse import urljoin
 
 # --- Tests for POST /api/v1/courses/{course_id}/setup-ia endpoint ---
@@ -256,7 +256,7 @@ def test_setup_ia_for_course_success(test_app_client: TestClient):
 
 
 # --- Tests for GET /api/v1/courses/{course_id}/refresh-files ---
-from src.entrenai.core.file_tracker import FileTracker
+from src.entrenai.core.files.file_tracker import FileTracker
 from src.entrenai.config import base_config
 from pathlib import Path
 

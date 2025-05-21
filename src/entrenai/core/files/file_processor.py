@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import List, Optional, Dict
 
-from src.entrenai.utils.logger import get_logger
+from src.entrenai.config.logger import get_logger
 
 # Import specific libraries for file processing
 # For PDF:

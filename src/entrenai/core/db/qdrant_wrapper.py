@@ -10,8 +10,8 @@ from qdrant_client.http.exceptions import UnexpectedResponse
 from typing import List, Optional  # Added Dict, Any
 
 from src.entrenai.config import QdrantConfig
-from src.entrenai.core.models import DocumentChunk
-from src.entrenai.utils.logger import get_logger
+from src.entrenai.api.models import DocumentChunk
+from src.entrenai.config.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -58,10 +58,6 @@ class QdrantWrapper:
     def _normalize_name_for_collection(self, name: str) -> str:
         """Normaliza un nombre para ser usado como identificador de colección en Qdrant."""
         if not name:
-            # Fallback si el nombre es vacío, aunque esto debería ser manejado antes.
-            # Usar un UUID podría ser una opción, pero requiere consistencia.
-            # Por ahora, un nombre genérico con timestamp o error.
-            # Para este caso, es mejor que la capa superior asegure un nombre válido.
             logger.error("Se intentó normalizar un nombre vacío para la colección.")
             raise ValueError(
                 "El nombre del curso no puede estar vacío para generar el nombre de la colección."
@@ -75,19 +71,12 @@ class QdrantWrapper:
         # Truncar a una longitud máxima (Qdrant podría tener límites)
         max_len = 60  # Un límite razonable
         if len(name_processed) > max_len:
-            # Truncar y añadir un hash corto del nombre original para reducir colisiones si es necesario
-            # import hashlib
-            # name_hash = hashlib.md5(name_lower.encode()).hexdigest()[:8]
-            # name_processed = f"{name_processed[:max_len-9]}_{name_hash}"
             name_processed = name_processed[:max_len]
 
         if not name_processed:  # Si después de la normalización queda vacío (ej. nombre solo con caracteres especiales)
             logger.error(
                 f"El nombre normalizado para '{name}' resultó vacío. Usando fallback."
             )
-            # Esto es un caso extremo, idealmente los nombres de curso son más robustos.
-            # Podríamos usar un UUID o un hash del nombre original completo.
-            # Por simplicidad, si esto ocurre, es un problema con el nombre del curso.
             raise ValueError(
                 f"El nombre del curso '{name}' resultó en un nombre de colección normalizado vacío."
             )

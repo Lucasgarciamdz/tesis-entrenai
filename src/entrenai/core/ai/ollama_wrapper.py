@@ -2,7 +2,7 @@ import ollama
 from typing import List, Optional, Any
 
 from src.entrenai.config import OllamaConfig
-from src.entrenai.utils.logger import get_logger
+from src.entrenai.config.logger import get_logger
 
 logger = get_logger(__name__)
 

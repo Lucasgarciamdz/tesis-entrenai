@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.entrenai.utils.logger import get_logger
+from src.entrenai.config.logger import get_logger
 from src.entrenai.config import base_config
 
 # Initialize logger for this module

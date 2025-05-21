@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 
 from src.entrenai.config import GeminiConfig
-from src.entrenai.utils.logger import get_logger
+from src.entrenai.config.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -132,7 +132,6 @@ class GeminiWrapper:
             )
 
             # Enviar mensaje y obtener respuesta
-            # Nota: Gemini API puede no soportar stream a través de este método
             response = self.client.models.generate_content(
                 model=model_to_use, contents=contents, config=generation_config
             )
@@ -172,16 +171,15 @@ class GeminiWrapper:
         Returns:
             Texto limpio listo para la conversión a markdown.
         """
-        # Remove <think>...</think> blocks
+
         cleaned_text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
 
-        # Remove other common metadata patterns that might appear in OCR or extracted text
         cleaned_text = re.sub(
             r"^\s*\[.*?\]\s*$", "", cleaned_text, flags=re.MULTILINE
-        )  # Remove [metadata] lines
+        )
         cleaned_text = re.sub(
             r"^\s*#\s*metadata:.*$", "", cleaned_text, flags=re.MULTILINE
-        )  # Remove #metadata lines
+        )
 
         return cleaned_text.strip()
 
@@ -195,19 +193,14 @@ class GeminiWrapper:
         Returns:
             Markdown limpio y bien formateado.
         """
-        # Remove any lingering <think> tags that might have been generated
         cleaned_markdown = re.sub(r"<think>.*?</think>", "", markdown, flags=re.DOTALL)
 
-        # Remove any "I've converted this to markdown..." explanatory text at the beginning
         cleaned_markdown = re.sub(
             r"^.*?(#|---|```)", r"\1", cleaned_markdown, flags=re.DOTALL, count=1
         )
 
-        # Fix common formatting issues
-        # Ensure proper spacing after headings
         cleaned_markdown = re.sub(r"(#{1,6}.*?)(\n(?!\n))", r"\1\n\n", cleaned_markdown)
 
-        # Ensure code blocks are properly formatted with newlines
         cleaned_markdown = re.sub(
             r"```(\w*)\n?([^`]+)```", r"```\1\n\2\n```", cleaned_markdown
         )

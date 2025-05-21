@@ -5,7 +5,7 @@ from pdf2image.exceptions import (
     PDFInfoNotInstalledError,
 )  # Import for specific exception
 
-from src.entrenai.core.file_processor import (
+from src.entrenai.core.files.file_processor import (
     FileProcessor,
     TxtFileProcessor,
     MarkdownFileProcessor,

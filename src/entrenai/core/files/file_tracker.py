@@ -3,7 +3,7 @@ import time
 from pathlib import Path
 from typing import Optional, Dict
 
-from src.entrenai.utils.logger import get_logger
+from src.entrenai.config.logger import get_logger
 
 # Import base_config to get db_path, assuming it's added to BaseConfig or a specific FileConfig
 from src.entrenai.config import base_config

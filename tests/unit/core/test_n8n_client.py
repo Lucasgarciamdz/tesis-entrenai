@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock, mock_open
 from urllib.parse import urljoin
 
-from src.entrenai.core.n8n_client import N8NClient, N8NClientError, N8NWorkflow
+from src.entrenai.core.clients.n8n_client import N8NClient, N8NClientError, N8NWorkflow
 from src.entrenai.config import N8NConfig, OllamaConfig  # For type hints
 
 

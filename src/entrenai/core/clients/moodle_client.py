@@ -4,13 +4,13 @@ from typing import List, Optional, Dict, Any
 from urllib.parse import urljoin
 
 from src.entrenai.config import MoodleConfig
-from src.entrenai.core.models import (
+from src.entrenai.api.models import (
     MoodleCourse,
     MoodleSection,
     MoodleModule,
     MoodleFile,
 )
-from src.entrenai.utils.logger import get_logger
+from src.entrenai.config.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -326,10 +326,6 @@ class MoodleClient:
 
             payload = {"courseid": course_id, "modules": [module_data_for_api]}
 
-            # Usar local_wsmanagesections_update_sections para añadir/actualizar módulos en una sección
-            # Esta función es más flexible si el plugin está instalado.
-            # Si no, se debería usar core_course_add_module que tiene una estructura de payload diferente.
-            # Asumiendo que el plugin está y es el método preferido.
             self._make_request("local_wsmanagesections_update_sections", payload)
 
             # Después de crear/actualizar, obtener el módulo para devolverlo con su ID

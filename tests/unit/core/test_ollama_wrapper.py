@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 import ollama  # For ollama.ResponseError
 
-from src.entrenai.core.ollama_wrapper import OllamaWrapper, OllamaWrapperError
+from src.entrenai.core.ai.ollama_wrapper import OllamaWrapper, OllamaWrapperError
 from src.entrenai.config import OllamaConfig
 
 
