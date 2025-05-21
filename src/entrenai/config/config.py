@@ -78,23 +78,36 @@ class MoodleConfig(BaseConfig):
             )
 
 
-class QdrantConfig(BaseConfig):
-    """Qdrant specific configurations."""
+class PgvectorConfig(BaseConfig):
+    """Pgvector specific configurations."""
 
     def __init__(self):
         super().__init__()
-        self.host: Optional[str] = os.getenv("QDRANT_HOST")
-        self.port: Optional[int] = int(os.getenv("QDRANT_PORT", "6333"))
-        self.grpc_port: Optional[int] = int(os.getenv("QDRANT_GRPC_PORT", "6334"))
-        self.api_key: Optional[str] = os.getenv("QDRANT_API_KEY")  # Can be None
+        self.host: Optional[str] = os.getenv("PGVECTOR_HOST")
+        self.port: Optional[int] = int(os.getenv("PGVECTOR_PORT", "5432"))
+        self.user: Optional[str] = os.getenv("PGVECTOR_USER")
+        self.password: Optional[str] = os.getenv("PGVECTOR_PASSWORD")
+        self.db_name: Optional[str] = os.getenv("PGVECTOR_DB_NAME")
         self.collection_prefix: str = os.getenv(
-            "QDRANT_COLLECTION_PREFIX", "entrenai_course_"
+            "PGVECTOR_COLLECTION_PREFIX", "entrenai_course_"
         )
         self.default_vector_size: int = int(os.getenv("DEFAULT_VECTOR_SIZE", "384"))
 
         if not self.host:
             logging.warning(
-                "Advertencia: QDRANT_HOST no está configurado en el entorno."
+                "Advertencia: PGVECTOR_HOST no está configurado en el entorno."
+            )
+        if not self.user:
+            logging.warning(
+                "Advertencia: PGVECTOR_USER no está configurado en el entorno."
+            )
+        if not self.password:
+            logging.warning(
+                "Advertencia: PGVECTOR_PASSWORD no está configurado en el entorno."
+            )
+        if not self.db_name:
+            logging.warning(
+                "Advertencia: PGVECTOR_DB_NAME no está configurado en el entorno."
             )
 
 
@@ -171,7 +184,7 @@ class N8NConfig(BaseConfig):
 # This makes them singletons for the application's lifecycle
 base_config = BaseConfig()
 moodle_config = MoodleConfig()
-qdrant_config = QdrantConfig()
+pgvector_config = PgvectorConfig()
 ollama_config = OllamaConfig()
 gemini_config = GeminiConfig()
 n8n_config = N8NConfig()

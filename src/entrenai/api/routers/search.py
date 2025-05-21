@@ -2,9 +2,9 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Dict, Optional, Any
 from pydantic import BaseModel
 
-from src.entrenai.core.db.qdrant_wrapper import QdrantWrapper
+from src.entrenai.core.db import PgvectorWrapper, PgvectorWrapperError # Updated import
 from src.entrenai.core.ai.ai_provider import get_ai_wrapper, AIProviderError
-from src.entrenai.config import qdrant_config
+from src.entrenai.config import pgvector_config # Updated import
 from src.entrenai.config.logger import get_logger
 
 logger = get_logger(__name__)
@@ -26,12 +26,12 @@ class ContextSearchRequest(BaseModel):
     query: str
     course_name: str
     limit: Optional[int] = 5
-    threshold: Optional[float] = 0.7
+    threshold: Optional[float] = 0.7 # This will be removed from search_chunks call
 
 
 # --- Dependencias ---
-def get_qdrant_wrapper() -> QdrantWrapper:
-    return QdrantWrapper(config=qdrant_config)
+def get_pgvector_wrapper() -> PgvectorWrapper: # Renamed function and updated return type
+    return PgvectorWrapper(config=pgvector_config) # Updated instantiation
 
 
 def get_ai_client():
@@ -47,21 +47,18 @@ def get_ai_client():
 @router.post("/search", response_model=SearchResponse)
 async def search_context(
     search_request: ContextSearchRequest,
-    qdrant: QdrantWrapper = Depends(get_qdrant_wrapper),
+    pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper), # Updated dependency
     ai_client=Depends(get_ai_client),
 ):
     """
-    Busca contexto relevante en la base de datos vectorial Qdrant para una consulta.
+    Busca contexto relevante en la base de datos vectorial Pgvector para una consulta.
     """
     logger.info(
         f"Buscando contexto para consulta: '{search_request.query}' "
         f"en el curso '{search_request.course_name}'"
     )
 
-    # Validar que el cliente Qdrant y el cliente AI estén disponibles
-    if not qdrant.client:
-        logger.error("Cliente Qdrant no disponible")
-        raise HTTPException(status_code=500, detail="Cliente Qdrant no disponible")
+    # Removed qdrant.client check, PgvectorWrapper handles connection internally
 
     try:
         # Generar embedding para la consulta
@@ -72,23 +69,27 @@ async def search_context(
                 status_code=500, detail="Error al generar embedding para la consulta"
             )
 
-        # Realizar búsqueda en Qdrant
-        search_results = qdrant.search_chunks(
+        # Realizar búsqueda en Pgvector
+        # Note: score_threshold is not used by PgvectorWrapper.search_chunks as implemented
+        search_results = pgvector_db.search_chunks(
             course_name=search_request.course_name,
             query_embedding=query_embedding,
-            limit=search_request.limit,
-            score_threshold=search_request.threshold,
+            limit=search_request.limit or 5, # Ensure limit has a default if None
+            # score_threshold is not a direct parameter for the current pgvector_wrapper.search_chunks
         )
 
         # Formatear resultados para la respuesta
+        # PgvectorWrapper.search_chunks returns List[Dict[str, Any]]
+        # Each dict has 'id', 'score', and 'payload' (which includes 'text', 'document_id', etc.)
         formatted_results = []
-        for result in search_results:
+        for result in search_results: # result is a dict
+            payload = result.get("payload", {})
             formatted_result = {
-                "id": result.id,
-                "score": result.score,
-                "text": result.payload.get("original_text", ""),
+                "id": result.get("id"),
+                "score": result.get("score"),
+                "text": payload.get("text", ""), # text is directly in payload
                 "metadata": {
-                    k: v for k, v in result.payload.items() if k != "original_text"
+                    k: v for k, v in payload.items() if k != "text" # Adjust to exclude 'text' from metadata
                 },
             }
             formatted_results.append(formatted_result)

@@ -52,20 +52,28 @@ services:
     networks:
       - entrenai_net
 
-  # --- Qdrant Vector Database ---
-  qdrant:
-    image: qdrant/qdrant:v1.14.0
-    container_name: entrenai_qdrant
+  # --- PGVector Database ---
+  pgvector_db:
+    image: pgvector/pgvector:pg16 # Includes pgvector extension
+    container_name: entrenai_pgvector_db
     restart: unless-stopped
     ports:
-      - "${QDRANT_HOST_HTTP_PORT:-6333}:6333" # HTTP port
-      - "${QDRANT_HOST_GRPC_PORT:-6334}:6334" # gRPC port
+      - "${PGVECTOR_HOST_PORT:-5433}:5432" # Expose on a different host port if 5432 is taken
     volumes:
-      - qdrant_data:/qdrant/storage
+      - pgvector_data:/var/lib/postgresql/data
     environment:
-      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+      POSTGRES_USER: ${PGVECTOR_USER:-pgvector_user}
+      POSTGRES_PASSWORD: ${PGVECTOR_PASSWORD:-pgvector_password}
+      POSTGRES_DB: ${PGVECTOR_DB_NAME:-pgvector_db}
+      # Optional: Command to create extension if not automatically handled by the image
+      # POSTGRES_INITDB_ARGS: "--initdb-statement='CREATE EXTENSION IF NOT EXISTS vector;'"
     networks:
       - entrenai_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-pgvector_user} -d $${POSTGRES_DB:-pgvector_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # --- Ollama LLM Server ---
   ollama:
@@ -144,7 +152,7 @@ volumes:
     driver: local
   moodle_data_dir:
     driver: local
-  qdrant_data:
+  pgvector_data: # Added for the new pgvector service
     driver: local
   ollama_models:
     driver: local

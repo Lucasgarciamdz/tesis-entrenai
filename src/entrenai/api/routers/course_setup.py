@@ -8,7 +8,7 @@ from src.entrenai.api.models import (
     HttpUrl,  # Importar MoodleModule si se va a usar para parsear respuesta de módulos
 )
 from src.entrenai.core.clients.moodle_client import MoodleClient, MoodleAPIError
-from src.entrenai.core.db.qdrant_wrapper import QdrantWrapper
+from src.entrenai.core.db import PgvectorWrapper, PgvectorWrapperError # Updated import
 from src.entrenai.core.ai.ollama_wrapper import OllamaWrapper
 from src.entrenai.core.ai.gemini_wrapper import GeminiWrapper
 from src.entrenai.core.ai.ai_provider import get_ai_wrapper, AIProviderError
@@ -18,7 +18,7 @@ from src.entrenai.core.files.file_processor import FileProcessor, FileProcessing
 from src.entrenai.core.ai.embedding_manager import EmbeddingManager
 from src.entrenai.config import (
     moodle_config,
-    qdrant_config,
+    pgvector_config, # Updated import
     ollama_config,
     gemini_config,
     base_config,
@@ -40,8 +40,8 @@ def get_moodle_client() -> MoodleClient:
     return MoodleClient(config=moodle_config)
 
 
-def get_qdrant_wrapper() -> QdrantWrapper:
-    return QdrantWrapper(config=qdrant_config)
+def get_pgvector_wrapper() -> PgvectorWrapper: # Renamed function and updated return type
+    return PgvectorWrapper(config=pgvector_config) # Updated instantiation
 
 
 def get_ai_client() -> OllamaWrapper | GeminiWrapper:
@@ -142,7 +142,7 @@ async def setup_ia_for_course(
         description="Nombre del curso para la IA (opcional, se intentará obtener de Moodle).",
     ),
     moodle: MoodleClient = Depends(get_moodle_client),
-    qdrant: QdrantWrapper = Depends(get_qdrant_wrapper),
+    pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper), # Updated dependency
     ai_client=Depends(get_ai_client),
     n8n: N8NClient = Depends(get_n8n_client),
 ):
@@ -201,8 +201,8 @@ async def setup_ia_for_course(
             detail=f"No se pudo determinar el nombre del curso {course_id}.",
         )
 
-    vector_size = qdrant_config.default_vector_size
-    qdrant_collection_name = qdrant.get_collection_name(course_name_str)
+    vector_size = pgvector_config.default_vector_size # Updated config usage
+    pgvector_table_name = pgvector_db.get_table_name(course_name_str) # Updated method call
 
     moodle_section_name_desired = (
         moodle_config.course_folder_name
@@ -215,23 +215,22 @@ async def setup_ia_for_course(
         course_id=course_id,
         status="pendiente",
         message=f"Configuración iniciada para el curso {course_id} ('{course_name_str}').",
-        qdrant_collection_name=qdrant_collection_name,
+        qdrant_collection_name=pgvector_table_name, # Renamed field for clarity, though model might not reflect this directly
     )
 
     try:
         logger.info(
-            f"Asegurando colección Qdrant '{qdrant_collection_name}' para curso '{course_name_str}' con tamaño de vector {vector_size}"
+            f"Asegurando tabla Pgvector '{pgvector_table_name}' para curso '{course_name_str}' con tamaño de vector {vector_size}"
         )
-        if not qdrant.client:
-            raise HTTPException(status_code=500, detail="Cliente Qdrant no disponible.")
-        if not qdrant.ensure_collection(course_name_str, vector_size):
+        # Removed qdrant.client check as PgvectorWrapper handles connection internally
+        if not pgvector_db.ensure_table(course_name_str, vector_size): # Updated method call
             response_details.status = "fallido"
             response_details.message = (
-                f"Falló al asegurar la colección Qdrant '{qdrant_collection_name}'."
+                f"Falló al asegurar la tabla Pgvector '{pgvector_table_name}'."
             )
             logger.error(response_details.message)
             raise HTTPException(status_code=500, detail=response_details.message)
-        logger.info(f"Colección Qdrant '{qdrant_collection_name}' asegurada.")
+        logger.info(f"Tabla Pgvector '{pgvector_table_name}' asegurada.")
 
         logger.info(
             f"Configurando workflow de chat N8N para curso '{course_name_str}' (ID: {course_id})"
@@ -252,7 +251,7 @@ async def setup_ia_for_course(
             }
 
         n8n_chat_url_str = n8n.configure_and_deploy_chat_workflow(
-            course_id, course_name_str, qdrant_collection_name, ai_params
+            course_id, course_name_str, pgvector_table_name, ai_params # Updated variable
         )
 
         if not n8n_chat_url_str:
@@ -367,7 +366,7 @@ async def refresh_course_files(
     course_id: int,
     moodle: MoodleClient = Depends(get_moodle_client),
     file_tracker: FileTracker = Depends(get_file_tracker),
-    qdrant: QdrantWrapper = Depends(get_qdrant_wrapper),
+    pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper), # Updated dependency
     ai_client: OllamaWrapper | GeminiWrapper = Depends(get_ai_client),
     embedding_manager: EmbeddingManager = Depends(get_embedding_manager),
     file_processor: FileProcessor = Depends(get_file_processor),
@@ -377,44 +376,44 @@ async def refresh_course_files(
         f"Iniciando proceso de refresco de archivos para el curso ID: {course_id}"
     )
 
-    # Obtener nombre del curso para Qdrant
-    course_name_for_qdrant: Optional[str] = None
+    # Obtener nombre del curso para Pgvector
+    course_name_for_pgvector: Optional[str] = None # Renamed variable
     try:
         logger.info(
-            f"Obteniendo nombre del curso {course_id} para operaciones de Qdrant..."
+            f"Obteniendo nombre del curso {course_id} para operaciones de Pgvector..."
         )
         target_user_id_for_name = moodle_config.default_teacher_id
         if target_user_id_for_name:
             courses = moodle.get_courses_by_user(user_id=target_user_id_for_name)
             course = next((c for c in courses if c.id == course_id), None)
             if course:
-                course_name_for_qdrant = course.displayname or course.fullname
-        if not course_name_for_qdrant:
+                course_name_for_pgvector = course.displayname or course.fullname
+        if not course_name_for_pgvector:
             all_courses = moodle.get_all_courses()
             course = next((c for c in all_courses if c.id == course_id), None)
             if course:
-                course_name_for_qdrant = course.displayname or course.fullname
+                course_name_for_pgvector = course.displayname or course.fullname
 
-        if not course_name_for_qdrant:
-            course_name_for_qdrant = f"Curso_{course_id}"
+        if not course_name_for_pgvector:
+            course_name_for_pgvector = f"Curso_{course_id}"
             logger.warning(
-                f"No se pudo obtener el nombre para el curso ID {course_id}, usando fallback: '{course_name_for_qdrant}' para Qdrant."
+                f"No se pudo obtener el nombre para el curso ID {course_id}, usando fallback: '{course_name_for_pgvector}' para Pgvector."
             )
         else:
-            logger.info(f"Nombre del curso para Qdrant: '{course_name_for_qdrant}'")
+            logger.info(f"Nombre del curso para Pgvector: '{course_name_for_pgvector}'")
     except Exception as e:
         logger.error(
-            f"Error al obtener el nombre del curso {course_id} para Qdrant: {e}"
+            f"Error al obtener el nombre del curso {course_id} para Pgvector: {e}"
         )
         raise HTTPException(
             status_code=500,
-            detail=f"No se pudo determinar el nombre del curso {course_id} para operaciones de Qdrant.",
+            detail=f"No se pudo determinar el nombre del curso {course_id} para operaciones de Pgvector.",
         )
 
-    if not course_name_for_qdrant:
+    if not course_name_for_pgvector:
         raise HTTPException(
             status_code=500,
-            detail=f"Nombre del curso para Qdrant es inválido para el curso ID {course_id}.",
+            detail=f"Nombre del curso para Pgvector es inválido para el curso ID {course_id}.",
         )
 
     target_section_name = moodle_config.course_folder_name
@@ -427,21 +426,21 @@ async def refresh_course_files(
     course_download_dir = Path(base_config.download_dir) / str(course_id)
 
     try:
-        # Asegurar que existe la colección de Qdrant antes de procesar archivos
-        vector_size = qdrant_config.default_vector_size
+        # Asegurar que existe la tabla de Pgvector antes de procesar archivos
+        vector_size = pgvector_config.default_vector_size # Updated config usage
         logger.info(
-            f"Asegurando colección Qdrant para curso {course_id} con tamaño de vector {vector_size}"
+            f"Asegurando tabla Pgvector para curso {course_id} ('{course_name_for_pgvector}') con tamaño de vector {vector_size}"
         )
-        if not qdrant.ensure_collection(course_name_for_qdrant, vector_size):
+        if not pgvector_db.ensure_table(course_name_for_pgvector, vector_size): # Updated method call
             logger.error(
-                f"Falló al asegurar la colección Qdrant para el curso {course_id}"
+                f"Falló al asegurar la tabla Pgvector para el curso {course_id} ('{course_name_for_pgvector}')"
             )
             raise HTTPException(
                 status_code=500,
-                detail=f"Falló al asegurar la colección Qdrant para el curso {course_id}",
+                detail=f"Falló al asegurar la tabla Pgvector para el curso {course_id} ('{course_name_for_pgvector}')",
             )
         logger.info(
-            f"Colección Qdrant '{qdrant.get_collection_name(course_name_for_qdrant)}' asegurada."
+            f"Tabla Pgvector '{pgvector_db.get_table_name(course_name_for_pgvector)}' asegurada."
         )
 
         # Obtener todos los contenidos del curso para encontrar la sección y módulos
@@ -587,9 +586,9 @@ async def refresh_course_files(
                         )
 
                     final_texts, final_embeddings = zip(*valid_data)
-                    qdrant_chunks = (
-                        embedding_manager.prepare_document_chunks_for_qdrant(
-                            course_id,
+                    db_chunks = ( # Renamed variable
+                        embedding_manager.prepare_document_chunks_for_vector_db( # Updated method call
+                            course_id, # Keep course_id here as per EmbeddingManager's current signature
                             mf.filename,
                             mf.filename,
                             mf.filename,
@@ -598,21 +597,21 @@ async def refresh_course_files(
                         )
                     )
 
-                    if qdrant_chunks:
-                        # Usar course_name_for_qdrant en lugar de course_id
-                        if qdrant.upsert_chunks(course_name_for_qdrant, qdrant_chunks):
+                    if db_chunks:
+                        # Usar course_name_for_pgvector en lugar de course_id para la interacción con Pgvector
+                        if pgvector_db.upsert_chunks(course_name_for_pgvector, db_chunks): # Updated method call
                             logger.info(
-                                f"Insertados/actualizados {len(qdrant_chunks)} chunks para {mf.filename}."
+                                f"Insertados/actualizados {len(db_chunks)} chunks para {mf.filename} en Pgvector."
                             )
-                            total_chunks_upserted_count += len(qdrant_chunks)
-                            file_summary["chunks_upserted"] = len(qdrant_chunks)
+                            total_chunks_upserted_count += len(db_chunks)
+                            file_summary["chunks_upserted"] = len(db_chunks)
                         else:
                             logger.error(
-                                f"Falló el upsert a Qdrant para {mf.filename}."
+                                f"Falló el upsert a Pgvector para {mf.filename}."
                             )
-                            file_summary["status"] = "qdrant_upsert_fallido"
+                            file_summary["status"] = "pgvector_upsert_fallido"
                             raise FileProcessingError(
-                                f"Falló el upsert a Qdrant para {mf.filename}"
+                                f"Falló el upsert a Pgvector para {mf.filename}"
                             )
 
                     file_tracker.mark_file_as_processed(

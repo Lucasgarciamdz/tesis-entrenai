@@ -10,7 +10,6 @@ requests
 aiohttp # For async requests, if needed later
 
 # Qdrant client
-qdrant-client
 
 # Ollama client
 ollama
@@ -35,6 +34,9 @@ chardet
 # Moodle (No client library specified, will use requests. Add if a specific client is found/needed)
 
 # N8N (No client library specified, will use requests. Add if a specific client is found/needed)
+
+# pgvector
+pgvector
 
 # Generic
 uv
