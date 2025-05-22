@@ -177,6 +177,18 @@ class N8NConfig(BaseConfig):
             logging.warning("Advertencia: N8N_URL no está configurado en el entorno.")
 
 
+class CeleryConfig(BaseConfig):
+    """Celery specific configurations."""
+
+    def __init__(self):
+        super().__init__()
+        self.broker_url: str = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
+        self.result_backend: str = os.getenv(
+            "CELERY_RESULT_BACKEND", "redis://localhost:6379/0"
+        )
+        # Consider adding other Celery settings if needed, e.g., task visibility timeout
+
+
 # Instantiate configurations for easy import elsewhere
 # This makes them singletons for the application's lifecycle
 base_config = BaseConfig()
@@ -185,6 +197,7 @@ pgvector_config = PgvectorConfig()
 ollama_config = OllamaConfig()
 gemini_config = GeminiConfig()
 n8n_config = N8NConfig()
+celery_config = CeleryConfig()
 
 # Example of how to use:
 # from entrenai.config import moodle_config

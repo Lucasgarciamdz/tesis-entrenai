@@ -24,6 +24,7 @@ help:
 	@echo "  services-down  : Stop Docker Compose services"
 	@echo "  services-logs  : View logs for Docker Compose services"
 	@echo "  services-restart: Restart Docker Compose services"
+	@echo "  run-celery-worker: Run a Celery worker locally"
 
 setup: $(VENV_DIR)/bin/activate
 $(VENV_DIR)/bin/activate: requirements.txt
@@ -36,6 +37,10 @@ $(VENV_DIR)/bin/activate: requirements.txt
 run: $(VENV_DIR)/bin/activate .env
 	@echo "Starting FastAPI application..."
 	$(VENV_ACTIVATE); uvicorn src.entrenai.api.main:app $(RUN_ARGS)
+
+run-celery-worker: $(VENV_DIR)/bin/activate .env
+	@echo "Starting Celery worker..."
+	$(VENV_ACTIVATE); celery -A src.entrenai.celery_app.app worker -l INFO -P eventlet
 
 test: $(VENV_DIR)/bin/activate
 	@echo "Running tests..."
