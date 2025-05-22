@@ -94,4 +94,14 @@ class CourseSetupResponse(BaseModel):
     n8n_chat_url: Optional[HttpUrl] = None
 
 
+class IndexedFile(BaseModel):
+    filename: str
+    last_modified_moodle: int
+
+
+class DeleteFileResponse(BaseModel):
+    message: str
+    detail: Optional[str] = None
+
+
 # Add other models as needed for API interactions, internal data structures, etc.
