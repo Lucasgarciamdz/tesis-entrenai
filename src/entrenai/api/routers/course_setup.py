@@ -9,21 +9,24 @@ from src.entrenai.api.models import (
 )
 from src.entrenai.core.clients.moodle_client import MoodleClient, MoodleAPIError
 from src.entrenai.core.db import PgvectorWrapper, PgvectorWrapperError # Updated import
-from src.entrenai.core.ai.ollama_wrapper import OllamaWrapper
-from src.entrenai.core.ai.gemini_wrapper import GeminiWrapper
+from src.entrenai.core.ai.ollama_wrapper import OllamaWrapper # Keep for type hint if get_ai_client stays
+from src.entrenai.core.ai.gemini_wrapper import GeminiWrapper # Keep for type hint if get_ai_client stays
 from src.entrenai.core.ai.ai_provider import get_ai_wrapper, AIProviderError
 from src.entrenai.core.clients.n8n_client import N8NClient
 # from src.entrenai.core.files.file_tracker import FileTracker # Removed
-from src.entrenai.core.files.file_processor import FileProcessor, FileProcessingError
-from src.entrenai.core.ai.embedding_manager import EmbeddingManager
+# from src.entrenai.core.files.file_processor import FileProcessor, FileProcessingError # Removed if not used directly
+# from src.entrenai.core.ai.embedding_manager import EmbeddingManager # Removed if not used directly
 from src.entrenai.config import (
     moodle_config,
-    pgvector_config, # Updated import
+    pgvector_config,
     ollama_config,
     gemini_config,
     base_config,
     n8n_config,
 )
+from src.entrenai.core.tasks import process_moodle_file_task # Import Celery task
+from src.entrenai.celery_app import app as celery_app # Import Celery app instance
+from celery.result import AsyncResult # Import AsyncResult
 from src.entrenai.config.logger import get_logger
 from pathlib import Path
 
@@ -84,14 +87,13 @@ def get_n8n_client() -> N8NClient:
 #     return FileTracker(db_path=Path(base_config.file_tracker_db_path)) # Removed
 
 
-def get_file_processor() -> FileProcessor:
-    return FileProcessor()
+# def get_file_processor() -> FileProcessor: # Removed as file_processor dependency is removed
+#     return FileProcessor()
 
-
-def get_embedding_manager(
-    ai_client=Depends(get_ai_client),
-) -> EmbeddingManager:
-    return EmbeddingManager(ollama_wrapper=ai_client)
+# def get_embedding_manager( # Removed as embedding_manager dependency is removed
+#     ai_client=Depends(get_ai_client),
+# ) -> EmbeddingManager:
+#     return EmbeddingManager(ollama_wrapper=ai_client)
 
 
 @router.get("/courses", response_model=List[MoodleCourse])
@@ -365,19 +367,36 @@ async def setup_ia_for_course(
 async def refresh_course_files(
     course_id: int,
     moodle: MoodleClient = Depends(get_moodle_client),
-    # file_tracker: FileTracker = Depends(get_file_tracker), # Removed
-    pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper), 
-    ai_client: OllamaWrapper | GeminiWrapper = Depends(get_ai_client),
-    embedding_manager: EmbeddingManager = Depends(get_embedding_manager),
-    file_processor: FileProcessor = Depends(get_file_processor),
+    pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper),
+    # ai_client: OllamaWrapper | GeminiWrapper = Depends(get_ai_client), # Removed, task handles AI client
+    # embedding_manager: EmbeddingManager = Depends(get_embedding_manager), # Removed, task handles embeddings
+    # file_processor: FileProcessor = Depends(get_file_processor), # Removed, task handles file processing
 ):
-    """Refresca y procesa los archivos de un curso, actualizando la base de conocimiento de la IA."""
+    """
+    Inicia el refresco y procesamiento asíncrono de archivos para un curso.
+
+    Esta operación identifica archivos nuevos o modificados en la carpeta designada
+    del curso en Moodle y despacha tareas Celery individuales para procesar cada archivo.
+    El procesamiento incluye la descarga, extracción de texto, formateo a Markdown,
+    generación de embeddings y almacenamiento en la base de datos vectorial (Pgvector).
+
+    La API responde inmediatamente con una lista de IDs de las tareas despachadas,
+    permitiendo al cliente rastrear el progreso de forma asíncrona usando el endpoint
+    `/api/v1/task/{task_id}/status`.
+
+    Respuesta:
+    - `message`: Mensaje indicando el inicio del proceso y el número de tareas despachadas.
+    - `course_id`: ID del curso.
+    - `files_identified_for_processing`: Número de archivos que se determinó necesitan procesamiento.
+    - `tasks_dispatched`: Número de tareas Celery efectivamente despachadas.
+    - `task_ids`: Lista de strings, donde cada string es el ID de una tarea Celery despachada.
+    """
     logger.info(
         f"Iniciando proceso de refresco de archivos para el curso ID: {course_id}"
     )
 
     # Obtener nombre del curso para Pgvector
-    course_name_for_pgvector: Optional[str] = None # Renamed variable
+    course_name_for_pgvector: Optional[str] = None
     try:
         logger.info(
             f"Obteniendo nombre del curso {course_id} para operaciones de Pgvector..."
@@ -417,16 +436,15 @@ async def refresh_course_files(
         )
 
     target_section_name = moodle_config.course_folder_name
-    target_folder_name = "Documentos Entrenai"
+    target_folder_name = "Documentos Entrenai" # As defined in setup_ia_for_course
 
     files_to_process_count = 0
-    successfully_processed_count = 0
-    total_chunks_upserted_count = 0
-    processed_files_summary: List[Dict[str, Any]] = []
+    tasks_dispatched_count = 0
+    dispatched_task_ids: List[str] = [] # To store IDs of dispatched tasks
     course_download_dir = Path(base_config.download_dir) / str(course_id)
 
     try:
-        # Asegurar que existe la tabla de Pgvector antes de procesar archivos
+        # 1. Asegurar que existe la tabla de Pgvector antes de procesar archivos
         vector_size = pgvector_config.default_vector_size # Updated config usage
         logger.info(
             f"Asegurando tabla Pgvector para curso {course_id} ('{course_name_for_pgvector}') con tamaño de vector {vector_size}"
@@ -443,7 +461,7 @@ async def refresh_course_files(
             f"Tabla Pgvector '{pgvector_db.get_table_name(course_name_for_pgvector)}' asegurada."
         )
 
-        # Obtener todos los contenidos del curso para encontrar la sección y módulos
+        # 2. Obtener todos los contenidos del curso para encontrar la sección y módulos
         all_course_contents = moodle._make_request(
             "core_course_get_contents", payload_params={"courseid": course_id}
         )
@@ -453,7 +471,7 @@ async def refresh_course_files(
                 detail="No se pudieron obtener los contenidos del curso.",
             )
 
-        # Buscar la sección objetivo por nombre
+        # 3. Buscar la sección objetivo por nombre
         found_section_id: Optional[int] = None
         for section_data in all_course_contents:
             if section_data.get("name") == target_section_name:
@@ -472,7 +490,7 @@ async def refresh_course_files(
             f"Sección '{target_section_name}' encontrada con ID: {found_section_id}."
         )
 
-        # Encontrar el módulo de carpeta en la sección
+        # 4. Encontrar el módulo de carpeta en la sección
         folder_module = moodle.get_course_module_by_name(
             course_id, found_section_id, target_folder_name, "folder"
         )
@@ -490,193 +508,164 @@ async def refresh_course_files(
             f"Carpeta '{target_folder_name}' encontrada con cmid: {folder_cmid}."
         )
 
-        # Obtener los archivos de la carpeta
+        # 5. Obtener los archivos de la carpeta
         moodle_files = moodle.get_folder_files(folder_cmid=folder_cmid)
         if not moodle_files:
             logger.info(
                 f"No se encontraron archivos en la carpeta '{target_folder_name}' (cmid: {folder_cmid})."
             )
             return {
-                "message": "No se encontraron archivos en la carpeta designada de Moodle.",
-                "files_checked": 0,
-                "files_processed": 0,
-                "total_chunks_upserted": 0,
+                "message": "No se encontraron archivos en la carpeta designada de Moodle para procesar.",
+                "course_id": course_id,
+                "files_identified_for_processing": 0,
+                "tasks_dispatched": 0,
             }
 
         logger.info(
             f"Se encontraron {len(moodle_files)} archivos en la carpeta de Moodle. Verificando archivos nuevos/modificados..."
         )
-        course_download_dir.mkdir(parents=True, exist_ok=True)
+        course_download_dir.mkdir(parents=True, exist_ok=True) # Ensure download dir for the course exists
 
+        # 6. Loop through Moodle files and dispatch tasks
         for mf in moodle_files:
-            file_summary: Dict[str, Any] = {
-                "filename": mf.filename,
-                "status": "omitido_sin_cambios",
-            }
-            downloaded_path: Optional[Path] = None
-            try:
-                if not mf.filename or not mf.fileurl or mf.timemodified is None:
-                    logger.warning(
-                        f"Omitiendo archivo de Moodle con datos incompletos: {mf.model_dump_json()}"
+            if not mf.filename or not mf.fileurl or mf.timemodified is None:
+                logger.warning(
+                    f"Omitiendo archivo de Moodle con datos incompletos: {mf.model_dump_json(exclude_none=True)}"
+                )
+                continue
+
+            if pgvector_db.is_file_new_or_modified(
+                course_id, mf.filename, mf.timemodified
+            ):
+                files_to_process_count += 1
+                logger.info(
+                    f"Archivo '{mf.filename}' es nuevo o modificado. Despachando tarea Celery..."
+                )
+
+                # Prepare AI provider configuration
+                ai_provider_config_payload: Dict[str, Any] = {
+                    "selected_provider": base_config.ai_provider
+                }
+                if base_config.ai_provider == "gemini":
+                    ai_provider_config_payload["gemini"] = gemini_config.model_dump()
+                else: # Default to ollama
+                    ai_provider_config_payload["ollama"] = ollama_config.model_dump()
+
+                # Dispatch Celery task
+                try:
+                    task_result = process_moodle_file_task.delay(
+                        course_id=course_id,
+                        course_name_for_pgvector=course_name_for_pgvector,
+                        moodle_file_info=mf.model_dump(),
+                        download_dir_str=str(course_download_dir),
+                        ai_provider_config=ai_provider_config_payload,
+                        pgvector_config_dict=pgvector_config.model_dump(),
+                        moodle_config_dict=moodle_config.model_dump(),
+                        base_config_dict=base_config.model_dump(),
                     )
-                    file_summary["status"] = "omitido_datos_incompletos"
-                    processed_files_summary.append(file_summary)
-                    continue
+                    tasks_dispatched_count += 1
+                    dispatched_task_ids.append(task_result.id)
+                    logger.info(f"Tarea Celery {task_result.id} despachada para archivo: {mf.filename}")
+                except Exception as e_task:
+                    logger.error(f"Error al despachar tarea Celery para {mf.filename}: {e_task}")
+                    # Potentially add to a list of failed dispatches if needed for response
 
-                if pgvector_db.is_file_new_or_modified( # Changed from file_tracker to pgvector_db
-                    course_id, mf.filename, mf.timemodified
-                ):
-                    files_to_process_count += 1
-                    logger.info(
-                        f"Archivo '{mf.filename}' es nuevo o modificado. Procesando..."
-                    )
+            else:
+                logger.info(f"Archivo '{mf.filename}' no ha sido modificado. Omitiendo.")
 
-                    downloaded_path = moodle.download_file(
-                        str(mf.fileurl), course_download_dir, mf.filename
-                    )
-                    logger.info(
-                        f"Descargado exitosamente: {mf.filename} a {downloaded_path}"
-                    )
-
-                    raw_text = file_processor.process_file(downloaded_path)
-                    if not raw_text:
-                        logger.error(f"Extracción de texto falló para {mf.filename}.")
-                        file_summary["status"] = "extraccion_texto_fallida"
-                        raise FileProcessingError(
-                            f"Extracción de texto falló para {mf.filename}"
-                        )
-
-                    markdown_text = ai_client.format_to_markdown(
-                        raw_text, save_path=str(Path(base_config.data_dir) / "markdown")
-                    )
-                    logger.info(
-                        f"Formateado a Markdown para {mf.filename} (longitud: {len(markdown_text)})"
-                    )
-
-                    text_chunks = embedding_manager.split_text_into_chunks(
-                        markdown_text
-                    )
-                    if not text_chunks:
-                        logger.warning(f"No se generaron chunks para {mf.filename}.")
-                        file_summary["status"] = "no_se_generaron_chunks"
-                        raise FileProcessingError(
-                            f"No se generaron chunks para {mf.filename}"
-                        )
-
-                    contextualized_chunks = [
-                        embedding_manager.contextualize_chunk(
-                            c, mf.filename, mf.filename
-                        )
-                        for c in text_chunks
-                    ]
-                    embeddings_list = embedding_manager.generate_embeddings_for_chunks(
-                        contextualized_chunks
-                    )
-
-                    valid_data = [
-                        (ctx_c, emb)
-                        for ctx_c, emb in zip(contextualized_chunks, embeddings_list)
-                        if emb
-                    ]
-                    if not valid_data:
-                        logger.warning(f"No hay embeddings válidos para {mf.filename}.")
-                        file_summary["status"] = "generacion_embedding_fallida"
-                        raise FileProcessingError(
-                            f"No hay embeddings válidos para {mf.filename}"
-                        )
-
-                    final_texts, final_embeddings = zip(*valid_data)
-                    db_chunks = ( # Renamed variable
-                        embedding_manager.prepare_document_chunks_for_vector_db( # Updated method call
-                            course_id, # Keep course_id here as per EmbeddingManager's current signature
-                            mf.filename,
-                            mf.filename,
-                            mf.filename,
-                            list(final_texts),
-                            list(final_embeddings),
-                        )
-                    )
-
-                    if db_chunks:
-                        # Usar course_name_for_pgvector en lugar de course_id para la interacción con Pgvector
-                        if pgvector_db.upsert_chunks(course_name_for_pgvector, db_chunks): # Updated method call
-                            logger.info(
-                                f"Insertados/actualizados {len(db_chunks)} chunks para {mf.filename} en Pgvector."
-                            )
-                            total_chunks_upserted_count += len(db_chunks)
-                            file_summary["chunks_upserted"] = len(db_chunks)
-                        else:
-                            logger.error(
-                                f"Falló el upsert a Pgvector para {mf.filename}."
-                            )
-                            file_summary["status"] = "pgvector_upsert_fallido"
-                            raise FileProcessingError(
-                                f"Falló el upsert a Pgvector para {mf.filename}"
-                            )
-
-                    pgvector_db.mark_file_as_processed( # Changed from file_tracker to pgvector_db
-                        course_id, mf.filename, mf.timemodified
-                    )
-                    successfully_processed_count += 1
-                    file_summary["status"] = "procesado_exitosamente"
-            except (MoodleAPIError, FileProcessingError, Exception) as e:
-                logger.error(f"Error procesando archivo '{mf.filename}': {e}")
-                if (
-                    "status" not in file_summary
-                    or file_summary["status"] == "omitido_sin_cambios"
-                ):
-                    file_summary["status"] = f"error: {str(e)}"
-            # finally:
-            #     if downloaded_path and downloaded_path.exists():
-            #         try:
-            #             downloaded_path.unlink()
-            #             logger.debug(f"Archivo temporal eliminado: {downloaded_path}")
-            #         except OSError as e_unlink:
-            #             logger.error(f"Error eliminando archivo temporal {downloaded_path}: {e_unlink}")
-            processed_files_summary.append(file_summary)
-
+        # 7. Cleanup (optional, as tasks handle individual file cleanup)
+        # The main course_download_dir might still be useful for tasks if they are slow to pick up
+        # Or if multiple tasks share it. Consider if cleanup here is still needed.
+        # For now, individual tasks clean up their own downloaded files.
+        # If the directory is meant to be cleaned only if empty:
         try:
             if course_download_dir.exists() and not any(course_download_dir.iterdir()):
-                shutil.rmtree(course_download_dir)
-                logger.info(
-                    f"Directorio de descargas del curso vacío eliminado: {course_download_dir}"
-                )
+                # This check might be problematic if tasks haven't run yet.
+                # Consider if this cleanup is still appropriate here.
+                # shutil.rmtree(course_download_dir)
+                # logger.info(
+                #     f"Directorio de descargas del curso vacío (aparentemente) eliminado: {course_download_dir}"
+                # )
+                logger.info(f"Revisión de directorio de descargas {course_download_dir} completada. Las tareas gestionarán los archivos individuales.")
         except Exception as e_rm:
             logger.warning(
-                f"No se pudo eliminar el directorio de descargas del curso {course_download_dir}: {e_rm}"
+                f"No se pudo realizar la limpieza del directorio de descargas del curso {course_download_dir}: {e_rm}"
             )
 
-        msg = (
-            f"Refresco de archivos completado para el curso {course_id}. "
-            f"Archivos verificados: {len(moodle_files)}. "
-            f"Se intentaron procesar {files_to_process_count} archivos nuevos/modificados. "
-            f"Procesados exitosamente e incrustados: {successfully_processed_count} archivos. "
-            f"Total de chunks insertados/actualizados: {total_chunks_upserted_count}."
+        # 8. Prepare and return response
+        response_message = (
+            f"Refresco de archivos iniciado para el curso {course_id}. "
+            f"{tasks_dispatched_count} tareas despachadas para {files_to_process_count} archivos identificados para procesamiento."
         )
-        logger.info(msg)
+        logger.info(response_message)
         return {
-            "message": msg,
-            "files_checked": len(moodle_files),
-            "files_to_process": files_to_process_count,
-            "files_processed_successfully": successfully_processed_count,
-            "total_chunks_upserted": total_chunks_upserted_count,
-            "processed_files_details": processed_files_summary,
+            "message": response_message,
+            "course_id": course_id,
+            "files_identified_for_processing": files_to_process_count,
+            "tasks_dispatched": tasks_dispatched_count,
+            "task_ids": dispatched_task_ids,
         }
 
     except HTTPException as http_exc:
         logger.error(
-            f"HTTPException durante refresco de archivos para curso {course_id}: {http_exc.detail}"
+            f"HTTPException durante el inicio del refresco de archivos para curso {course_id}: {http_exc.detail}"
         )
         raise http_exc
     except MoodleAPIError as e:
         logger.error(
-            f"Error de API de Moodle durante refresco de archivos para curso {course_id}: {e}"
+            f"Error de API de Moodle durante el inicio del refresco de archivos para curso {course_id}: {e}"
         )
         raise HTTPException(status_code=502, detail=f"Error de API de Moodle: {str(e)}")
     except Exception as e:
         logger.exception(
-            f"Error inesperado durante refresco de archivos para curso {course_id}: {e}"
+            f"Error inesperado durante el inicio del refresco de archivos para curso {course_id}: {e}"
         )
         raise HTTPException(
             status_code=500, detail=f"Error interno del servidor: {str(e)}"
         )
+
+
+@router.get("/task/{task_id}/status", name="get_task_status")
+async def get_task_status(task_id: str):
+    """
+    Consulta el estado de una tarea Celery específica por su ID.
+
+    Permite rastrear el progreso de las tareas de procesamiento de archivos despachadas
+    por el endpoint `refresh_course_files`.
+
+    Args:
+        task_id (str): El ID de la tarea Celery a consultar.
+
+    Returns:
+        dict: Un diccionario con la información del estado de la tarea:
+            - `task_id` (str): El ID de la tarea consultada.
+            - `status` (str): El estado actual de la tarea (ej. "PENDING", "STARTED", 
+                              "SUCCESS", "FAILURE", "RETRY", "REVOKED").
+            - `result` (Any): El resultado de la tarea.
+                - Si `status` es "SUCCESS", este es el valor de retorno de la función de la tarea.
+                - Si `status` es "FAILURE", este es la representación string de la excepción.
+                - Para otros estados, puede ser `None` o información de estado intermedio.
+            - `traceback` (str, optional): Si la tarea falló (`status`="FAILURE"),
+              esto contendrá el traceback de la excepción. `None` en otros casos.
+    """
+    logger.info(f"Consultando estado para la tarea ID: {task_id}")
+    task_result = AsyncResult(task_id, app=celery_app)
+
+    status_response = {
+        "task_id": task_id,
+        "status": task_result.status,
+        "result": None,
+        "traceback": None,
+    }
+
+    if task_result.successful():
+        status_response["result"] = task_result.result
+    elif task_result.failed():
+        status_response["result"] = str(task_result.result) # Exception object as string
+        status_response["traceback"] = task_result.traceback
+    else:
+        # For PENDING, STARTED, RETRY, REVOKED, result is often None or not the final outcome
+        status_response["result"] = task_result.result if task_result.result else None
+
+    logger.debug(f"Estado de la tarea {task_id}: {status_response}")
+    return status_response
