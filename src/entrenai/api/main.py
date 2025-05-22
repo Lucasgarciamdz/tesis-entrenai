@@ -5,6 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.entrenai.config.logger import get_logger
 from src.entrenai.config import base_config
 
+# Direct imports to avoid potential circular imports
+import src.entrenai.api.routers.course_setup as course_setup
+import src.entrenai.api.routers.search as search
+
 # Initialize logger for this module
 logger = get_logger(__name__)
 
@@ -57,9 +61,7 @@ async def health_check():
 # from .routers import some_router
 # app.include_router(some_router.router, prefix="/items", tags=["items"])
 
-# Import and include routers
-from src.entrenai.api.routers import course_setup, search
-
+# Include routers
 app.include_router(course_setup.router)
 app.include_router(search.router)
 

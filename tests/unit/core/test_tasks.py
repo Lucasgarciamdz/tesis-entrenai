@@ -1,61 +1,79 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
-from src.entrenai.core.tasks import process_moodle_file_task
 # from src.entrenai.db.models import MoodleFile # If needed for constructing moodle_file_info
 
 # It's good practice to have sample data available for tests
 SAMPLE_MOODLE_FILE_INFO = {
     "filename": "test_document.pdf",
     "fileurl": "http://example.com/test_document.pdf",
-    "timemodified": 1678886400, # Example timestamp
+    "timemodified": 1678886400,  # Example timestamp
     "contextid": 100,
     "component": "mod_folder",
     "filearea": "content",
     "itemid": 123,
     "license": "allrightsreserved",
     "author": "Test User",
-    "source": "", # Usually empty or a URL
+    "source": "",  # Usually empty or a URL
 }
 
 SAMPLE_PGVECTOR_CONFIG_DICT = {
-    "host": "localhost", "port": 5432, "user": "test", "password": "test", "db_name": "test_db",
-    "collection_prefix": "test_course_", "default_vector_size": 384,
+    "host": "localhost",
+    "port": 5432,
+    "user": "test",
+    "password": "test",
+    "db_name": "test_db",
+    "collection_prefix": "test_course_",
+    "default_vector_size": 384,
 }
 SAMPLE_MOODLE_CONFIG_DICT = {
-    "url": "http://moodle.example.com", "token": "test_token",
-    "course_folder_name": "Entrenai Docs", "refresh_link_name": "Refresh", "chat_link_name": "Chat",
+    "url": "http://moodle.example.com",
+    "token": "test_token",
+    "course_folder_name": "Entrenai Docs",
+    "refresh_link_name": "Refresh",
+    "chat_link_name": "Chat",
     "default_teacher_id": 1,
 }
 SAMPLE_AI_PROVIDER_CONFIG_OLLAMA = {
     "selected_provider": "ollama",
-    "ollama": {"host": "http://ollama:11434", "embedding_model": "nomic-embed-text", "markdown_model": "llama3", "qa_model": "llama3", "context_model": "llama3"},
+    "ollama": {
+        "host": "http://ollama:11434",
+        "embedding_model": "nomic-embed-text",
+        "markdown_model": "llama3",
+        "qa_model": "llama3",
+        "context_model": "llama3",
+    },
 }
 SAMPLE_BASE_CONFIG_DICT = {
-    "log_level": "INFO", "fastapi_host": "0.0.0.0", "fastapi_port": 8000,
-    "data_dir": "test_data", "download_dir": "test_data/downloads",
+    "log_level": "INFO",
+    "fastapi_host": "0.0.0.0",
+    "fastapi_port": 8000,
+    "data_dir": "test_data",
+    "download_dir": "test_data/downloads",
     "ai_provider": "ollama",
 }
 
 
 @pytest.fixture
 def mock_celery_task_instance():
-    """ Mocks the bound Celery task instance (self) """
+    """Mocks the bound Celery task instance (self)"""
     task_instance = MagicMock()
     task_instance.request.id = "test_task_id_123"
     return task_instance
 
+
 @pytest.fixture
 def mock_dependencies():
-    """ Mocks all external dependencies for the task """
-    with patch('src.entrenai.core.tasks.MoodleClient') as MockMoodleClient, \
-         patch('src.entrenai.core.tasks.PgvectorWrapper') as MockPgvectorWrapper, \
-         patch('src.entrenai.core.tasks.FileProcessor') as MockFileProcessor, \
-         patch('src.entrenai.core.tasks.OllamaWrapper') as MockOllamaWrapper, \
-         patch('src.entrenai.core.tasks.GeminiWrapper') as MockGeminiWrapper, \
-         patch('src.entrenai.core.tasks.EmbeddingManager') as MockEmbeddingManager, \
-         patch('src.entrenai.core.tasks.Path') as MockPath:
-
+    """Mocks all external dependencies for the task"""
+    with (
+        patch("src.entrenai.core.tasks.MoodleClient") as MockMoodleClient,
+        patch("src.entrenai.core.tasks.PgvectorWrapper") as MockPgvectorWrapper,
+        patch("src.entrenai.core.tasks.FileProcessor") as MockFileProcessor,
+        patch("src.entrenai.core.tasks.OllamaWrapper") as MockOllamaWrapper,
+        patch("src.entrenai.core.tasks.GeminiWrapper") as MockGeminiWrapper,
+        patch("src.entrenai.core.tasks.EmbeddingManager") as MockEmbeddingManager,
+        patch("src.entrenai.core.tasks.Path") as MockPath,
+    ):
         # Configure default return values for mocks if needed
         mock_moodle_client_instance = MockMoodleClient.return_value
         mock_pgvector_db_instance = MockPgvectorWrapper.return_value
@@ -64,12 +82,13 @@ def mock_dependencies():
         mock_ollama_wrapper_instance = MockOllamaWrapper.return_value
         mock_gemini_wrapper_instance = MockGeminiWrapper.return_value
         mock_embedding_manager_instance = MockEmbeddingManager.return_value
-        
+
         # Mock Pathlib behavior
         mock_path_instance = MockPath.return_value
-        mock_path_instance.__truediv__.return_value = mock_path_instance # e.g. Path() / "subdir"
+        mock_path_instance.__truediv__.return_value = (
+            mock_path_instance  # e.g. Path() / "subdir"
+        )
         mock_path_instance.stem = "test_document"
-
 
         yield {
             "moodle_client": mock_moodle_client_instance,
@@ -78,9 +97,10 @@ def mock_dependencies():
             "ollama_wrapper": mock_ollama_wrapper_instance,
             "gemini_wrapper": mock_gemini_wrapper_instance,
             "embedding_manager": mock_embedding_manager_instance,
-            "path_lib": MockPath, # The class itself for Path() calls
-            "path_instance": mock_path_instance # Instance for operations like .unlink()
+            "path_lib": MockPath,  # The class itself for Path() calls
+            "path_instance": mock_path_instance,  # Instance for operations like .unlink()
         }
+
 
 # --- Test Cases for process_moodle_file_task ---
 
@@ -217,4 +237,4 @@ def mock_dependencies():
 # NOTE: For real implementation, each of these outlined tests would be a separate function.
 # The example test function provides a template.
 # Remember to also create __init__.py files in tests/unit and tests/unit/core if they don't exist.
-pass # Placeholder to make the file valid Python if no tests are uncommented initially
+pass  # Placeholder to make the file valid Python if no tests are uncommented initially

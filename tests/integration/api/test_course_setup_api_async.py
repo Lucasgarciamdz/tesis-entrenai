@@ -1,27 +1,46 @@
-import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock
 
-from src.entrenai.api.main import app # Assuming your FastAPI app instance is here
+from src.entrenai.api.main import app  # Assuming your FastAPI app instance is here
 # from src.entrenai.db.models import MoodleFile # For creating mock MoodleFile instances
 
 # Sample data that might be returned by mocked services
 SAMPLE_MOODLE_FILES_DATA = [
     {
-        "filename": "doc1.pdf", "fileurl": "http://moodle.com/doc1.pdf", "timemodified": 1700000000,
-        "contextid": 1, "component": "mod_folder", "filearea": "content", "itemid": 1,
-        "license": "cc-by", "author": "Test", "source": ""
+        "filename": "doc1.pdf",
+        "fileurl": "http://moodle.com/doc1.pdf",
+        "timemodified": 1700000000,
+        "contextid": 1,
+        "component": "mod_folder",
+        "filearea": "content",
+        "itemid": 1,
+        "license": "cc-by",
+        "author": "Test",
+        "source": "",
     },
     {
-        "filename": "doc2.docx", "fileurl": "http://moodle.com/doc2.docx", "timemodified": 1700000005,
-        "contextid": 1, "component": "mod_folder", "filearea": "content", "itemid": 2,
-        "license": "cc-by", "author": "Test", "source": ""
+        "filename": "doc2.docx",
+        "fileurl": "http://moodle.com/doc2.docx",
+        "timemodified": 1700000005,
+        "contextid": 1,
+        "component": "mod_folder",
+        "filearea": "content",
+        "itemid": 2,
+        "license": "cc-by",
+        "author": "Test",
+        "source": "",
     },
     {
-        "filename": "doc3.pptx", "fileurl": "http://moodle.com/doc3.pptx", "timemodified": 1600000000, # Older file
-        "contextid": 1, "component": "mod_folder", "filearea": "content", "itemid": 3,
-        "license": "cc-by", "author": "Test", "source": ""
-    }
+        "filename": "doc3.pptx",
+        "fileurl": "http://moodle.com/doc3.pptx",
+        "timemodified": 1600000000,  # Older file
+        "contextid": 1,
+        "component": "mod_folder",
+        "filearea": "content",
+        "itemid": 3,
+        "license": "cc-by",
+        "author": "Test",
+        "source": "",
+    },
 ]
 
 client = TestClient(app)
@@ -197,4 +216,4 @@ client = TestClient(app)
 #     assert data["result"]["detail"] == "Processed successfully"
 
 # NOTE: Remember to create __init__.py files in tests/integration and tests/integration/api if they don't exist.
-pass # Placeholder to make the file valid Python if no tests are uncommented initially
+pass  # Placeholder to make the file valid Python if no tests are uncommented initially

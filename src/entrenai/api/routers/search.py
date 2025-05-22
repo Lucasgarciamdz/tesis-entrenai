@@ -2,9 +2,9 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Dict, Optional, Any
 from pydantic import BaseModel
 
-from src.entrenai.core.db import PgvectorWrapper, PgvectorWrapperError # Updated import
+from src.entrenai.core.db import PgvectorWrapper  # Updated import
 from src.entrenai.core.ai.ai_provider import get_ai_wrapper, AIProviderError
-from src.entrenai.config import pgvector_config # Updated import
+from src.entrenai.config import pgvector_config  # Updated import
 from src.entrenai.config.logger import get_logger
 
 logger = get_logger(__name__)
@@ -26,12 +26,14 @@ class ContextSearchRequest(BaseModel):
     query: str
     course_name: str
     limit: Optional[int] = 5
-    threshold: Optional[float] = 0.7 # This will be removed from search_chunks call
+    threshold: Optional[float] = 0.7  # This will be removed from search_chunks call
 
 
 # --- Dependencias ---
-def get_pgvector_wrapper() -> PgvectorWrapper: # Renamed function and updated return type
-    return PgvectorWrapper(config=pgvector_config) # Updated instantiation
+def get_pgvector_wrapper() -> (
+    PgvectorWrapper
+):  # Renamed function and updated return type
+    return PgvectorWrapper(config=pgvector_config)  # Updated instantiation
 
 
 def get_ai_client():
@@ -47,7 +49,7 @@ def get_ai_client():
 @router.post("/search", response_model=SearchResponse)
 async def search_context(
     search_request: ContextSearchRequest,
-    pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper), # Updated dependency
+    pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper),  # Updated dependency
     ai_client=Depends(get_ai_client),
 ):
     """
@@ -74,7 +76,7 @@ async def search_context(
         search_results = pgvector_db.search_chunks(
             course_name=search_request.course_name,
             query_embedding=query_embedding,
-            limit=search_request.limit or 5, # Ensure limit has a default if None
+            limit=search_request.limit or 5,  # Ensure limit has a default if None
             # score_threshold is not a direct parameter for the current pgvector_wrapper.search_chunks
         )
 
@@ -82,14 +84,16 @@ async def search_context(
         # PgvectorWrapper.search_chunks returns List[Dict[str, Any]]
         # Each dict has 'id', 'score', and 'payload' (which includes 'text', 'document_id', etc.)
         formatted_results = []
-        for result in search_results: # result is a dict
+        for result in search_results:  # result is a dict
             payload = result.get("payload", {})
             formatted_result = {
                 "id": result.get("id"),
                 "score": result.get("score"),
-                "text": payload.get("text", ""), # text is directly in payload
+                "text": payload.get("text", ""),  # text is directly in payload
                 "metadata": {
-                    k: v for k, v in payload.items() if k != "text" # Adjust to exclude 'text' from metadata
+                    k: v
+                    for k, v in payload.items()
+                    if k != "text"  # Adjust to exclude 'text' from metadata
                 },
             }
             formatted_results.append(formatted_result)

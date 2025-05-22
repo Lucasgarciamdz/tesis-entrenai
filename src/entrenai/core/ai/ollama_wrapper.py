@@ -1,7 +1,7 @@
 import ollama
 from typing import List, Optional, Any
 
-from src.entrenai.config import OllamaConfig
+from src.entrenai.config import ollama_config
 from src.entrenai.config.logger import get_logger
 
 logger = get_logger(__name__)
@@ -21,7 +21,7 @@ class OllamaWrapper:
     Wrapper for interacting with Ollama API.
     """
 
-    def __init__(self, config: OllamaConfig):
+    def __init__(self, config: ollama_config):
         self.config = config
         self.client: Optional[ollama.Client] = None
         try:

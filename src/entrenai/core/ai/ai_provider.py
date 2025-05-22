@@ -13,6 +13,7 @@ from src.entrenai.config.logger import get_logger
 
 logger = get_logger(__name__)
 
+
 class AIProviderError(Exception):
     """Excepción personalizada para errores relacionados con el proveedor de IA."""
 

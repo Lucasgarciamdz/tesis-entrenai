@@ -182,7 +182,9 @@ class CeleryConfig(BaseConfig):
 
     def __init__(self):
         super().__init__()
-        self.broker_url: str = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
+        self.broker_url: str = os.getenv(
+            "CELERY_BROKER_URL", "redis://localhost:6379/0"
+        )
         self.result_backend: str = os.getenv(
             "CELERY_RESULT_BACKEND", "redis://localhost:6379/0"
         )

@@ -1,24 +1,27 @@
 from fastapi import APIRouter, HTTPException, Query, Depends, Request
 from typing import List, Optional, Dict, Any
-import shutil
 
 from src.entrenai.api.models import (
     MoodleCourse,
     CourseSetupResponse,
     HttpUrl,  # Importar MoodleModule si se va a usar para parsear respuesta de módulos
-    IndexedFile, # Added for the new endpoint
-    DeleteFileResponse, # Added for the new DELETE endpoint
+    IndexedFile,  # Added for the new endpoint
+    DeleteFileResponse,  # Added for the new DELETE endpoint
 )
 from src.entrenai.core.clients.moodle_client import MoodleClient, MoodleAPIError
-from src.entrenai.core.db import PgvectorWrapper, PgvectorWrapperError # Updated import
-from src.entrenai.core.ai.ollama_wrapper import OllamaWrapper # Keep for type hint if get_ai_client stays
-from src.entrenai.core.ai.gemini_wrapper import GeminiWrapper # Keep for type hint if get_ai_client stays
+from src.entrenai.core.db import PgvectorWrapper, PgvectorWrapperError  # Updated import
+from src.entrenai.core.ai.ollama_wrapper import (
+    OllamaWrapper,
+)  # Keep for type hint if get_ai_client stays
+from src.entrenai.core.ai.gemini_wrapper import (
+    GeminiWrapper,
+)  # Keep for type hint if get_ai_client stays
 from src.entrenai.core.ai.ai_provider import get_ai_wrapper, AIProviderError
 from src.entrenai.core.clients.n8n_client import N8NClient
+
 # from src.entrenai.core.files.file_tracker import FileTracker # Removed
 # from src.entrenai.core.files.file_processor import FileProcessor, FileProcessingError # Removed if not used directly
 # from src.entrenai.core.ai.embedding_manager import EmbeddingManager # Removed if not used directly
-from src.entrenai.api.models import IndexedFile, DeleteFileResponse # Make sure IndexedFile and DeleteFileResponse are imported from models
 from src.entrenai.config import (
     moodle_config,
     pgvector_config,
@@ -27,9 +30,9 @@ from src.entrenai.config import (
     base_config,
     n8n_config,
 )
-from src.entrenai.core.tasks import process_moodle_file_task # Import Celery task
-from src.entrenai.celery_app import app as celery_app # Import Celery app instance
-from celery.result import AsyncResult # Import AsyncResult
+from src.entrenai.core.tasks import process_moodle_file_task  # Import Celery task
+from src.entrenai.celery_app import app as celery_app  # Import Celery app instance
+from celery.result import AsyncResult  # Import AsyncResult
 from src.entrenai.config.logger import get_logger
 from pathlib import Path
 
@@ -58,8 +61,10 @@ async def _get_course_name_for_operations(course_id: int, moodle: MoodleClient) 
             course = next((c for c in courses if c.id == course_id), None)
             if course:
                 course_name_for_pgvector = course.displayname or course.fullname
-        
-        if not course_name_for_pgvector: # If not found under default teacher or no default teacher
+
+        if (
+            not course_name_for_pgvector
+        ):  # If not found under default teacher or no default teacher
             all_courses = moodle.get_all_courses()
             course = next((c for c in all_courses if c.id == course_id), None)
             if course:
@@ -74,7 +79,7 @@ async def _get_course_name_for_operations(course_id: int, moodle: MoodleClient) 
                 status_code=404,
                 detail=f"Curso con ID {course_id} no encontrado en Moodle.",
             )
-        
+
         logger.info(f"Nombre del curso para Pgvector: '{course_name_for_pgvector}'")
         return course_name_for_pgvector
     except MoodleAPIError as e:
@@ -82,12 +87,12 @@ async def _get_course_name_for_operations(course_id: int, moodle: MoodleClient) 
             f"Error de API de Moodle al obtener el nombre del curso {course_id} para Pgvector: {e}"
         )
         raise HTTPException(
-            status_code=502, # Bad Gateway, Moodle error
+            status_code=502,  # Bad Gateway, Moodle error
             detail=f"Error de API de Moodle al intentar obtener el nombre del curso {course_id}.",
         )
-    except HTTPException: # Re-raise HTTPException (e.g. the 404 from above)
+    except HTTPException:  # Re-raise HTTPException (e.g. the 404 from above)
         raise
-    except Exception as e: # Catch-all for other unexpected errors
+    except Exception as e:  # Catch-all for other unexpected errors
         logger.error(
             f"Error inesperado al obtener el nombre del curso {course_id} para Pgvector: {e}"
         )
@@ -107,8 +112,10 @@ def get_moodle_client() -> MoodleClient:
     return MoodleClient(config=moodle_config)
 
 
-def get_pgvector_wrapper() -> PgvectorWrapper: # Renamed function and updated return type
-    return PgvectorWrapper(config=pgvector_config) # Updated instantiation
+def get_pgvector_wrapper() -> (
+    PgvectorWrapper
+):  # Renamed function and updated return type
+    return PgvectorWrapper(config=pgvector_config)  # Updated instantiation
 
 
 def get_ai_client() -> OllamaWrapper | GeminiWrapper:
@@ -198,10 +205,13 @@ async def list_moodle_courses(
         )
 
 
-@router.delete("/courses/{course_id}/indexed-files/{file_identifier}", response_model=DeleteFileResponse)
+@router.delete(
+    "/courses/{course_id}/indexed-files/{file_identifier}",
+    response_model=DeleteFileResponse,
+)
 async def delete_indexed_file(
     course_id: int,
-    file_identifier: str, # FastAPI handles URL decoding of path parameters
+    file_identifier: str,  # FastAPI handles URL decoding of path parameters
     moodle: MoodleClient = Depends(get_moodle_client),
     pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper),
 ):
@@ -216,8 +226,12 @@ async def delete_indexed_file(
     try:
         # 1. Obtener el nombre del curso para operaciones de Pgvector
         # This helper will raise HTTPException (404, 502, or 500) if it fails
-        course_name_for_pgvector = await _get_course_name_for_operations(course_id, moodle)
-        logger.info(f"Operando sobre la tabla derivada de: '{course_name_for_pgvector}' para la eliminación de chunks.")
+        course_name_for_pgvector = await _get_course_name_for_operations(
+            course_id, moodle
+        )
+        logger.info(
+            f"Operando sobre la tabla derivada de: '{course_name_for_pgvector}' para la eliminación de chunks."
+        )
 
         # 2. Eliminar chunks del archivo de Pgvector
         # PgvectorWrapper.delete_file_chunks returns True if successful or if document_id not found (idempotent)
@@ -252,7 +266,7 @@ async def delete_indexed_file(
             raise HTTPException(
                 status_code=500,
                 detail=f"Error al eliminar el registro del archivo '{file_identifier}' de la tabla de seguimiento. "
-                       f"Es posible que los datos del archivo hayan sido eliminados del almacén de vectores, pero el seguimiento está inconsistente.",
+                f"Es posible que los datos del archivo hayan sido eliminados del almacén de vectores, pero el seguimiento está inconsistente.",
             )
         logger.info(
             f"Registro del archivo '{file_identifier}' (curso ID: {course_id}) eliminado (o no encontrado) de la tabla de seguimiento."
@@ -263,13 +277,19 @@ async def delete_indexed_file(
         logger.info(success_message)
         return DeleteFileResponse(message=success_message)
 
-    except HTTPException as http_exc: # Re-raise HTTPExceptions (from helper or from here)
+    except (
+        HTTPException
+    ) as http_exc:  # Re-raise HTTPExceptions (from helper or from here)
         raise http_exc
-    except MoodleAPIError as e: # Should be caught by the helper, but as a safeguard
-        logger.error(f"Error de API de Moodle durante la eliminación del archivo '{file_identifier}' para el curso {course_id}: {e}")
+    except MoodleAPIError as e:  # Should be caught by the helper, but as a safeguard
+        logger.error(
+            f"Error de API de Moodle durante la eliminación del archivo '{file_identifier}' para el curso {course_id}: {e}"
+        )
         raise HTTPException(status_code=502, detail=f"Error de API de Moodle: {str(e)}")
-    except PgvectorWrapperError as e: # Specific errors from PgvectorWrapper if any are not handled by True/False returns
-        logger.error(f"Error de PgvectorWrapper durante la eliminación del archivo '{file_identifier}' para el curso {course_id}: {e}")
+    except PgvectorWrapperError as e:  # Specific errors from PgvectorWrapper if any are not handled by True/False returns
+        logger.error(
+            f"Error de PgvectorWrapper durante la eliminación del archivo '{file_identifier}' para el curso {course_id}: {e}"
+        )
         raise HTTPException(status_code=500, detail=f"Error de base de datos: {str(e)}")
     except Exception as e:
         logger.exception(
@@ -290,7 +310,7 @@ async def setup_ia_for_course(
         description="Nombre del curso para la IA (opcional, se intentará obtener de Moodle).",
     ),
     moodle: MoodleClient = Depends(get_moodle_client),
-    pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper), # Updated dependency
+    pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper),  # Updated dependency
     ai_client=Depends(get_ai_client),
     n8n: N8NClient = Depends(get_n8n_client),
 ):
@@ -349,8 +369,10 @@ async def setup_ia_for_course(
             detail=f"No se pudo determinar el nombre del curso {course_id}.",
         )
 
-    vector_size = pgvector_config.default_vector_size # Updated config usage
-    pgvector_table_name = pgvector_db.get_table_name(course_name_str) # Updated method call
+    vector_size = pgvector_config.default_vector_size  # Updated config usage
+    pgvector_table_name = pgvector_db.get_table_name(
+        course_name_str
+    )  # Updated method call
 
     moodle_section_name_desired = (
         moodle_config.course_folder_name
@@ -363,7 +385,7 @@ async def setup_ia_for_course(
         course_id=course_id,
         status="pendiente",
         message=f"Configuración iniciada para el curso {course_id} ('{course_name_str}').",
-        qdrant_collection_name=pgvector_table_name, # Renamed field for clarity, though model might not reflect this directly
+        qdrant_collection_name=pgvector_table_name,  # Renamed field for clarity, though model might not reflect this directly
     )
 
     try:
@@ -371,7 +393,9 @@ async def setup_ia_for_course(
             f"Asegurando tabla Pgvector '{pgvector_table_name}' para curso '{course_name_str}' con tamaño de vector {vector_size}"
         )
         # Removed qdrant.client check as PgvectorWrapper handles connection internally
-        if not pgvector_db.ensure_table(course_name_str, vector_size): # Updated method call
+        if not pgvector_db.ensure_table(
+            course_name_str, vector_size
+        ):  # Updated method call
             response_details.status = "fallido"
             response_details.message = (
                 f"Falló al asegurar la tabla Pgvector '{pgvector_table_name}'."
@@ -399,7 +423,10 @@ async def setup_ia_for_course(
             }
 
         n8n_chat_url_str = n8n.configure_and_deploy_chat_workflow(
-            course_id, course_name_str, pgvector_table_name, ai_params # Updated variable
+            course_id,
+            course_name_str,
+            pgvector_table_name,
+            ai_params,  # Updated variable
         )
 
         if not n8n_chat_url_str:
@@ -440,8 +467,12 @@ async def setup_ia_for_course(
         # refresh_path = router.url_path_for("refresh_files", course_id=course_id)
         # refresh_files_url = str(request.base_url.replace(path=str(refresh_path)))
         # New way:
-        refresh_files_url = request.base_url.rstrip('/') + "/static/manage_files.html?course_id=" + str(course_id)
-        
+        refresh_files_url = (
+            request.base_url.rstrip("/")
+            + "/static/manage_files.html?course_id="
+            + str(course_id)
+        )
+
         n8n_chat_url_for_moodle = (
             str(response_details.n8n_chat_url) if response_details.n8n_chat_url else "#"
         )
@@ -586,20 +617,22 @@ async def refresh_course_files(
         )
 
     target_section_name = moodle_config.course_folder_name
-    target_folder_name = "Documentos Entrenai" # As defined in setup_ia_for_course
+    target_folder_name = "Documentos Entrenai"  # As defined in setup_ia_for_course
 
     files_to_process_count = 0
     tasks_dispatched_count = 0
-    dispatched_task_ids: List[str] = [] # To store IDs of dispatched tasks
+    dispatched_task_ids: List[str] = []  # To store IDs of dispatched tasks
     course_download_dir = Path(base_config.download_dir) / str(course_id)
 
     try:
         # 1. Asegurar que existe la tabla de Pgvector antes de procesar archivos
-        vector_size = pgvector_config.default_vector_size # Updated config usage
+        vector_size = pgvector_config.default_vector_size  # Updated config usage
         logger.info(
             f"Asegurando tabla Pgvector para curso {course_id} ('{course_name_for_pgvector}') con tamaño de vector {vector_size}"
         )
-        if not pgvector_db.ensure_table(course_name_for_pgvector, vector_size): # Updated method call
+        if not pgvector_db.ensure_table(
+            course_name_for_pgvector, vector_size
+        ):  # Updated method call
             logger.error(
                 f"Falló al asegurar la tabla Pgvector para el curso {course_id} ('{course_name_for_pgvector}')"
             )
@@ -674,7 +707,9 @@ async def refresh_course_files(
         logger.info(
             f"Se encontraron {len(moodle_files)} archivos en la carpeta de Moodle. Verificando archivos nuevos/modificados..."
         )
-        course_download_dir.mkdir(parents=True, exist_ok=True) # Ensure download dir for the course exists
+        course_download_dir.mkdir(
+            parents=True, exist_ok=True
+        )  # Ensure download dir for the course exists
 
         # 6. Loop through Moodle files and dispatch tasks
         for mf in moodle_files:
@@ -698,7 +733,7 @@ async def refresh_course_files(
                 }
                 if base_config.ai_provider == "gemini":
                     ai_provider_config_payload["gemini"] = gemini_config.model_dump()
-                else: # Default to ollama
+                else:  # Default to ollama
                     ai_provider_config_payload["ollama"] = ollama_config.model_dump()
 
                 # Dispatch Celery task
@@ -715,13 +750,19 @@ async def refresh_course_files(
                     )
                     tasks_dispatched_count += 1
                     dispatched_task_ids.append(task_result.id)
-                    logger.info(f"Tarea Celery {task_result.id} despachada para archivo: {mf.filename}")
+                    logger.info(
+                        f"Tarea Celery {task_result.id} despachada para archivo: {mf.filename}"
+                    )
                 except Exception as e_task:
-                    logger.error(f"Error al despachar tarea Celery para {mf.filename}: {e_task}")
+                    logger.error(
+                        f"Error al despachar tarea Celery para {mf.filename}: {e_task}"
+                    )
                     # Potentially add to a list of failed dispatches if needed for response
 
             else:
-                logger.info(f"Archivo '{mf.filename}' no ha sido modificado. Omitiendo.")
+                logger.info(
+                    f"Archivo '{mf.filename}' no ha sido modificado. Omitiendo."
+                )
 
         # 7. Cleanup (optional, as tasks handle individual file cleanup)
         # The main course_download_dir might still be useful for tasks if they are slow to pick up
@@ -736,7 +777,9 @@ async def refresh_course_files(
                 # logger.info(
                 #     f"Directorio de descargas del curso vacío (aparentemente) eliminado: {course_download_dir}"
                 # )
-                logger.info(f"Revisión de directorio de descargas {course_download_dir} completada. Las tareas gestionarán los archivos individuales.")
+                logger.info(
+                    f"Revisión de directorio de descargas {course_download_dir} completada. Las tareas gestionarán los archivos individuales."
+                )
         except Exception as e_rm:
             logger.warning(
                 f"No se pudo realizar la limpieza del directorio de descargas del curso {course_download_dir}: {e_rm}"
@@ -789,7 +832,7 @@ async def get_task_status(task_id: str):
     Returns:
         dict: Un diccionario con la información del estado de la tarea:
             - `task_id` (str): El ID de la tarea consultada.
-            - `status` (str): El estado actual de la tarea (ej. "PENDING", "STARTED", 
+            - `status` (str): El estado actual de la tarea (ej. "PENDING", "STARTED",
                               "SUCCESS", "FAILURE", "RETRY", "REVOKED").
             - `result` (Any): El resultado de la tarea.
                 - Si `status` es "SUCCESS", este es el valor de retorno de la función de la tarea.
@@ -811,7 +854,9 @@ async def get_task_status(task_id: str):
     if task_result.successful():
         status_response["result"] = task_result.result
     elif task_result.failed():
-        status_response["result"] = str(task_result.result) # Exception object as string
+        status_response["result"] = str(
+            task_result.result
+        )  # Exception object as string
         status_response["traceback"] = task_result.traceback
     else:
         # For PENDING, STARTED, RETRY, REVOKED, result is often None or not the final outcome
@@ -830,7 +875,9 @@ async def get_indexed_files_for_course(
     Recupera una lista de archivos indexados y sus fechas de última modificación
     para un ID de curso específico.
     """
-    logger.info(f"Solicitud para obtener archivos indexados para el curso ID: {course_id}")
+    logger.info(
+        f"Solicitud para obtener archivos indexados para el curso ID: {course_id}"
+    )
     try:
         # Suponiendo que get_processed_files_timestamps devuelve un dict como {'filename': timestamp}
         # o None si el curso no existe o no tiene archivos.
@@ -845,7 +892,7 @@ async def get_indexed_files_for_course(
         # Por ahora, se asume que puede trabajar directamente con course_id o un mapeo interno.
 
         processed_files_timestamps = pgvector_db.get_processed_files_timestamps(
-            course_id=course_id # Pasando course_id directamente
+            course_id=course_id  # Pasando course_id directamente
         )
 
         if processed_files_timestamps is None or not processed_files_timestamps:
@@ -867,14 +914,17 @@ async def get_indexed_files_for_course(
         )
         return indexed_files
 
-    except PgvectorWrapperError as e: # Asumiendo que PgvectorWrapper puede lanzar un error específico
+    except (
+        PgvectorWrapperError
+    ) as e:  # Asumiendo que PgvectorWrapper puede lanzar un error específico
         logger.error(
             f"Error de PgvectorWrapper al obtener archivos indexados para el curso {course_id}: {e}"
         )
         raise HTTPException(
-            status_code=500, detail=f"Error de base de datos al obtener archivos indexados: {str(e)}"
+            status_code=500,
+            detail=f"Error de base de datos al obtener archivos indexados: {str(e)}",
         )
-    except HTTPException as http_exc: # Re-raise HTTPExceptions para no enmascararlas
+    except HTTPException as http_exc:  # Re-raise HTTPExceptions para no enmascararlas
         raise http_exc
     except Exception as e:
         logger.exception(

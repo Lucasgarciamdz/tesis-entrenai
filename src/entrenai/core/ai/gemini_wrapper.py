@@ -174,9 +174,7 @@ class GeminiWrapper:
 
         cleaned_text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
 
-        cleaned_text = re.sub(
-            r"^\s*\[.*?\]\s*$", "", cleaned_text, flags=re.MULTILINE
-        )
+        cleaned_text = re.sub(r"^\s*\[.*?\]\s*$", "", cleaned_text, flags=re.MULTILINE)
         cleaned_text = re.sub(
             r"^\s*#\s*metadata:.*$", "", cleaned_text, flags=re.MULTILINE
         )

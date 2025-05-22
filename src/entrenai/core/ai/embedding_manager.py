@@ -135,7 +135,7 @@ class EmbeddingManager:
 
     def prepare_document_chunks_for_vector_db(
         self,
-        course_id: int, # TODO: Consider if course_name should be passed here directly
+        course_id: int,  # TODO: Consider if course_name should be passed here directly
         document_id: str,
         source_filename: str,
         document_title: Optional[str],

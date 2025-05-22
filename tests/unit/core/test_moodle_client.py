@@ -4,7 +4,11 @@ from unittest.mock import patch, MagicMock
 from urllib.parse import urljoin
 from pathlib import Path  # Added Path import
 
-from src.entrenai.core.clients.moodle_client import MoodleClient, MoodleAPIError, MoodleCourse
+from src.entrenai.core.clients.moodle_client import (
+    MoodleClient,
+    MoodleAPIError,
+    MoodleCourse,
+)
 from src.entrenai.config import MoodleConfig
 
 
