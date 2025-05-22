@@ -13,7 +13,7 @@ from src.entrenai.core.ai.ollama_wrapper import OllamaWrapper
 from src.entrenai.core.ai.gemini_wrapper import GeminiWrapper
 from src.entrenai.core.ai.ai_provider import get_ai_wrapper, AIProviderError
 from src.entrenai.core.clients.n8n_client import N8NClient
-from src.entrenai.core.files.file_tracker import FileTracker
+# from src.entrenai.core.files.file_tracker import FileTracker # Removed
 from src.entrenai.core.files.file_processor import FileProcessor, FileProcessingError
 from src.entrenai.core.ai.embedding_manager import EmbeddingManager
 from src.entrenai.config import (
@@ -80,8 +80,8 @@ def get_n8n_client() -> N8NClient:
     return N8NClient(config=n8n_config)
 
 
-def get_file_tracker() -> FileTracker:
-    return FileTracker(db_path=Path(base_config.file_tracker_db_path))
+# def get_file_tracker() -> FileTracker: # Removed
+#     return FileTracker(db_path=Path(base_config.file_tracker_db_path)) # Removed
 
 
 def get_file_processor() -> FileProcessor:
@@ -365,8 +365,8 @@ async def setup_ia_for_course(
 async def refresh_course_files(
     course_id: int,
     moodle: MoodleClient = Depends(get_moodle_client),
-    file_tracker: FileTracker = Depends(get_file_tracker),
-    pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper), # Updated dependency
+    # file_tracker: FileTracker = Depends(get_file_tracker), # Removed
+    pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper), 
     ai_client: OllamaWrapper | GeminiWrapper = Depends(get_ai_client),
     embedding_manager: EmbeddingManager = Depends(get_embedding_manager),
     file_processor: FileProcessor = Depends(get_file_processor),
@@ -523,7 +523,7 @@ async def refresh_course_files(
                     processed_files_summary.append(file_summary)
                     continue
 
-                if file_tracker.is_file_new_or_modified(
+                if pgvector_db.is_file_new_or_modified( # Changed from file_tracker to pgvector_db
                     course_id, mf.filename, mf.timemodified
                 ):
                     files_to_process_count += 1
@@ -614,7 +614,7 @@ async def refresh_course_files(
                                 f"Falló el upsert a Pgvector para {mf.filename}"
                             )
 
-                    file_tracker.mark_file_as_processed(
+                    pgvector_db.mark_file_as_processed( # Changed from file_tracker to pgvector_db
                         course_id, mf.filename, mf.timemodified
                     )
                     successfully_processed_count += 1

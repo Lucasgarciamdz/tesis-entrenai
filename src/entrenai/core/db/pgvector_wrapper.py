@@ -2,6 +2,7 @@ import psycopg2 # Or psycopg if using version 3+
 from psycopg2.extras import RealDictCursor # Or appropriate cursor for dict results
 from pgvector.psycopg2 import register_vector # Or equivalent for psycopg3
 import re
+import time # Added for timestamping
 from typing import List, Optional, Dict, Any # Ensure Dict and Any are imported
 
 from src.entrenai.config import PgvectorConfig # Use the new config
@@ -16,6 +17,8 @@ class PgvectorWrapperError(Exception):
 
 class PgvectorWrapper:
     """Wrapper to interact with PostgreSQL with pgvector extension."""
+
+    FILE_TRACKER_TABLE_NAME = "file_tracker"
 
     def __init__(self, config: PgvectorConfig):
         self.config = config
@@ -38,6 +41,8 @@ class PgvectorWrapper:
             self.cursor.execute("CREATE EXTENSION IF NOT EXISTS vector;")
             self.conn.commit()
             logger.info(f"PgvectorWrapper initialized and connected to {config.host}:{config.port}/{config.db_name}")
+
+            self.ensure_file_tracker_table() # Ensure the file tracker table exists
 
         except psycopg2.Error as e:
             logger.error(f"Failed to connect to PostgreSQL/pgvector at {config.host}:{config.port}: {e}")
@@ -125,6 +130,40 @@ class PgvectorWrapper:
             logger.error(f"Unexpected error ensuring table '{table_name}': {e}")
             if self.conn: self.conn.rollback()
             return False
+
+    def get_processed_files_timestamps(self, course_id: int) -> Dict[str, int]:
+        """
+        Retrieves a dictionary of processed file identifiers and their moodle_timemodified timestamps for a given course.
+        Returns an empty dictionary on error or if no files are found.
+        """
+        if not self.conn or not self.cursor:
+            logger.error("No database connection. Cannot get processed files timestamps.")
+            return {}
+
+        try:
+            query = f"""
+            SELECT file_identifier, moodle_timemodified
+            FROM {self.FILE_TRACKER_TABLE_NAME}
+            WHERE course_id = %s;
+            """
+            self.cursor.execute(query, (course_id,))
+            results = self.cursor.fetchall() # List of RealDictRow
+
+            timestamps_map = {row['file_identifier']: row['moodle_timemodified'] for row in results}
+            
+            if not timestamps_map:
+                logger.info(f"No processed files found for course '{course_id}' in tracker.")
+            else:
+                logger.info(f"Retrieved {len(timestamps_map)} processed file timestamps for course '{course_id}'.")
+            return timestamps_map
+        except psycopg2.Error as e:
+            logger.error(f"Error retrieving processed files timestamps for course '{course_id}': {e}")
+            if self.conn: self.conn.rollback()
+            return {}
+        except Exception as e:
+            logger.error(f"Unexpected error retrieving processed files timestamps for course '{course_id}': {e}")
+            if self.conn: self.conn.rollback()
+            return {}
 
     def upsert_chunks(self, course_name: str, chunks: List[DocumentChunk]) -> bool:
         """
@@ -283,3 +322,109 @@ class PgvectorWrapper:
     def __del__(self):
         """Ensure connection is closed when the object is destroyed."""
         self.close_connection()
+
+    def ensure_file_tracker_table(self):
+        """
+        Ensures the file_tracker table exists. If not, creates it.
+        Schema: course_id (INTEGER), file_identifier (TEXT), moodle_timemodified (BIGINT), processed_at (BIGINT)
+        Primary Key: (course_id, file_identifier)
+        """
+        if not self.conn or not self.cursor:
+            logger.error("No database connection. Cannot ensure file_tracker table.")
+            # Potentially raise an error or handle differently if this is critical at this stage
+            return
+
+        try:
+            self.cursor.execute(f"SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = '{self.FILE_TRACKER_TABLE_NAME}');")
+            if self.cursor.fetchone()['exists']:
+                logger.info(f"Table '{self.FILE_TRACKER_TABLE_NAME}' already exists.")
+                return
+
+            create_table_sql = f"""
+            CREATE TABLE {self.FILE_TRACKER_TABLE_NAME} (
+                course_id INTEGER NOT NULL,
+                file_identifier TEXT NOT NULL,
+                moodle_timemodified BIGINT NOT NULL,
+                processed_at BIGINT NOT NULL,
+                PRIMARY KEY (course_id, file_identifier)
+            );
+            """
+            self.cursor.execute(create_table_sql)
+            self.conn.commit()
+            logger.info(f"Table '{self.FILE_TRACKER_TABLE_NAME}' created successfully.")
+        except psycopg2.Error as e:
+            logger.error(f"Error ensuring table '{self.FILE_TRACKER_TABLE_NAME}': {e}")
+            if self.conn: self.conn.rollback()
+            # Depending on recovery strategy, might raise an error or attempt retry
+        except Exception as e:
+            logger.error(f"Unexpected error ensuring table '{self.FILE_TRACKER_TABLE_NAME}': {e}")
+            if self.conn: self.conn.rollback()
+
+    def is_file_new_or_modified(self, course_id: int, file_identifier: str, moodle_timemodified: int) -> bool:
+        """
+        Checks if the file is new or modified compared to the entry in file_tracker.
+        Returns True if the file is new, modified, or if an error occurs (conservative).
+        """
+        if not self.conn or not self.cursor:
+            logger.error("No database connection. Cannot check file status.")
+            return True # Conservative: assume new/modified if DB is not available
+
+        try:
+            query = f"""
+            SELECT moodle_timemodified
+            FROM {self.FILE_TRACKER_TABLE_NAME}
+            WHERE course_id = %s AND file_identifier = %s;
+            """
+            self.cursor.execute(query, (course_id, file_identifier))
+            result = self.cursor.fetchone()
+
+            if result is None:
+                logger.info(f"File '{file_identifier}' for course '{course_id}' not found in tracker. Assuming new.")
+                return True # File not found, so it's new
+            
+            stored_timemodified = result['moodle_timemodified']
+            if moodle_timemodified > stored_timemodified:
+                logger.info(f"File '{file_identifier}' for course '{course_id}' is modified (new: {moodle_timemodified}, stored: {stored_timemodified}).")
+                return True # File is modified
+            
+            logger.info(f"File '{file_identifier}' for course '{course_id}' is up-to-date (timestamp: {moodle_timemodified}).")
+            return False # File is not modified
+        except psycopg2.Error as e:
+            logger.error(f"Error checking file status for '{file_identifier}' in course '{course_id}': {e}")
+            if self.conn: self.conn.rollback()
+            return True # Conservative: assume new/modified on error
+        except Exception as e:
+            logger.error(f"Unexpected error checking file status for '{file_identifier}' in course '{course_id}': {e}")
+            if self.conn: self.conn.rollback()
+            return True # Conservative approach
+
+    def mark_file_as_processed(self, course_id: int, file_identifier: str, moodle_timemodified: int):
+        """
+        Marks the file as processed by inserting or updating its record in file_tracker.
+        """
+        if not self.conn or not self.cursor:
+            logger.error("No database connection. Cannot mark file as processed.")
+            # Consider raising an error if this operation is critical and cannot be deferred
+            return False
+
+        processed_at_ts = int(time.time())
+        try:
+            upsert_sql = f"""
+            INSERT INTO {self.FILE_TRACKER_TABLE_NAME} (course_id, file_identifier, moodle_timemodified, processed_at)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (course_id, file_identifier) DO UPDATE SET
+                moodle_timemodified = EXCLUDED.moodle_timemodified,
+                processed_at = EXCLUDED.processed_at;
+            """
+            self.cursor.execute(upsert_sql, (course_id, file_identifier, moodle_timemodified, processed_at_ts))
+            self.conn.commit()
+            logger.info(f"Successfully marked file '{file_identifier}' for course '{course_id}' as processed at {processed_at_ts} with moodle_timemodified {moodle_timemodified}.")
+            return True
+        except psycopg2.Error as e:
+            logger.error(f"Error marking file '{file_identifier}' for course '{course_id}' as processed: {e}")
+            if self.conn: self.conn.rollback()
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error marking file '{file_identifier}' for course '{course_id}' as processed: {e}")
+            if self.conn: self.conn.rollback()
+            return False

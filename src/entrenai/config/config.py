@@ -25,9 +25,6 @@ class BaseConfig:
         self.data_dir: str = os.getenv(
             "DATA_DIR", "data"
         )  # Base directory for app data
-        self.file_tracker_db_path: str = os.path.join(
-            self.data_dir, os.getenv("FILE_TRACKER_DB_NAME", "file_tracker.sqlite")
-        )
         self.download_dir: str = os.path.join(
             self.data_dir, os.getenv("DOWNLOAD_SUBDIR", "downloads")
         )
