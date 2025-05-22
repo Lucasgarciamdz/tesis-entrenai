@@ -133,9 +133,9 @@ class EmbeddingManager:
         )
         return embeddings
 
-    def prepare_document_chunks_for_qdrant(
+    def prepare_document_chunks_for_vector_db(
         self,
-        course_id: int,
+        course_id: int, # TODO: Consider if course_name should be passed here directly
         document_id: str,
         source_filename: str,
         document_title: Optional[str],
@@ -144,7 +144,7 @@ class EmbeddingManager:
         additional_metadatas: Optional[List[Optional[Dict[str, Any]]]] = None,
     ) -> List[DocumentChunk]:
         """
-        Prepara objetos DocumentChunk listos para Qdrant, incluyendo IDs únicos y metadatos.
+        Prepara objetos DocumentChunk listos para el Vector DB, incluyendo IDs únicos y metadatos.
         """
         if len(chunks_text) != len(embeddings):
             raise ValueError(
@@ -181,6 +181,6 @@ class EmbeddingManager:
                 )
             )
         logger.info(
-            f"Preparados {len(document_chunks)} objetos DocumentChunk para Qdrant."
+            f"Preparados {len(document_chunks)} objetos DocumentChunk para el Vector DB."
         )
         return document_chunks
