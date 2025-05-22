@@ -6,6 +6,8 @@ from src.entrenai.api.models import (
     MoodleCourse,
     CourseSetupResponse,
     HttpUrl,  # Importar MoodleModule si se va a usar para parsear respuesta de módulos
+    IndexedFile, # Added for the new endpoint
+    DeleteFileResponse, # Added for the new DELETE endpoint
 )
 from src.entrenai.core.clients.moodle_client import MoodleClient, MoodleAPIError
 from src.entrenai.core.db import PgvectorWrapper, PgvectorWrapperError # Updated import
@@ -16,6 +18,7 @@ from src.entrenai.core.clients.n8n_client import N8NClient
 # from src.entrenai.core.files.file_tracker import FileTracker # Removed
 # from src.entrenai.core.files.file_processor import FileProcessor, FileProcessingError # Removed if not used directly
 # from src.entrenai.core.ai.embedding_manager import EmbeddingManager # Removed if not used directly
+from src.entrenai.api.models import IndexedFile, DeleteFileResponse # Make sure IndexedFile and DeleteFileResponse are imported from models
 from src.entrenai.config import (
     moodle_config,
     pgvector_config,
@@ -36,6 +39,67 @@ router = APIRouter(
     prefix="/api/v1",
     tags=["Configuración de Curso y Gestión de IA"],
 )
+
+
+# --- Helper Functions ---
+async def _get_course_name_for_operations(course_id: int, moodle: MoodleClient) -> str:
+    """
+    Retrieves the course name for a given course_id, used for Pgvector operations.
+    This logic is shared by refresh_course_files and the new delete_indexed_file endpoint.
+    """
+    course_name_for_pgvector: Optional[str] = None
+    try:
+        logger.info(
+            f"Obteniendo nombre del curso {course_id} para operaciones de Pgvector..."
+        )
+        target_user_id_for_name = moodle_config.default_teacher_id
+        if target_user_id_for_name:
+            courses = moodle.get_courses_by_user(user_id=target_user_id_for_name)
+            course = next((c for c in courses if c.id == course_id), None)
+            if course:
+                course_name_for_pgvector = course.displayname or course.fullname
+        
+        if not course_name_for_pgvector: # If not found under default teacher or no default teacher
+            all_courses = moodle.get_all_courses()
+            course = next((c for c in all_courses if c.id == course_id), None)
+            if course:
+                course_name_for_pgvector = course.displayname or course.fullname
+
+        if not course_name_for_pgvector:
+            # If still not found after checking all courses, it's a genuine "not found"
+            logger.warning(
+                f"No se pudo encontrar el curso {course_id} en Moodle para obtener su nombre."
+            )
+            raise HTTPException(
+                status_code=404,
+                detail=f"Curso con ID {course_id} no encontrado en Moodle.",
+            )
+        
+        logger.info(f"Nombre del curso para Pgvector: '{course_name_for_pgvector}'")
+        return course_name_for_pgvector
+    except MoodleAPIError as e:
+        logger.error(
+            f"Error de API de Moodle al obtener el nombre del curso {course_id} para Pgvector: {e}"
+        )
+        raise HTTPException(
+            status_code=502, # Bad Gateway, Moodle error
+            detail=f"Error de API de Moodle al intentar obtener el nombre del curso {course_id}.",
+        )
+    except HTTPException: # Re-raise HTTPException (e.g. the 404 from above)
+        raise
+    except Exception as e: # Catch-all for other unexpected errors
+        logger.error(
+            f"Error inesperado al obtener el nombre del curso {course_id} para Pgvector: {e}"
+        )
+        # Using a fallback name as in setup_ia_for_course or refresh_course_files might be an option,
+        # but for deletion, it's safer to fail if the name can't be reliably determined.
+        # However, the original refresh_course_files uses a fallback `Curso_{course_id}`.
+        # For deletion, this could be risky if the fallback name doesn't match what was used for table creation.
+        # Sticking to raising an error if not found via Moodle API.
+        raise HTTPException(
+            status_code=500,
+            detail=f"No se pudo determinar el nombre del curso {course_id} para operaciones de base de datos debido a un error interno.",
+        )
 
 
 # --- Inyección de Dependencias para Clientes ---
@@ -129,6 +193,88 @@ async def list_moodle_courses(
         raise HTTPException(status_code=502, detail=f"Error de API de Moodle: {str(e)}")
     except Exception as e:
         logger.exception(f"Error inesperado obteniendo cursos de Moodle: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Error interno del servidor: {str(e)}"
+        )
+
+
+@router.delete("/courses/{course_id}/indexed-files/{file_identifier}", response_model=DeleteFileResponse)
+async def delete_indexed_file(
+    course_id: int,
+    file_identifier: str, # FastAPI handles URL decoding of path parameters
+    moodle: MoodleClient = Depends(get_moodle_client),
+    pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper),
+):
+    """
+    Elimina un archivo específico y sus datos asociados del sistema de IA
+    (chunks en Pgvector y registro en la tabla de seguimiento).
+    """
+    logger.info(
+        f"Solicitud para eliminar archivo '{file_identifier}' del curso ID: {course_id}"
+    )
+
+    try:
+        # 1. Obtener el nombre del curso para operaciones de Pgvector
+        # This helper will raise HTTPException (404, 502, or 500) if it fails
+        course_name_for_pgvector = await _get_course_name_for_operations(course_id, moodle)
+        logger.info(f"Operando sobre la tabla derivada de: '{course_name_for_pgvector}' para la eliminación de chunks.")
+
+        # 2. Eliminar chunks del archivo de Pgvector
+        # PgvectorWrapper.delete_file_chunks returns True if successful or if document_id not found (idempotent)
+        chunks_deleted_success = pgvector_db.delete_file_chunks(
+            course_name=course_name_for_pgvector, document_id=file_identifier
+        )
+        if not chunks_deleted_success:
+            logger.error(
+                f"Falló la eliminación de chunks para el archivo '{file_identifier}' del curso '{course_name_for_pgvector}' (ID: {course_id})."
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error al eliminar los datos del archivo '{file_identifier}' del almacén de vectores. La tabla de seguimiento no fue modificada.",
+            )
+        logger.info(
+            f"Chunks para el archivo '{file_identifier}' eliminados (o no encontrados) del curso '{course_name_for_pgvector}' (ID: {course_id})."
+        )
+
+        # 3. Eliminar el archivo de la tabla de seguimiento (file_tracker)
+        # PgvectorWrapper.delete_file_from_tracker returns True if successful or if not found (idempotent)
+        tracker_deleted_success = pgvector_db.delete_file_from_tracker(
+            course_id=course_id, file_identifier=file_identifier
+        )
+        if not tracker_deleted_success:
+            logger.error(
+                f"Falló la eliminación del archivo '{file_identifier}' (curso ID: {course_id}) de la tabla de seguimiento, "
+                f"aunque los chunks podrían haber sido eliminados."
+            )
+            # This is a state of partial failure. Chunks might be gone, but tracker entry remains.
+            # Or, chunks might have failed AND tracker failed.
+            # The message should ideally guide the user or admin.
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error al eliminar el registro del archivo '{file_identifier}' de la tabla de seguimiento. "
+                       f"Es posible que los datos del archivo hayan sido eliminados del almacén de vectores, pero el seguimiento está inconsistente.",
+            )
+        logger.info(
+            f"Registro del archivo '{file_identifier}' (curso ID: {course_id}) eliminado (o no encontrado) de la tabla de seguimiento."
+        )
+
+        # 4. Si ambas operaciones son exitosas (o el archivo/chunks no existían, lo cual es un tipo de éxito para delete)
+        success_message = f"Archivo '{file_identifier}' y sus datos asociados eliminados exitosamente para el curso ID {course_id}."
+        logger.info(success_message)
+        return DeleteFileResponse(message=success_message)
+
+    except HTTPException as http_exc: # Re-raise HTTPExceptions (from helper or from here)
+        raise http_exc
+    except MoodleAPIError as e: # Should be caught by the helper, but as a safeguard
+        logger.error(f"Error de API de Moodle durante la eliminación del archivo '{file_identifier}' para el curso {course_id}: {e}")
+        raise HTTPException(status_code=502, detail=f"Error de API de Moodle: {str(e)}")
+    except PgvectorWrapperError as e: # Specific errors from PgvectorWrapper if any are not handled by True/False returns
+        logger.error(f"Error de PgvectorWrapper durante la eliminación del archivo '{file_identifier}' para el curso {course_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error de base de datos: {str(e)}")
+    except Exception as e:
+        logger.exception(
+            f"Error inesperado durante la eliminación del archivo '{file_identifier}' para el curso {course_id}: {e}"
+        )
         raise HTTPException(
             status_code=500, detail=f"Error interno del servidor: {str(e)}"
         )
@@ -290,8 +436,12 @@ async def setup_ia_for_course(
         )
 
         # Construir URLs y HTML summary
-        refresh_path = router.url_path_for("refresh_files", course_id=course_id)
-        refresh_files_url = str(request.base_url.replace(path=str(refresh_path)))
+        # Old way:
+        # refresh_path = router.url_path_for("refresh_files", course_id=course_id)
+        # refresh_files_url = str(request.base_url.replace(path=str(refresh_path)))
+        # New way:
+        refresh_files_url = request.base_url.rstrip('/') + "/static/manage_files.html?course_id=" + str(course_id)
+        
         n8n_chat_url_for_moodle = (
             str(response_details.n8n_chat_url) if response_details.n8n_chat_url else "#"
         )
@@ -669,3 +819,67 @@ async def get_task_status(task_id: str):
 
     logger.debug(f"Estado de la tarea {task_id}: {status_response}")
     return status_response
+
+
+@router.get("/courses/{course_id}/indexed-files", response_model=List[IndexedFile])
+async def get_indexed_files_for_course(
+    course_id: int,
+    pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper),
+):
+    """
+    Recupera una lista de archivos indexados y sus fechas de última modificación
+    para un ID de curso específico.
+    """
+    logger.info(f"Solicitud para obtener archivos indexados para el curso ID: {course_id}")
+    try:
+        # Suponiendo que get_processed_files_timestamps devuelve un dict como {'filename': timestamp}
+        # o None si el curso no existe o no tiene archivos.
+        # Nota: Será necesario ajustar esto si el método get_course_id_from_name o similar es necesario
+        # o si el manejo de 'course_name_for_pgvector' debe replicarse aquí.
+        # Por simplicidad, se asume que get_processed_files_timestamps puede manejar un course_id directamente
+        # o que ya existe una forma de mapear course_id a la tabla/colección correcta internamente.
+
+        # TODO: Determinar si es necesario obtener 'course_name_for_pgvector' como en otros endpoints.
+        # Si PgvectorWrapper.get_processed_files_timestamps espera un nombre de tabla derivado
+        # del nombre del curso en lugar de course_id, entonces se necesita lógica adicional aquí.
+        # Por ahora, se asume que puede trabajar directamente con course_id o un mapeo interno.
+
+        processed_files_timestamps = pgvector_db.get_processed_files_timestamps(
+            course_id=course_id # Pasando course_id directamente
+        )
+
+        if processed_files_timestamps is None or not processed_files_timestamps:
+            logger.warning(
+                f"No se encontraron archivos indexados para el curso ID: {course_id} o el curso no existe en el seguimiento."
+            )
+            raise HTTPException(
+                status_code=404,
+                detail=f"No se encontraron archivos indexados para el curso ID {course_id} o el curso no se encuentra.",
+            )
+
+        indexed_files = [
+            IndexedFile(filename=filename, last_modified_moodle=timestamp)
+            for filename, timestamp in processed_files_timestamps.items()
+        ]
+
+        logger.info(
+            f"Se encontraron {len(indexed_files)} archivos indexados para el curso ID: {course_id}"
+        )
+        return indexed_files
+
+    except PgvectorWrapperError as e: # Asumiendo que PgvectorWrapper puede lanzar un error específico
+        logger.error(
+            f"Error de PgvectorWrapper al obtener archivos indexados para el curso {course_id}: {e}"
+        )
+        raise HTTPException(
+            status_code=500, detail=f"Error de base de datos al obtener archivos indexados: {str(e)}"
+        )
+    except HTTPException as http_exc: # Re-raise HTTPExceptions para no enmascararlas
+        raise http_exc
+    except Exception as e:
+        logger.exception(
+            f"Error inesperado al obtener archivos indexados para el curso {course_id}: {e}"
+        )
+        raise HTTPException(
+            status_code=500, detail=f"Error interno del servidor: {str(e)}"
+        )

@@ -131,6 +131,74 @@ class PgvectorWrapper:
             if self.conn: self.conn.rollback()
             return False
 
+    def delete_file_chunks(self, course_name: str, document_id: str) -> bool:
+        """
+        Deletes all chunks associated with a specific document_id from the course's table.
+        Returns True on success or if no matching rows were found, False on error.
+        """
+        if not self.conn or not self.cursor:
+            logger.error("No database connection. Cannot delete file chunks.")
+            return False
+
+        table_name = self.get_table_name(course_name)
+        try:
+            # Check if table exists to prevent errors on deletion from non-existent table
+            self.cursor.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s);", (table_name,))
+            if not self.cursor.fetchone()['exists']:
+                logger.warning(f"Table '{table_name}' does not exist. Cannot delete chunks for document_id '{document_id}'.")
+                return True # Or False, depending on desired behavior for non-existent table. True seems more idempotent.
+
+            delete_sql = f"DELETE FROM {table_name} WHERE document_id = %s;"
+            self.cursor.execute(delete_sql, (document_id,))
+            deleted_rows = self.cursor.rowcount # Number of rows affected
+            self.conn.commit()
+            
+            if deleted_rows > 0:
+                logger.info(f"Successfully deleted {deleted_rows} chunks for document_id '{document_id}' from table '{table_name}'.")
+            else:
+                logger.info(f"No chunks found for document_id '{document_id}' in table '{table_name}'. Nothing to delete.")
+            return True
+        except psycopg2.Error as e:
+            logger.error(f"Error deleting chunks for document_id '{document_id}' from table '{table_name}': {e}")
+            if self.conn: self.conn.rollback()
+            return False
+        except Exception as e: # Catch any other unexpected errors
+            logger.error(f"Unexpected error deleting chunks for document_id '{document_id}' from table '{table_name}': {e}")
+            if self.conn: self.conn.rollback()
+            return False
+
+    def delete_file_from_tracker(self, course_id: int, file_identifier: str) -> bool:
+        """
+        Deletes a file's record from the file_tracker table.
+        Returns True on success or if no matching row was found, False on error.
+        """
+        if not self.conn or not self.cursor:
+            logger.error("No database connection. Cannot delete file from tracker.")
+            return False
+
+        try:
+            delete_sql = f"""
+            DELETE FROM {self.FILE_TRACKER_TABLE_NAME}
+            WHERE course_id = %s AND file_identifier = %s;
+            """
+            self.cursor.execute(delete_sql, (course_id, file_identifier))
+            deleted_rows = self.cursor.rowcount
+            self.conn.commit()
+
+            if deleted_rows > 0:
+                logger.info(f"Successfully deleted file '{file_identifier}' (course_id: {course_id}) from {self.FILE_TRACKER_TABLE_NAME}.")
+            else:
+                logger.info(f"No record found for file '{file_identifier}' (course_id: {course_id}) in {self.FILE_TRACKER_TABLE_NAME}. Nothing to delete.")
+            return True
+        except psycopg2.Error as e:
+            logger.error(f"Error deleting file '{file_identifier}' (course_id: {course_id}) from {self.FILE_TRACKER_TABLE_NAME}: {e}")
+            if self.conn: self.conn.rollback()
+            return False
+        except Exception as e: # Catch any other unexpected errors
+            logger.error(f"Unexpected error deleting file '{file_identifier}' (course_id: {course_id}) from {self.FILE_TRACKER_TABLE_NAME}: {e}")
+            if self.conn: self.conn.rollback()
+            return False
+
     def get_processed_files_timestamps(self, course_id: int) -> Dict[str, int]:
         """
         Retrieves a dictionary of processed file identifiers and their moodle_timemodified timestamps for a given course.

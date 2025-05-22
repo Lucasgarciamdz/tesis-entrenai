@@ -1,9 +1,10 @@
 document.addEventListener('DOMContentLoaded', () => {
-    const courseSearchInput = document.getElementById('course-search');
+    // const courseSearchInput = document.getElementById('course-search'); // Removed
     const courseSelect = document.getElementById('course-select');
     const setupAiButton = document.getElementById('setup-ai-button');
     const statusMessages = document.getElementById('status-messages');
-    
+    const manageFilesButton = document.getElementById('manage-files-button'); // Get the button
+
     let allCourses = []; // Para guardar la lista completa de cursos
 
     // URL base de tu API FastAPI (ajusta si es necesario)
@@ -65,20 +66,29 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    courseSearchInput.addEventListener('input', (e) => {
-        const searchTerm = e.target.value.toLowerCase().trim();
-        if (!allCourses || allCourses.length === 0) return;
+    // The orphaned courseSearchInput.addEventListener block has been removed.
 
-        const filteredCourses = allCourses.filter(course => {
-            const fullName = (course.fullname || "").toLowerCase();
-            const shortName = (course.shortname || "").toLowerCase();
-            const displayName = (course.displayname || "").toLowerCase();
-            return fullName.includes(searchTerm) || 
-                   shortName.includes(searchTerm) || 
-                   displayName.includes(searchTerm);
+    if (courseSelect) {
+        courseSelect.addEventListener('change', () => {
+            if (courseSelect.value && manageFilesButton) {
+                manageFilesButton.style.display = 'block'; // Show the button
+            } else if (manageFilesButton) {
+                manageFilesButton.style.display = 'none'; // Hide the button
+            }
         });
-        populateCourseSelect(filteredCourses);
-    });
+    }
+
+    if (manageFilesButton) {
+      manageFilesButton.addEventListener('click', () => {
+        const selectedCourseId = courseSelect.value;
+        if (selectedCourseId) {
+          // Navigate to the manage_files.html page with the course_id as a query parameter
+          window.location.href = `/static/manage_files.html?course_id=${selectedCourseId}`;
+        } else {
+          updateStatus('Por favor, selecciona un curso primero antes de gestionar archivos.', 'warning');
+        }
+      });
+    }
 
     setupAiButton.addEventListener('click', async () => {
         const selectedCourseId = courseSelect.value;
@@ -96,11 +106,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const courseDisplayName = selectedCourse.displayname || selectedCourse.fullname;
         updateStatus(`Iniciando configuración de IA para el curso: "${courseDisplayName}" (ID: ${selectedCourseId})... Esto puede tardar unos minutos.`, 'info');
         setupAiButton.disabled = true;
-        courseSearchInput.disabled = true;
+        // courseSearchInput.disabled = true; // Removed
         courseSelect.disabled = true;
 
         try {
-            const response = await fetch(`${API_BASE_URL}/courses/${selectedCourseId}/setup-ia?course_name=${encodeURIComponent(courseDisplayName)}`, {
+            // Backend expects 'courseName' as alias for course_name_query
+            const response = await fetch(`${API_BASE_URL}/courses/${selectedCourseId}/setup-ia?courseName=${encodeURIComponent(courseDisplayName)}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -119,7 +130,7 @@ document.addEventListener('DOMContentLoaded', () => {
             updateStatus(`Error en la configuración para "${courseDisplayName}": ${error.message}`, 'error');
         } finally {
             setupAiButton.disabled = false;
-            courseSearchInput.disabled = false;
+            // courseSearchInput.disabled = false; // Removed
             courseSelect.disabled = false;
         }
     });

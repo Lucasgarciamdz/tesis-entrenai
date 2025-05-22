@@ -34,6 +34,35 @@ p {
     margin-bottom: 15px;
 }
 
+.app-explanation {
+    background-color: #e7f3fe; /* Light blue background */
+    border: 1px solid #b_e_d_4_f_0; /* Slightly darker blue border */
+    border-left: 5px solid #007bff; /* Primary blue left border for emphasis */
+    padding: 15px 20px;
+    margin-top: 20px;
+    margin-bottom: 30px;
+    border-radius: 5px;
+}
+
+.app-explanation h3 {
+    color: #0056b3; /* Darker blue for headings */
+    margin-top: 0;
+    margin-bottom: 10px;
+}
+
+.app-explanation p, .app-explanation ol {
+    margin-bottom: 10px;
+    color: #333; /* Dark grey for text for readability */
+}
+
+.app-explanation ol {
+    padding-left: 20px;
+}
+
+.app-explanation li {
+    margin-bottom: 5px;
+}
+
 .controls { 
     margin-bottom: 25px; 
     padding: 15px;
@@ -77,6 +106,24 @@ p {
     background-color: #0056b3;
 }
 
+/* Style for the new manage-files-button (can be the same as setup-ai-button) */
+#manage-files-button {
+    /* display: block; /* Already handled by inline style initially, but good for consistency if shown */
+    /* width: 100%; /* Already handled by .controls button */
+    /* padding: 12px 15px; /* Already handled by .controls button */
+    background-color: #6c757d; /* A secondary button color (e.g., grey) */
+    /* color: white; /* Already handled by .controls button */
+    /* border: none; /* Already handled by .controls button */
+    /* border-radius: 4px; /* Already handled by .controls button */
+    /* cursor: pointer; /* Already handled by .controls button */
+    /* font-size: 16px; /* Already handled by .controls button */
+    /* transition: background-color 0.2s ease-in-out; /* Already handled by .controls button */
+}
+
+#manage-files-button:hover {
+    background-color: #5a6268; /* Darker shade for hover */
+}
+
 .controls button:disabled { 
     background-color: #cccccc; 
     cursor: not-allowed;
@@ -116,4 +163,83 @@ p {
     background-color: #f8d7da; 
     border-left-color: #dc3545; 
     color: #721c24;
+}
+
+/* Styles for manage_files.html */
+#course-title {
+    text-align: left; /* Override h1 center align if needed */
+    margin-bottom: 20px;
+}
+
+#course-name-placeholder {
+    font-weight: normal;
+    color: #555;
+}
+
+.back-link {
+    display: inline-block;
+    margin-bottom: 20px;
+    color: #007bff;
+    text-decoration: none;
+}
+
+.back-link:hover {
+    text-decoration: underline;
+}
+
+.file-list {
+    list-style: none;
+    padding-left: 0;
+    margin-bottom: 20px;
+}
+
+.file-list li {
+    background-color: #f9f9f9;
+    border: 1px solid #e0e0e0;
+    padding: 10px 15px;
+    margin-bottom: 8px;
+    border-radius: 4px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.file-list li span {
+    flex-grow: 1;
+    margin-right: 10px; /* Space before delete button */
+}
+
+.delete-btn {
+    padding: 6px 12px;
+    background-color: #dc3545; /* Red for delete */
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background-color 0.2s ease-in-out;
+}
+
+.delete-btn:hover {
+    background-color: #c82333; /* Darker red on hover */
+}
+
+.small-text {
+    font-size: 0.9em;
+    color: #666;
+    margin-top: -10px; /* Adjust spacing after buttons or headings */
+    margin-bottom: 15px;
+}
+
+/* Ensure status messages on manage_files page uses the same styling */
+#status-messages-manage p {
+    /* Styles are already defined for #status-messages .info, .success, etc. */
+    /* If #status-messages-manage itself needs specific container styling: */
+    margin-top: 20px;
+}
+
+/* Specific styling for task items if needed */
+#processing-files-list li.error-task {
+    background-color: #f8d7da; /* Light red for error tasks */
+    border-left: 5px solid #dc3545;
 }

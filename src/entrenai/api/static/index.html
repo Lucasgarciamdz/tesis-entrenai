@@ -10,19 +10,28 @@
     <div class="container">
         <h1>Bienvenido a Entrenai</h1>
         <p>Entrenai te permite crear una IA personalizada para tus cursos de Moodle, utilizando el material que proporciones para responder preguntas de los estudiantes.</p>
+
+        <div class="app-explanation">
+            <h3>¿Qué es Entrenai?</h3>
+            <p>Entrenai es una herramienta que se integra con Moodle para potenciar tus cursos con inteligencia artificial. Sube tus materiales (PDFs, DOCXs, PPTXs) y Entrenai permitirá a tus estudiantes realizar consultas y obtener respuestas basadas en dicho contenido, directamente desde Moodle.</p>
+            <h3>¿Cómo empezar?</h3>
+            <ol>
+                <li>Selecciona tu curso de la lista de abajo.</li>
+                <li>Haz clic en "Crear IA para este Curso" para realizar la configuración inicial. Esto creará una sección especial en tu curso de Moodle con las herramientas necesarias.</li>
+                <li>Una vez configurado, podrás gestionar los archivos que la IA utiliza y ver el estado de procesamiento.</li>
+            </ol>
+        </div>
         
         <h2>Configurar IA para un Curso</h2>
         
         <div class="controls">
-            <label for="course-search">Buscar Curso:</label>
-            <input type="text" id="course-search" placeholder="Escribe para filtrar cursos...">
-            
             <label for="course-select">Selecciona un Curso:</label>
             <select id="course-select" name="course-select">
                 <option value="">Cargando cursos...</option>
             </select>
             
             <button id="setup-ai-button">Crear IA para este Curso</button>
+            <button id="manage-files-button" style="display:none; margin-top: 10px;">Gestionar Archivos de IA</button>
         </div>
         
         <div id="status-messages">

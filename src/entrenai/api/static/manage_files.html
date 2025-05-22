@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestionar Archivos de IA</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- <link rel="stylesheet" href="manage_files.css"> --> <!-- If a separate CSS file is created -->
+</head>
+<body>
+    <div class="container">
+        <h1 id="course-title">Gestionar Archivos de IA para el Curso: <span id="course-name-placeholder">[Cargando nombre del curso...]</span></h1>
+        <a href="index.html" class="back-link">&larr; Volver a la página principal</a>
+
+        <div id="status-messages-manage">
+            <!-- Status messages will appear here -->
+        </div>
+
+        <h2>Acciones del Curso</h2>
+        <div class="controls">
+            <button id="refresh-moodle-files-button">Actualizar Archivos desde Moodle</button>
+            <p class="small-text">Haz clic aquí para que Entrenai revise la carpeta del curso en Moodle en busca de archivos nuevos o actualizados para procesar.</p>
+        </div>
+
+        <h2>Archivos Indexados</h2>
+        <p class="small-text">Estos archivos ya han sido procesados y están siendo utilizados por la IA.</p>
+        <ul id="indexed-files-list" class="file-list">
+            <!-- Indexed files will be listed here by JavaScript -->
+            <li>No hay archivos indexados o aún no se han cargado.</li>
+        </ul>
+
+        <h2>Archivos en Procesamiento</h2>
+        <p class="small-text">Estos archivos están siendo procesados actualmente por la IA. El estado se actualizará automáticamente.</p>
+        <ul id="processing-files-list" class="file-list">
+            <!-- Files being processed will be listed here by JavaScript -->
+            <li>No hay archivos procesándose actualmente.</li>
+        </ul>
+    </div>
+
+    <script src="manage_files.js"></script>
+</body>
+</html>
