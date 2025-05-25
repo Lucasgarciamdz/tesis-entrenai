@@ -61,12 +61,12 @@ services:
       - "${PGVECTOR_HOST_PORT:-5433}:5432" # Expose on a different host port if 5432 is taken
     volumes:
       - pgvector_data:/var/lib/postgresql/data
+      - ./src/entrenai/core/db/init.sql:/docker-entrypoint-initdb.d/init.sql
     environment:
       POSTGRES_USER: ${PGVECTOR_USER:-pgvector_user}
       POSTGRES_PASSWORD: ${PGVECTOR_PASSWORD:-pgvector_password}
       POSTGRES_DB: ${PGVECTOR_DB_NAME:-pgvector_db}
       # Optional: Command to create extension if not automatically handled by the image
-      # POSTGRES_INITDB_ARGS: "--initdb-statement='CREATE EXTENSION IF NOT EXISTS vector;'"
     networks:
       - entrenai_net
     healthcheck:
@@ -145,49 +145,51 @@ services:
     networks:
       - entrenai_net
 
-  # # --- Redis for Celery ---
-  # redis:
-  #   image: "redis:alpine"
-  #   container_name: entrenai_redis
-  #   restart: unless-stopped
-  #   ports:
-  #     - "${REDIS_HOST_PORT:-6379}:6379"
-  #   volumes:
-  #     - redis_data:/data
-  #   networks:
-  #     - entrenai_net
-  #   healthcheck:
-  #     test: ["CMD", "redis-cli", "ping"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
+  # --- Redis for Celery ---
+  redis:
+    image: "redis:alpine"
+    container_name: entrenai_redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_HOST_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - entrenai_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
   
-  # celery_worker:
-  #   build: . # Assumes Dockerfile is in the root and copies src to /app/src
-  #   container_name: entrenai_celery_worker
-  #   restart: unless-stopped
-  #   command: sh -c "celery -A src.entrenai.celery_app.app worker -l INFO -P eventlet"
-  #   volumes:
-  #     - ./src:/app/src # Mount local src to /app/src in container
-  #     - ./data:/app/data # Mount local data to /app/data in container (for file processing outputs like markdown)
-  #   env_file:
-  #     - .env # Load environment variables from .env file
-  #   environment:
-  #     # Override or set specific variables if needed, .env takes precedence for shared ones
-  #     CELERY_BROKER_URL: redis://redis:6379/0
-  #     CELERY_RESULT_BACKEND: redis://redis:6379/0
-  #     # Ensure PYTHONPATH is set if your Dockerfile doesn't handle it for 'src' imports
-  #     # PYTHONUNBUFFERED: 1 # Good for seeing logs immediately
-  #   depends_on:
-  #     redis:
-  #       condition: service_healthy
-  #     pgvector_db: # If tasks might interact with pgvector
-  #       condition: service_healthy
-  #     # Add other dependencies if tasks directly require them at startup
-  #     # moodle_db:
-  #     #   condition: service_healthy
-  #   networks:
-  #     - entrenai_net
+  celery_worker:
+    build: . # Assumes Dockerfile is in the root and copies src to /app/src
+    container_name: entrenai_celery_worker
+    restart: unless-stopped
+    command: sh -c "celery -A src.entrenai.celery_app.app worker -l INFO -P eventlet"
+    volumes:
+      - ./src:/app/src # Mount local src to /app/src in container
+      - ./data:/app/data # Mount local data to /app/data in container (for file processing outputs like markdown)
+    env_file:
+      - .env # Load environment variables from .env file
+    environment:
+      # Override or set specific variables if needed, .env takes precedence for shared ones
+      APP_ENV: docker # Indica al config.py que use la configuración de Docker para Pgvector
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+
+      # Ensure PYTHONPATH is set if your Dockerfile doesn't handle it for 'src' imports
+      # PYTHONUNBUFFERED: 1 # Good for seeing logs immediately
+    depends_on:
+      redis:
+        condition: service_healthy
+      pgvector_db: # If tasks might interact with pgvector
+        condition: service_healthy
+      # Add other dependencies if tasks directly require them at startup
+      # moodle_db:
+      #   condition: service_healthy
+    networks:
+      - entrenai_net
 
 volumes:
   moodle_db_data:

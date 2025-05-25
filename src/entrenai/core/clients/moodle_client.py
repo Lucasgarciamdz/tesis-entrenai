@@ -65,7 +65,8 @@ class MoodleClient:
         else:
             logger.warning("MoodleClient inicializado sin una URL base válida.")
 
-    def _process_courses_data(self, courses_data: Any) -> List[MoodleCourse]:
+    @staticmethod
+    def _process_courses_data(courses_data: Any) -> List[MoodleCourse]:
         """
         Helper para procesar y validar datos de cursos de la API de Moodle.
 
@@ -536,9 +537,8 @@ class MoodleClient:
             logger.exception(f"Error extrayendo archivos de carpeta: {e}")
             return []
 
-    def _parse_folder_contents(
-        self, module: dict, folder_cmid: int
-    ) -> List[MoodleFile]:
+    @staticmethod
+    def _parse_folder_contents(module: dict, folder_cmid: int) -> List[MoodleFile]:
         """Parse the contents of a folder module to extract file information.
 
         Args:

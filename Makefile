@@ -8,7 +8,7 @@ VENV_DIR = .venv
 VENV_ACTIVATE = . $(VENV_DIR)/bin/activate
 
 # Default FastAPI run command
-RUN_ARGS = --host $(shell grep FASTAPI_HOST .env | cut -d '=' -f2) --port $(shell grep FASTAPI_PORT .env | cut -d '=' -f2)
+RUN_ARGS = --host $(shell grep FASTAPI_HOST .env | cut -d '=' -f2) --port $(shell grep FASTAPI_PORT .env | cut -d '=' -f2) --reload
 
 .PHONY: help setup run test lint docs clean services-up services-down services-logs services-restart
 

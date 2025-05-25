@@ -471,7 +471,7 @@ async def setup_ia_for_course(
         # refresh_files_url = str(request.base_url.replace(path=str(refresh_path)))
         # New way:
         refresh_files_url = (
-            request.base_url.rstrip("/")
+            str(request.base_url).rstrip("/")
             + "/static/manage_files.html?course_id="
             + str(course_id)
         )
@@ -600,7 +600,15 @@ async def refresh_course_files(
     files_to_process_count = 0
     tasks_dispatched_count = 0
     dispatched_task_ids: List[str] = []  # To store IDs of dispatched tasks
-    course_download_dir = Path(base_config.download_dir) / str(course_id)
+    # Ruta que el API podría usar para crear el directorio en el host/API-environment
+    course_download_dir_on_api_host = (
+        Path(base_config.download_dir) / str(course_id)
+    ).resolve()
+
+    # Ruta que se pasará a la tarea Celery (relativa al WORKDIR del contenedor Celery, o absoluta dentro del contenedor)
+    # base_config.download_dir es 'data/downloads'
+    # Esto resultará en 'data/downloads/<course_id>'
+    download_dir_for_task_str = str(Path(base_config.download_dir) / str(course_id))
 
     try:
         # 1. Asegurar que existe la tabla de Pgvector antes de procesar archivos
@@ -685,7 +693,8 @@ async def refresh_course_files(
         logger.info(
             f"Se encontraron {len(moodle_files)} archivos en la carpeta de Moodle. Verificando archivos nuevos/modificados..."
         )
-        course_download_dir.mkdir(
+        # Asegurar que el directorio de descarga del curso exista (creado por el API en su entorno)
+        course_download_dir_on_api_host.mkdir(
             parents=True, exist_ok=True
         )  # Ensure download dir for the course exists
 
@@ -710,21 +719,30 @@ async def refresh_course_files(
                     "selected_provider": base_config.ai_provider
                 }
                 if base_config.ai_provider == "gemini":
-                    ai_provider_config_payload["gemini"] = gemini_config.model_dump()
+                    ai_provider_config_payload["gemini"] = vars(gemini_config)
                 else:  # Default to ollama
-                    ai_provider_config_payload["ollama"] = ollama_config.model_dump()
+                    ai_provider_config_payload["ollama"] = vars(ollama_config)
 
                 # Dispatch Celery task
                 try:
                     task_result = process_moodle_file_task.delay(
                         course_id=course_id,
                         course_name_for_pgvector=course_name_for_pgvector,
-                        moodle_file_info=mf.model_dump(),
-                        download_dir_str=str(course_download_dir),
+                        moodle_file_info={
+                            "filename": mf.filename,
+                            "filepath": mf.filepath,
+                            "filesize": mf.filesize,
+                            "fileurl": str(
+                                mf.fileurl
+                            ),  # Explicitly convert HttpUrl to string
+                            "timemodified": mf.timemodified,
+                            "mimetype": mf.mimetype,
+                        },
+                        download_dir_str=download_dir_for_task_str,  # <--- CAMBIO CLAVE AQUÍ
                         ai_provider_config=ai_provider_config_payload,
-                        pgvector_config_dict=pgvector_config.model_dump(),
-                        moodle_config_dict=moodle_config.model_dump(),
-                        base_config_dict=base_config.model_dump(),
+                        pgvector_config_dict=vars(pgvector_config),
+                        moodle_config_dict=vars(moodle_config),
+                        base_config_dict=vars(base_config),
                     )
                     tasks_dispatched_count += 1
                     dispatched_task_ids.append(task_result.id)
@@ -744,23 +762,25 @@ async def refresh_course_files(
 
         # 7. Cleanup (optional, as tasks handle individual file cleanup)
         # The main course_download_dir might still be useful for tasks if they are slow to pick up
-        # Or if multiple tasks share it. Consider if cleanup here is still needed.
+        # Or if multiple tasks share it. Consider if this cleanup is still needed.
         # For now, individual tasks clean up their own downloaded files.
         # If the directory is meant to be cleaned only if empty:
         try:
-            if course_download_dir.exists() and not any(course_download_dir.iterdir()):
+            if course_download_dir_on_api_host.exists() and not any(
+                course_download_dir_on_api_host.iterdir()
+            ):
                 # This check might be problematic if tasks haven't run yet.
                 # Consider if this cleanup is still appropriate here.
-                # shutil.rmtree(course_download_dir)
+                # shutil.rmtree(course_download_dir_on_api_host)
                 # logger.info(
-                #     f"Directorio de descargas del curso vacío (aparentemente) eliminado: {course_download_dir}"
+                #     f"Directorio de descargas del curso vacío (aparentemente) eliminado: {course_download_dir_on_api_host}"
                 # )
                 logger.info(
-                    f"Revisión de directorio de descargas {course_download_dir} completada. Las tareas gestionarán los archivos individuales."
+                    f"Revisión de directorio de descargas {course_download_dir_on_api_host} completada. Las tareas gestionarán los archivos individuales."
                 )
         except Exception as e_rm:
             logger.warning(
-                f"No se pudo realizar la limpieza del directorio de descargas del curso {course_download_dir}: {e_rm}"
+                f"No se pudo realizar la limpieza del directorio de descargas del curso {course_download_dir_on_api_host}: {e_rm}"
             )
 
         # 8. Prepare and return response
@@ -849,28 +869,13 @@ async def get_indexed_files_for_course(
     course_id: int,
     pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper),
 ):
-    """
-    Recupera una lista de archivos indexados y sus fechas de última modificación
-    para un ID de curso específico.
-    """
+    """Recupera una lista de archivos indexados y sus fechas de última modificación para un ID de curso específico."""
     logger.info(
         f"Solicitud para obtener archivos indexados para el curso ID: {course_id}"
     )
     try:
-        # Suponiendo que get_processed_files_timestamps devuelve un dict como {'filename': timestamp}
-        # o None si el curso no existe o no tiene archivos.
-        # Nota: Será necesario ajustar esto si el método get_course_id_from_name o similar es necesario
-        # o si el manejo de 'course_name_for_pgvector' debe replicarse aquí.
-        # Por simplicidad, se asume que get_processed_files_timestamps puede manejar un course_id directamente
-        # o que ya existe una forma de mapear course_id a la tabla/colección correcta internamente.
-
-        # TODO: Determinar si es necesario obtener 'course_name_for_pgvector' como en otros endpoints.
-        # Si PgvectorWrapper.get_processed_files_timestamps espera un nombre de tabla derivado
-        # del nombre del curso en lugar de course_id, entonces se necesita lógica adicional aquí.
-        # Por ahora, se asume que puede trabajar directamente con course_id o un mapeo interno.
-
         processed_files_timestamps = pgvector_db.get_processed_files_timestamps(
-            course_id=course_id  # Pasando course_id directamente
+            course_id=course_id
         )
 
         if processed_files_timestamps is None or not processed_files_timestamps:

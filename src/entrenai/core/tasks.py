@@ -260,12 +260,10 @@ def process_moodle_file_task(
                 logger.info(
                     f"Task ID: {self.request.id} - Pgvector connection closed for file: {filename}"
                 )
-                return
             except Exception as e_close:
                 logger.error(
                     f"Task ID: {self.request.id} - Error closing Pgvector connection for file: {filename}. Error: {e_close}",
                     exc_info=True,
                 )
-                return
         # MoodleClient and AI Wrappers using requests/aiohttp typically don't need explicit close here
         # as their sessions are managed by the instance lifecycle or underlying libraries.

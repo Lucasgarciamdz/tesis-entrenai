@@ -40,10 +40,13 @@ chardet
 pgvector
 
 # Celery and Redis
-celery==5.3.6
+celery
+eventlet # Required for Celery's eventlet pool
 redis==5.0.1
 
 # Generic
 uv
 ruff
 psycopg2-binary
+pydantic
+protobuf

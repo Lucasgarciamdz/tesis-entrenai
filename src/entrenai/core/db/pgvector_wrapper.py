@@ -68,7 +68,8 @@ class PgvectorWrapper:
             self.conn = None
             self.cursor = None
 
-    def _normalize_name_for_table(self, name: str) -> str:
+    @staticmethod
+    def _normalize_name_for_table(name: str) -> str:
         """Normalizes a name for use as a PostgreSQL table name."""
         if not name:
             logger.error("Attempted to normalize an empty name for the table.")

@@ -202,7 +202,8 @@ class OllamaWrapper:
                 f"Falló la generación de la completación de chat: {e}"
             ) from e
 
-    def _extract_markdown_content(self, response: Any) -> str:
+    @staticmethod
+    def _extract_markdown_content(response: Any) -> str:
         """
         Extrae contenido markdown de la respuesta de la API de Ollama.
         """
@@ -220,7 +221,8 @@ class OllamaWrapper:
         # If we got here, we couldn't extract the content
         raise OllamaWrapperError("Formato de respuesta inesperado de la API de Ollama")
 
-    def _save_markdown_to_file(self, markdown_content: str, save_path: str) -> None:
+    @staticmethod
+    def _save_markdown_to_file(markdown_content: str, save_path: str) -> None:
         """
         Guarda contenido markdown en un archivo en la ruta especificada.
         """
@@ -310,7 +312,8 @@ class OllamaWrapper:
                 f"Falló el formateo de texto a Markdown: {e}"
             ) from e
 
-    def _preprocess_text_content(self, text: str) -> str:
+    @staticmethod
+    def _preprocess_text_content(text: str) -> str:
         """
         Preprocesa el texto de entrada antes de enviarlo al LLM.
         Elimina cualquier sección <think> y otros metadatos no deseados.
@@ -323,7 +326,8 @@ class OllamaWrapper:
         """
         return preprocess_text_content(text)
 
-    def _postprocess_markdown_content(self, markdown: str) -> str:
+    @staticmethod
+    def _postprocess_markdown_content(markdown: str) -> str:
         """
         Performs final cleanup on the generated markdown.
 

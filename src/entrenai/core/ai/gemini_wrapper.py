@@ -164,7 +164,8 @@ class GeminiWrapper:
                 f"Falló la generación de completación de chat: {e}"
             ) from e
 
-    def _preprocess_text_content(self, text: str) -> str:
+    @staticmethod
+    def _preprocess_text_content(text: str) -> str:
         """
         Preprocesa el texto de entrada antes de enviarlo al LLM.
         Elimina cualquier sección <think> y otros metadatos no deseados.
@@ -177,7 +178,8 @@ class GeminiWrapper:
         """
         return preprocess_text_content(text)
 
-    def _postprocess_markdown_content(self, markdown: str) -> str:
+    @staticmethod
+    def _postprocess_markdown_content(markdown: str) -> str:
         """
         Performs final cleanup on the generated markdown.
 
@@ -276,6 +278,7 @@ class GeminiWrapper:
                 f"Falló el formateo de texto a Markdown: {e}"
             ) from e
 
-    def _save_markdown_to_file(self, markdown_content: str, save_path: str) -> None:
+    @staticmethod
+    def _save_markdown_to_file(markdown_content: str, save_path: str) -> None:
         """Guarda el contenido Markdown en un archivo."""
         save_markdown_to_file(markdown_content, Path(save_path))

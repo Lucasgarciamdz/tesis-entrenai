@@ -91,7 +91,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const selectedCourseId = courseSelect.value;
         if (selectedCourseId) {
           // Navigate to the manage_files.html page with the course_id as a query parameter
-          window.location.href = `/static/manage_files.html?course_id=${selectedCourseId}`;
+          window.location.href = `/ui/manage_files.html?course_id=${selectedCourseId}`;
         } else {
           updateStatus('Por favor, selecciona un curso primero antes de gestionar archivos.', 'warning');
         }
@@ -105,7 +105,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const selectedCourse = allCourses.find(c => c.id === selectedCourseId); // Comparación estricta
+        const selectedCourse = allCourses.find(c => c.id == selectedCourseId); // Cambiar === por ==
         if (!selectedCourse) {
              updateStatus('Curso seleccionado no válido.', 'error');
             return;
