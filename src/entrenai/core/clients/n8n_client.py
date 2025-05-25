@@ -1,11 +1,12 @@
-import requests
 import json  # For loading workflow JSON
 from pathlib import Path  # For workflow_json_path
 from typing import List, Optional, Dict, Any
 from urllib.parse import urljoin
 
-from src.entrenai.config import N8NConfig  # OllamaConfig for type hint
+import requests
+
 from src.entrenai.api.models import N8NWorkflow
+from src.entrenai.config import N8NConfig  # OllamaConfig for type hint
 from src.entrenai.config.logger import get_logger
 
 logger = get_logger(__name__)
@@ -385,8 +386,10 @@ class N8NClient:
     def configure_and_deploy_chat_workflow(
         self,
         course_id: int,  # For logging and potential future use in parametrization
-        course_name: str,  # For logging and potential future use in parametrization
-        qdrant_collection_name: str,  # For potential future use in parametrization
+        course_name: str,
+        # For logging and potential future use in parametrization
+        qdrant_collection_name: str,
+        # For potential future use in parametrization
         ollama_config_params: Dict[
             str, Any
         ],  # For potential future use in parametrization

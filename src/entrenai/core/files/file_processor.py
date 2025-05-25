@@ -2,24 +2,23 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import List, Optional, Dict
 
-from src.entrenai.config.logger import get_logger
+# For DOCX:
+import docx  # type: ignore
+import pytesseract  # type: ignore
 
 # Import specific libraries for file processing
 # For PDF:
 from pdf2image import convert_from_path
-
 from pdf2image.exceptions import (
     PDFInfoNotInstalledError,
     PDFPageCountError,
     PDFSyntaxError,
 )  # type: ignore
-import pytesseract  # type: ignore
-
-# For DOCX:
-import docx  # type: ignore
 
 # For PPTX:
 from pptx import Presentation  # type: ignore
+
+from src.entrenai.config.logger import get_logger
 
 logger = get_logger(__name__)
 

@@ -1,15 +1,16 @@
-import requests
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from urllib.parse import urljoin
 
-from src.entrenai.config import MoodleConfig
+import requests
+
 from src.entrenai.api.models import (
     MoodleCourse,
     MoodleSection,
     MoodleModule,
     MoodleFile,
 )
+from src.entrenai.config import MoodleConfig
 from src.entrenai.config.logger import get_logger
 
 logger = get_logger(__name__)
@@ -313,7 +314,8 @@ class MoodleClient:
             module_data_for_api: Dict[str, Any] = {
                 "modname": mod_type,
                 "name": module_name,
-                "section": section_id,  # Moodle necesita el ID de la sección donde se creará el módulo
+                "section": section_id,
+                # Moodle necesita el ID de la sección donde se creará el módulo
             }
 
             # Incorporar instance_params y common_module_options en module_data_for_api
@@ -366,7 +368,8 @@ class MoodleClient:
         url_name: str,
         external_url: str,
         description: str = "",
-        display_mode: int = 0,  # 0: Automático, 1: Embebido, 2: Abrir, 3: En pop-up
+        display_mode: int = 0,
+        # 0: Automático, 1: Embebido, 2: Abrir, 3: En pop-up
     ) -> Optional[MoodleModule]:
         """Asegura la existencia de un recurso URL en una sección, creándolo si es necesario."""
         logger.info(

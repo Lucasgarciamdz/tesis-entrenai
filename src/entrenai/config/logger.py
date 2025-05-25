@@ -1,5 +1,6 @@
 import logging
 import sys
+
 from src.entrenai.config import base_config
 
 

@@ -1,14 +1,8 @@
 import logging
-from pathlib import Path
 import traceback  # For detailed error logging
+from pathlib import Path
 
 from src.entrenai.celery_app import app  # Import the Celery app instance
-from src.entrenai.core.ai_wrapper_ollama import OllamaWrapper
-from src.entrenai.core.ai_wrapper_gemini import GeminiWrapper
-from src.entrenai.core.moodle_client import MoodleClient
-from src.entrenai.core.file_processor import FileProcessor
-from src.entrenai.core.embedding_manager import EmbeddingManager
-from src.entrenai.db.pgvector_wrapper import PgvectorWrapper
 from src.entrenai.config.config import (
     MoodleConfig,
     PgvectorConfig,
@@ -16,6 +10,12 @@ from src.entrenai.config.config import (
     GeminiConfig,
     BaseConfig,
 )
+from src.entrenai.core.ai.embedding_manager import EmbeddingManager
+from src.entrenai.core.ai.gemini_wrapper import GeminiWrapper
+from src.entrenai.core.ai.ollama_wrapper import OllamaWrapper
+from src.entrenai.core.clients.moodle_client import MoodleClient
+from src.entrenai.core.db.pgvector_wrapper import PgvectorWrapper
+from src.entrenai.core.files.file_processor import FileProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +99,7 @@ def process_moodle_file_task(
             file_url, download_dir_path, filename
         )
         if not downloaded_path:
-            raise Exception(f"Failed to download file: {filename}")
+            raise FileNotFoundError(f"No se pudo descargar el archivo: {filename}")
         logger.info(
             f"Task ID: {self.request.id} - File downloaded to: {downloaded_path}"
         )
@@ -110,7 +110,7 @@ def process_moodle_file_task(
             downloaded_path
         )  # Assuming error handling inside or returns None
         if raw_text is None:
-            raise Exception(f"Failed to extract text from file: {filename}")
+            raise ValueError(f"No se pudo extraer texto del archivo: {filename}")
         logger.info(
             f"Task ID: {self.request.id} - Text extracted successfully from: {filename}"
         )
@@ -128,7 +128,7 @@ def process_moodle_file_task(
             raw_text, save_path=markdown_file_path
         )
         if not markdown_text:
-            raise Exception(f"Failed to format text to markdown for: {filename}")
+            raise RuntimeError(f"No se pudo formatear el texto a markdown para: {filename}")
         logger.info(
             f"Task ID: {self.request.id} - Markdown generated and saved to: {markdown_file_path}"
         )
@@ -160,11 +160,11 @@ def process_moodle_file_task(
         )
         contextualized_chunks = []
         for i, chunk_text in enumerate(chunks):
-            # TODO: Determine if a more specific chunk_id or reference is needed
+            # Contextualizar cada chunk con información del archivo
             contextualized_text = embedding_manager.contextualize_chunk(
-                text_chunk=chunk_text,
-                file_name=filename,
-                # chunk_id=f"chunk_{i+1}" # Optional: if your method uses it
+                chunk_text,
+                filename,
+                f"chunk_{i+1}"
             )
             contextualized_chunks.append(contextualized_text)
         logger.info(
@@ -183,24 +183,16 @@ def process_moodle_file_task(
         )
 
         # 15. Prepare Chunks for DB
-        # Assuming MoodleFile object might be needed here, or its relevant fields
-        # For simplicity, passing filename and other details directly.
-        # The MoodleFile model itself is not passed to avoid serialization issues with Pydantic models in Celery.
-        file_metadata_for_chunks = {
-            "file_name": filename,
-            "file_path": str(downloaded_path),  # Or a more persistent URL if applicable
-            "course_id": str(course_id),  # Ensure type consistency if DB expects string
-            "last_modified": str(timemodified),  # Ensure type consistency
-            # Add any other relevant metadata from moodle_file_info
-        }
         logger.info(
             f"Task ID: {self.request.id} - Preparing document chunks for DB for: {filename}"
         )
         db_chunks = embedding_manager.prepare_document_chunks_for_vector_db(
-            course_id=course_id,  # course_id is int
-            file_info=moodle_file_info,  # Pass the original dict
+            document_id=f"{course_id}_{filename}",
+            document_title=filename,
+            source_filename=filename,
             chunks_text=contextualized_chunks,
-            embeddings_vectors=chunk_embeddings,
+            embeddings=chunk_embeddings,
+            course_id=course_id
         )
         logger.info(
             f"Task ID: {self.request.id} - Prepared {len(db_chunks)} chunks for DB for: {filename}"
@@ -268,10 +260,12 @@ def process_moodle_file_task(
                 logger.info(
                     f"Task ID: {self.request.id} - Pgvector connection closed for file: {filename}"
                 )
+                return
             except Exception as e_close:
                 logger.error(
                     f"Task ID: {self.request.id} - Error closing Pgvector connection for file: {filename}. Error: {e_close}",
                     exc_info=True,
                 )
+                return
         # MoodleClient and AI Wrappers using requests/aiohttp typically don't need explicit close here
         # as their sessions are managed by the instance lifecycle or underlying libraries.

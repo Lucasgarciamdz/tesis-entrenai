@@ -1,13 +1,12 @@
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-
-from src.entrenai.config.logger import get_logger
-from src.entrenai.config import base_config
+from fastapi.staticfiles import StaticFiles
 
 # Direct imports to avoid potential circular imports
 import src.entrenai.api.routers.course_setup as course_setup
 import src.entrenai.api.routers.search as search
+from src.entrenai.config import base_config
+from src.entrenai.config.logger import get_logger
 
 # Initialize logger for this module
 logger = get_logger(__name__)
@@ -65,17 +64,19 @@ async def health_check():
 app.include_router(course_setup.router)
 app.include_router(search.router)
 
-# Montar directorio estático
-# Asume que 'static' está en la raíz del proyecto, y main.py está en src/entrenai/api/
-# Por lo tanto, necesitamos subir dos niveles desde __file__ para llegar a la raíz del proyecto.
-# project_root = Path(__file__).resolve().parent.parent.parent
-# static_files_dir = project_root / "static"
-# app.mount("/ui", StaticFiles(directory=str(static_files_dir), html=True), name="ui")
+app.mount("/ui", StaticFiles(directory="src/entrenai/api/static", html=True), name="ui")
 
-# Simplificación: Asumir que la aplicación se ejecuta desde la raíz del proyecto
-# donde el directorio 'static' es directamente accesible.
-# Esto es común si usas `uvicorn src.entrenai.api.main:app` desde la raíz.
-# Si `make run` ejecuta uvicorn desde la raíz, "static" es correcto.
-# El Makefile actual ejecuta `uvicorn src.entrenai.api.main:app --reload $(RUN_ARGS)`
-# que se ejecuta desde la raíz del proyecto, por lo que "static" debería ser correcto.
-app.mount("/ui", StaticFiles(directory="static", html=True), name="ui")
+if __name__ == "__main__":
+    import uvicorn
+
+    # Cargar configuración desde el archivo .env
+    # load_dotenv()
+
+    # Iniciar el servidor Uvicorn
+    uvicorn.run(
+        app,
+        host=base_config.fastapi_host,
+        port=base_config.fastapi_port,
+        log_level=base_config.log_level.lower(),
+        reload=True,  # Solo para desarrollo
+    )

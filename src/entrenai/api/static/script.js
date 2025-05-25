@@ -12,6 +12,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // Si se abre como file:// o desde otro servidor, se necesita la URL completa y CORS.
     const API_BASE_URL = 'http://localhost:8000/api/v1'; 
 
+    // Verifica que los elementos existen antes de usarlos
+    if (!courseSelect || !setupAiButton || !statusMessages || !manageFilesButton) {
+        console.error('Faltan elementos del DOM requeridos. Revisa el HTML.');
+        return;
+    }
+
     async function fetchCourses() {
         updateStatus('Cargando cursos desde Moodle...', 'info');
         try {

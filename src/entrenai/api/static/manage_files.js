@@ -9,6 +9,12 @@ document.addEventListener('DOMContentLoaded', () => {
     let courseId;
     let activeTasks = {}; // To keep track of intervals for tasks
 
+    // Verifica que los elementos existen antes de usarlos
+    if (!courseNamePlaceholder || !statusMessagesManage || !refreshMoodleFilesButton || !indexedFilesList || !processingFilesList) {
+        console.error('Faltan elementos del DOM requeridos en manage_files.html. Revisa el HTML.');
+        return;
+    }
+
     // --- Initialization ---
     function initializePage() {
         const params = new URLSearchParams(window.location.search);

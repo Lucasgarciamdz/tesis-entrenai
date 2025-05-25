@@ -1,11 +1,12 @@
-from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Dict, Optional, Any
+
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
-from src.entrenai.core.db import PgvectorWrapper  # Updated import
-from src.entrenai.core.ai.ai_provider import get_ai_wrapper, AIProviderError
 from src.entrenai.config import pgvector_config  # Updated import
 from src.entrenai.config.logger import get_logger
+from src.entrenai.core.ai.ai_provider import get_ai_wrapper, AIProviderError
+from src.entrenai.core.db import PgvectorWrapper  # Updated import
 
 logger = get_logger(__name__)
 
@@ -49,7 +50,8 @@ def get_ai_client():
 @router.post("/search", response_model=SearchResponse)
 async def search_context(
     search_request: ContextSearchRequest,
-    pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper),  # Updated dependency
+    pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper),
+    # Updated dependency
     ai_client=Depends(get_ai_client),
 ):
     """

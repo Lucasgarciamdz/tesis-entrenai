@@ -1,5 +1,8 @@
-from fastapi import APIRouter, HTTPException, Query, Depends, Request
+from pathlib import Path
 from typing import List, Optional, Dict, Any
+
+from celery.result import AsyncResult  # Import AsyncResult
+from fastapi import APIRouter, HTTPException, Query, Depends, Request
 
 from src.entrenai.api.models import (
     MoodleCourse,
@@ -8,16 +11,7 @@ from src.entrenai.api.models import (
     IndexedFile,  # Added for the new endpoint
     DeleteFileResponse,  # Added for the new DELETE endpoint
 )
-from src.entrenai.core.clients.moodle_client import MoodleClient, MoodleAPIError
-from src.entrenai.core.db import PgvectorWrapper, PgvectorWrapperError  # Updated import
-from src.entrenai.core.ai.ollama_wrapper import (
-    OllamaWrapper,
-)  # Keep for type hint if get_ai_client stays
-from src.entrenai.core.ai.gemini_wrapper import (
-    GeminiWrapper,
-)  # Keep for type hint if get_ai_client stays
-from src.entrenai.core.ai.ai_provider import get_ai_wrapper, AIProviderError
-from src.entrenai.core.clients.n8n_client import N8NClient
+from src.entrenai.celery_app import app as celery_app  # Import Celery app instance
 
 # from src.entrenai.core.files.file_tracker import FileTracker # Removed
 # from src.entrenai.core.files.file_processor import FileProcessor, FileProcessingError # Removed if not used directly
@@ -30,11 +24,18 @@ from src.entrenai.config import (
     base_config,
     n8n_config,
 )
-from src.entrenai.core.tasks import process_moodle_file_task  # Import Celery task
-from src.entrenai.celery_app import app as celery_app  # Import Celery app instance
-from celery.result import AsyncResult  # Import AsyncResult
 from src.entrenai.config.logger import get_logger
-from pathlib import Path
+from src.entrenai.core.ai.ai_provider import get_ai_wrapper, AIProviderError
+from src.entrenai.core.ai.gemini_wrapper import (
+    GeminiWrapper,
+)  # Keep for type hint if get_ai_client stays
+from src.entrenai.core.ai.ollama_wrapper import (
+    OllamaWrapper,
+)  # Keep for type hint if get_ai_client stays
+from src.entrenai.core.clients.moodle_client import MoodleClient, MoodleAPIError
+from src.entrenai.core.clients.n8n_client import N8NClient
+from src.entrenai.core.db import PgvectorWrapper, PgvectorWrapperError  # Updated import
+from src.entrenai.core.tasks import process_moodle_file_task  # Import Celery task
 
 logger = get_logger(__name__)
 
@@ -310,7 +311,8 @@ async def setup_ia_for_course(
         description="Nombre del curso para la IA (opcional, se intentará obtener de Moodle).",
     ),
     moodle: MoodleClient = Depends(get_moodle_client),
-    pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper),  # Updated dependency
+    pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper),
+    # Updated dependency
     ai_client=Depends(get_ai_client),
     n8n: N8NClient = Depends(get_n8n_client),
 ):
@@ -385,7 +387,8 @@ async def setup_ia_for_course(
         course_id=course_id,
         status="pendiente",
         message=f"Configuración iniciada para el curso {course_id} ('{course_name_str}').",
-        qdrant_collection_name=pgvector_table_name,  # Renamed field for clarity, though model might not reflect this directly
+        qdrant_collection_name=pgvector_table_name,
+        # Renamed field for clarity, though model might not reflect this directly
     )
 
     try:

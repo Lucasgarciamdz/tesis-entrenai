@@ -16,6 +16,7 @@ ollama
 
 # Google Gemini
 google-genai
+google
 
 # Testing
 pytest
@@ -45,3 +46,4 @@ redis==5.0.1
 # Generic
 uv
 ruff
+psycopg2-binary

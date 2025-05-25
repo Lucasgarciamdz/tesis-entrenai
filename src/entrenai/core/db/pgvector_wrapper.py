@@ -1,14 +1,15 @@
-import psycopg2  # Or psycopg if using version 3+
-from psycopg2.extras import RealDictCursor  # Or appropriate cursor for dict results
-from pgvector.psycopg2 import register_vector  # Or equivalent for psycopg3
 import re
 import time  # Added for timestamping
 from typing import List, Dict, Any  # Ensure Dict and Any are imported
 
-from src.entrenai.config import PgvectorConfig  # Use the new config
+import psycopg2  # Or psycopg if using version 3+
+from pgvector.psycopg2 import register_vector  # Or equivalent for psycopg3
+from psycopg2.extras import RealDictCursor  # Or appropriate cursor for dict results
+
 from src.entrenai.api.models import (
     DocumentChunk,
 )  # Assuming this model is still relevant
+from src.entrenai.config import PgvectorConfig  # Use the new config
 from src.entrenai.config.logger import get_logger
 
 logger = get_logger(__name__)

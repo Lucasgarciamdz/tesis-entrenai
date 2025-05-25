@@ -1,10 +1,10 @@
 import uuid
 from typing import List, Optional, Dict, Any, Union
 
-from src.entrenai.core.ai.ollama_wrapper import OllamaWrapper
-from src.entrenai.core.ai.gemini_wrapper import GeminiWrapper
 from src.entrenai.api.models import DocumentChunk
 from src.entrenai.config.logger import get_logger
+from src.entrenai.core.ai.gemini_wrapper import GeminiWrapper
+from src.entrenai.core.ai.ollama_wrapper import OllamaWrapper
 
 logger = get_logger(__name__)
 
@@ -135,7 +135,8 @@ class EmbeddingManager:
 
     def prepare_document_chunks_for_vector_db(
         self,
-        course_id: int,  # TODO: Consider if course_name should be passed here directly
+        course_id: int,
+        # TODO: Consider if course_name should be passed here directly
         document_id: str,
         source_filename: str,
         document_title: Optional[str],

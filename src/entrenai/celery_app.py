@@ -1,6 +1,7 @@
 import os
-from celery import Celery
 from logging import getLogger
+
+from celery import Celery
 
 logger = getLogger(__name__)
 

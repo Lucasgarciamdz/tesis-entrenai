@@ -1,7 +1,8 @@
-import os
-from dotenv import load_dotenv
-from typing import Optional
 import logging  # Import standard logging to get a logger instance
+import os
+from typing import Optional
+
+from dotenv import load_dotenv
 
 # Load environment variables from .env file
 # This should be called once when the application starts.

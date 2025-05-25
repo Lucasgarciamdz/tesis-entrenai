@@ -1,9 +1,10 @@
-from typing import List, Optional, Dict
-from google import genai
-from google.genai import types
 import os
 import re
 from datetime import datetime
+from typing import List, Optional, Dict
+
+from google import genai
+from google.genai import types
 
 from src.entrenai.config import GeminiConfig
 from src.entrenai.config.logger import get_logger

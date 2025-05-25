@@ -1,7 +1,5 @@
 from typing import Optional, Union, Dict, Any, List, cast
 
-from src.entrenai.core.ai.ollama_wrapper import OllamaWrapper, OllamaWrapperError
-from src.entrenai.core.ai.gemini_wrapper import GeminiWrapper, GeminiWrapperError
 from src.entrenai.config import (
     BaseConfig,
     OllamaConfig,
@@ -10,6 +8,8 @@ from src.entrenai.config import (
     gemini_config,
 )
 from src.entrenai.config.logger import get_logger
+from src.entrenai.core.ai.gemini_wrapper import GeminiWrapper, GeminiWrapperError
+from src.entrenai.core.ai.ollama_wrapper import OllamaWrapper, OllamaWrapperError
 
 logger = get_logger(__name__)
 

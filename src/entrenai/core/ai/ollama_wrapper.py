@@ -1,5 +1,6 @@
-import ollama
 from typing import List, Optional, Any
+
+import ollama
 
 from src.entrenai.config import ollama_config
 from src.entrenai.config.logger import get_logger

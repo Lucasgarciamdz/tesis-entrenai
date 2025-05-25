@@ -1,5 +1,7 @@
-from pydantic import BaseModel, Field, HttpUrl
 from typing import List, Optional
+
+from pydantic import BaseModel, Field, HttpUrl
+
 
 # --- Moodle Specific Models ---
 
