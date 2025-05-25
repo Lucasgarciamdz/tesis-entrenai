@@ -29,13 +29,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     const errorData = await response.json();
                     errorDetail = errorData.detail || errorDetail;
                 } catch (e) { /* No hacer nada si el cuerpo del error no es JSON */ }
-                throw new Error(errorDetail);
+                updateStatus(errorDetail, 'error');
+                return;
             }
             allCourses = await response.json();
             if (!Array.isArray(allCourses)) {
                 console.error("La respuesta de cursos no es un array:", allCourses);
                 allCourses = []; // Evitar errores posteriores
-                throw new Error("Formato de respuesta de cursos inesperado.");
+                updateStatus("Formato de respuesta de cursos inesperado.", 'error');
+                return;
             }
             populateCourseSelect(allCourses);
             if (allCourses.length > 0) {
@@ -103,7 +105,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const selectedCourse = allCourses.find(c => c.id == selectedCourseId); // Comparación no estricta por si acaso
+        const selectedCourse = allCourses.find(c => c.id === selectedCourseId); // Comparación estricta
         if (!selectedCourse) {
              updateStatus('Curso seleccionado no válido.', 'error');
             return;
@@ -127,7 +129,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await response.json();
 
             if (!response.ok) {
-                throw new Error(result.detail || `Error ${response.status}: Falló la configuración de la IA.`);
+                updateStatus(result.detail || `Error ${response.status}: Falló la configuración de la IA.`, 'error');
+                return;
             }
             
             updateStatus(`Configuración para "${courseDisplayName}" completada: ${result.message}`, 'success');
@@ -153,5 +156,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    fetchCourses();
+    fetchCourses().catch(error => {
+        console.error('Error inicial al cargar cursos:', error);
+        updateStatus('Error al cargar cursos inicialmente', 'error');
+    });
 });

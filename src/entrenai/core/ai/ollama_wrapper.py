@@ -1,9 +1,15 @@
 from typing import List, Optional, Any
+from pathlib import Path
 
 import ollama
 
 from src.entrenai.config import ollama_config
 from src.entrenai.config.logger import get_logger
+from src.entrenai.core.ai.common_utils import (
+    postprocess_markdown_content,
+    preprocess_text_content,
+    save_markdown_to_file,
+)
 
 logger = get_logger(__name__)
 
@@ -218,30 +224,7 @@ class OllamaWrapper:
         """
         Guarda contenido markdown en un archivo en la ruta especificada.
         """
-        try:
-            import os
-            from datetime import datetime
-
-            # Create directory if it doesn't exist
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-
-            # If save_path is a directory, generate a filename based on timestamp
-            if os.path.isdir(save_path):
-                filename = f"markdown_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-                full_path = os.path.join(save_path, filename)
-            else:
-                # Ensure file has .md extension
-                if not save_path.endswith(".md"):
-                    save_path += ".md"
-                full_path = save_path
-
-            # Write content to file usando modo binario para preservar codificación
-            with open(full_path, "wb") as f:
-                f.write(markdown_content.encode("utf-8"))
-
-            logger.info(f"Contenido Markdown guardado en {full_path}")
-        except Exception as e:
-            logger.error(f"Falló al guardar contenido Markdown en {save_path}: {e}")
+        save_markdown_to_file(markdown_content, Path(save_path))
 
     def format_to_markdown(
         self,
@@ -338,20 +321,7 @@ class OllamaWrapper:
         Returns:
             Texto limpio listo para la conversión a markdown.
         """
-        import re
-
-        # Remove <think>...</think> blocks
-        cleaned_text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-
-        # Remove other common metadata patterns that might appear in OCR or extracted text
-        cleaned_text = re.sub(
-            r"^\s*\[.*?\]\s*$", "", cleaned_text, flags=re.MULTILINE
-        )  # Remove [metadata] lines
-        cleaned_text = re.sub(
-            r"^\s*#\s*metadata:.*$", "", cleaned_text, flags=re.MULTILINE
-        )  # Remove #metadata lines
-
-        return cleaned_text.strip()
+        return preprocess_text_content(text)
 
     def _postprocess_markdown_content(self, markdown: str) -> str:
         """
@@ -363,25 +333,6 @@ class OllamaWrapper:
         Returns:
             Markdown limpio y bien formateado.
         """
-        import re
-
-        # Remove any lingering <think> tags that might have been generated
-        cleaned_markdown = re.sub(r"<think>.*?</think>", "", markdown, flags=re.DOTALL)
-
-        # Remove any "I've converted this to markdown..." explanatory text at the beginning
-        cleaned_markdown = re.sub(
-            r"^.*?(#|---|```)", r"\1", cleaned_markdown, flags=re.DOTALL, count=1
-        )
-
-        # Fix common formatting issues
-        # Ensure proper spacing after headings
-        cleaned_markdown = re.sub(r"(#{1,6}.*?)(\n(?!\n))", r"\1\n\n", cleaned_markdown)
-
-        # Ensure code blocks are properly formatted with newlines
-        cleaned_markdown = re.sub(
-            r"```(\w*)\n?([^`]+)```", r"```\1\n\2\n```", cleaned_markdown
-        )
-
-        return cleaned_markdown.strip()
+        return postprocess_markdown_content(markdown)
 
     # add_context_to_chunk será manejado por EmbeddingManager por ahora.

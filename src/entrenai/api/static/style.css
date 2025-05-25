@@ -36,7 +36,7 @@ p {
 
 .app-explanation {
     background-color: #e7f3fe; /* Light blue background */
-    border: 1px solid #b_e_d_4_f_0; /* Slightly darker blue border */
+    border: 1px solid #bed4f0; /* Slightly darker blue border */
     border-left: 5px solid #007bff; /* Primary blue left border for emphasis */
     padding: 15px 20px;
     margin-top: 20px;
@@ -209,20 +209,7 @@ p {
     margin-right: 10px; /* Space before delete button */
 }
 
-.delete-btn {
-    padding: 6px 12px;
-    background-color: #dc3545; /* Red for delete */
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 14px;
-    transition: background-color 0.2s ease-in-out;
-}
 
-.delete-btn:hover {
-    background-color: #c82333; /* Darker red on hover */
-}
 
 .small-text {
     font-size: 0.9em;
@@ -238,8 +225,4 @@ p {
     margin-top: 20px;
 }
 
-/* Specific styling for task items if needed */
-#processing-files-list li.error-task {
-    background-color: #f8d7da; /* Light red for error tasks */
-    border-left: 5px solid #dc3545;
-}
+

@@ -1,12 +1,25 @@
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch  # Added for mocking config
+from urllib.parse import urljoin
+from pathlib import Path
 
 # Adjust the import path to your FastAPI application instance
 # Assuming your FastAPI app instance is named 'app' in 'src.entrenai.api.main'
 from src.entrenai.api.main import app
-from src.entrenai.api.models import MoodleCourse  # For response validation
-from src.entrenai.config import moodle_config  # To check if default teacher ID is set
+from src.entrenai.api.models import (
+    MoodleCourse,
+    CourseSetupResponse,
+)  # For response validation
+from src.entrenai.config import (
+    moodle_config,
+    qdrant_config,
+    n8n_config,
+    base_config,
+)  # To check if default teacher ID is set
+from src.entrenai.core.db.qdrant_wrapper import QdrantWrapper
+from src.entrenai.core.clients.moodle_client import MoodleClient
+from src.entrenai.core.clients.n8n_client import N8NClient
 
 
 # Fixture for the TestClient
@@ -122,14 +135,6 @@ def test_list_moodle_courses_no_teacher_id_and_no_default(test_app_client: TestC
         assert response.status_code == 400
         assert "Moodle teacher ID must be provided" in response.json().get("detail", "")
 
-
-# --- Additional imports for setup-ia test ---
-from src.entrenai.api.models import CourseSetupResponse
-from src.entrenai.config import qdrant_config, n8n_config
-from src.entrenai.core.db.qdrant_wrapper import QdrantWrapper
-from src.entrenai.core.clients.moodle_client import MoodleClient
-from src.entrenai.core.clients.n8n_client import N8NClient
-from urllib.parse import urljoin
 
 # --- Tests for POST /api/v1/courses/{course_id}/setup-ia endpoint ---
 TEST_COURSE_ID = 2  # As confirmed by the user
@@ -256,9 +261,6 @@ def test_setup_ia_for_course_success(test_app_client: TestClient):
 
 
 # --- Tests for GET /api/v1/courses/{course_id}/refresh-files ---
-from src.entrenai.core.files.file_tracker import FileTracker
-from src.entrenai.config import base_config
-from pathlib import Path
 
 
 @pytest.mark.integration
@@ -283,16 +285,10 @@ def test_refresh_files_success(test_app_client: TestClient):
 
     # Clear FileTracker for this course to ensure files are seen as new
     # This makes the test more reliable if run multiple times without Moodle file changes.
-    file_tracker = FileTracker(db_path=Path(base_config.file_tracker_db_path))
     # This is a bit of a hack for testing; ideally, we'd have a way to reset state
     # or use unique file names for each test run if Moodle interaction was programmatic.
     # For now, we assume the user can re-upload or change files if needed for re-testing.
     # A simpler approach for now: just run it and check for positive processing.
-    # If we want to clear:
-    # with file_tracker._get_connection() as conn:
-    #     conn.execute(f"DELETE FROM {file_tracker.TABLE_NAME} WHERE course_id = ?", (TEST_COURSE_ID,))
-    #     conn.commit()
-    # print(f"Cleared FileTracker records for course {TEST_COURSE_ID} before refresh test.")
 
     # First call: Process new files
     print(

@@ -38,11 +38,11 @@ def mocked_pgvector_wrapper(mock_pgvector_config: PgvectorConfig) -> PgvectorWra
     # Mock the __enter__ and __exit__ methods for context management
     mock_conn.cursor.return_value = mock_cursor
 
-    with patch("psycopg2.connect", return_value=mock_conn) as mock_connect:
+    with patch("psycopg2.connect", return_value=mock_conn):
         # Patch 'register_vector' as it's called during init
         with patch(
             "src.entrenai.core.db.pgvector_wrapper.register_vector", MagicMock()
-        ) as mock_register_vector:
+        ):
             wrapper = PgvectorWrapper(config=mock_pgvector_config)
             # Ensure the mock cursor is directly usable by the wrapper instance
             wrapper.conn = mock_conn

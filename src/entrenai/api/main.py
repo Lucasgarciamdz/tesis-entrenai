@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -11,11 +12,29 @@ from src.entrenai.config.logger import get_logger
 # Initialize logger for this module
 logger = get_logger(__name__)
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("Iniciando API de Entrenai...")
+    logger.info(f"Nivel de log configurado en: {base_config.log_level}")
+    logger.info(f"Host de FastAPI: {base_config.fastapi_host}")
+    logger.info(f"Puerto de FastAPI: {base_config.fastapi_port}")
+    # Aquí se podrían añadir verificaciones iniciales, como intentar conectar a Qdrant, Ollama, etc.
+    # Por ahora, solo se registra.
+
+    yield
+
+    # Shutdown
+    logger.info("Cerrando API de Entrenai...")
+
+
 # Initialize FastAPI app
 app = FastAPI(
     title="Entrenai API",
     description="API para el sistema Entrenai, integrando Moodle, Qdrant, Ollama y N8N.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # Configuración de CORS
@@ -27,21 +46,6 @@ app.add_middleware(
     allow_methods=["GET", "POST"],  # Especifica los métodos que permites
     allow_headers=["*"],  # Permite todos los headers
 )
-
-
-@app.on_event("startup")
-async def startup_event():
-    logger.info("Iniciando API de Entrenai...")
-    logger.info(f"Nivel de log configurado en: {base_config.log_level}")
-    logger.info(f"Host de FastAPI: {base_config.fastapi_host}")
-    logger.info(f"Puerto de FastAPI: {base_config.fastapi_port}")
-    # Aquí se podrían añadir verificaciones iniciales, como intentar conectar a Qdrant, Ollama, etc.
-    # Por ahora, solo se registra.
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    logger.info("Cerrando API de Entrenai...")
 
 
 @app.get("/")

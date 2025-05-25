@@ -65,6 +65,33 @@ class MoodleClient:
         else:
             logger.warning("MoodleClient inicializado sin una URL base válida.")
 
+    def _process_courses_data(self, courses_data: Any) -> List[MoodleCourse]:
+        """
+        Helper para procesar y validar datos de cursos de la API de Moodle.
+
+        Args:
+            courses_data: Datos de cursos de la API
+
+        Returns:
+            Lista de objetos MoodleCourse
+
+        Raises:
+            MoodleAPIError: Si los datos no están en el formato esperado
+        """
+        if not isinstance(courses_data, list):
+            if (
+                isinstance(courses_data, dict)
+                and "courses" in courses_data
+                and isinstance(courses_data["courses"], list)
+            ):
+                courses_data = courses_data["courses"]
+            else:
+                raise MoodleAPIError(
+                    "Los datos de cursos no están en el formato de lista esperado.",
+                    response_data=courses_data,
+                )
+        return [MoodleCourse(**cd) for cd in courses_data]
+
     def _format_moodle_params(
         self, in_args: Any, prefix: str = "", out_dict: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
@@ -165,19 +192,7 @@ class MoodleClient:
             courses_data = self._make_request(
                 "core_enrol_get_users_courses", {"userid": user_id}
             )
-            if not isinstance(courses_data, list):
-                if (
-                    isinstance(courses_data, dict)
-                    and "courses" in courses_data
-                    and isinstance(courses_data["courses"], list)
-                ):
-                    courses_data = courses_data["courses"]
-                else:
-                    raise MoodleAPIError(
-                        "Los datos de cursos no están en el formato de lista esperado.",
-                        response_data=courses_data,
-                    )
-            return [MoodleCourse(**cd) for cd in courses_data]
+            return self._process_courses_data(courses_data)
         except MoodleAPIError as e:
             logger.error(f"Falló la obtención de cursos para el usuario {user_id}: {e}")
             raise
@@ -633,19 +648,7 @@ class MoodleClient:
         logger.info("Obteniendo todos los cursos disponibles de Moodle")
         try:
             courses_data = self._make_request("core_course_get_courses")
-            if not isinstance(courses_data, list):
-                if (
-                    isinstance(courses_data, dict)
-                    and "courses" in courses_data
-                    and isinstance(courses_data["courses"], list)
-                ):
-                    courses_data = courses_data["courses"]
-                else:
-                    raise MoodleAPIError(
-                        "Los datos de cursos no están en el formato de lista esperado.",
-                        response_data=courses_data,
-                    )
-            return [MoodleCourse(**cd) for cd in courses_data]
+            return self._process_courses_data(courses_data)
         except MoodleAPIError as e:
             logger.error(f"Falló la obtención de todos los cursos: {e}")
             raise

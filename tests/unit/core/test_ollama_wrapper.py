@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
+from typing import Tuple
 import ollama  # For ollama.ResponseError
 
 from src.entrenai.core.ai.ollama_wrapper import OllamaWrapper, OllamaWrapperError
@@ -17,9 +18,6 @@ def mock_ollama_config() -> OllamaConfig:
         "test_context_model"  # Though not directly used in current methods
     )
     return config
-
-
-from typing import Tuple  # For tuple type hint
 
 
 @pytest.fixture

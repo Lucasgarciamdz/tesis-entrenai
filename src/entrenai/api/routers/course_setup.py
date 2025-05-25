@@ -579,45 +579,20 @@ async def refresh_course_files(
         f"Iniciando proceso de refresco de archivos para el curso ID: {course_id}"
     )
 
-    # Obtener nombre del curso para Pgvector
-    course_name_for_pgvector: Optional[str] = None
+    # Obtener nombre del curso para Pgvector usando función helper
     try:
-        logger.info(
-            f"Obteniendo nombre del curso {course_id} para operaciones de Pgvector..."
+        course_name_for_pgvector = await _get_course_name_for_operations(
+            course_id, moodle
         )
-        target_user_id_for_name = moodle_config.default_teacher_id
-        if target_user_id_for_name:
-            courses = moodle.get_courses_by_user(user_id=target_user_id_for_name)
-            course = next((c for c in courses if c.id == course_id), None)
-            if course:
-                course_name_for_pgvector = course.displayname or course.fullname
-        if not course_name_for_pgvector:
-            all_courses = moodle.get_all_courses()
-            course = next((c for c in all_courses if c.id == course_id), None)
-            if course:
-                course_name_for_pgvector = course.displayname or course.fullname
-
-        if not course_name_for_pgvector:
+    except HTTPException as e:
+        if e.status_code == 404:
+            # Usar fallback si el curso no se encuentra
             course_name_for_pgvector = f"Curso_{course_id}"
             logger.warning(
                 f"No se pudo obtener el nombre para el curso ID {course_id}, usando fallback: '{course_name_for_pgvector}' para Pgvector."
             )
         else:
-            logger.info(f"Nombre del curso para Pgvector: '{course_name_for_pgvector}'")
-    except Exception as e:
-        logger.error(
-            f"Error al obtener el nombre del curso {course_id} para Pgvector: {e}"
-        )
-        raise HTTPException(
-            status_code=500,
-            detail=f"No se pudo determinar el nombre del curso {course_id} para operaciones de Pgvector.",
-        )
-
-    if not course_name_for_pgvector:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Nombre del curso para Pgvector es inválido para el curso ID {course_id}.",
-        )
+            raise
 
     target_section_name = moodle_config.course_folder_name
     target_folder_name = "Documentos Entrenai"  # As defined in setup_ia_for_course

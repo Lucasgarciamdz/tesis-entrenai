@@ -119,12 +119,18 @@ class N8NClient:
                     response_data=response_data,
                 )
             return [N8NWorkflow(**wf_data) for wf_data in workflows_raw]
-        except N8NClientError as e:
-            logger.error(f"Failed to get workflows list from N8N: {e}")
+        except N8NClientError as n8n_error:
+            logger.error(f"Failed to get workflows list from N8N: {n8n_error}")
             raise
-        except Exception as e:  # Catch any other parsing error for N8NWorkflow
-            logger.exception(f"Unexpected error parsing N8N workflows list: {e}")
-            raise N8NClientError(f"Unexpected error parsing N8N workflows: {e}")
+        except (
+            Exception
+        ) as parsing_error:  # Catch any other parsing error for N8NWorkflow
+            logger.exception(
+                f"Unexpected error parsing N8N workflows list: {parsing_error}"
+            )
+            raise N8NClientError(
+                f"Unexpected error parsing N8N workflows: {parsing_error}"
+            )
 
     def get_workflow_details(self, workflow_id: str) -> Optional[N8NWorkflow]:
         try:
@@ -134,16 +140,20 @@ class N8NClient:
             elif isinstance(workflow_data, dict) and "id" in workflow_data:
                 return N8NWorkflow(**workflow_data)
             return None
-        except N8NClientError as e:
-            if e.status_code == 404:
+        except N8NClientError as n8n_error:
+            if n8n_error.status_code == 404:
                 return None
-            logger.error(f"Failed to get details for workflow '{workflow_id}': {e}")
-            raise
-        except Exception as e:
-            logger.exception(
-                f"Unexpected error fetching N8N workflow details for '{workflow_id}': {e}"
+            logger.error(
+                f"Failed to get details for workflow '{workflow_id}': {n8n_error}"
             )
-            raise N8NClientError(f"Unexpected error fetching N8N workflow details: {e}")
+            raise
+        except Exception as general_error:
+            logger.exception(
+                f"Unexpected error fetching N8N workflow details for '{workflow_id}': {general_error}"
+            )
+            raise N8NClientError(
+                f"Unexpected error fetching N8N workflow details: {general_error}"
+            )
 
     def import_workflow(
         self, workflow_json_content: Dict[str, Any]
@@ -187,11 +197,13 @@ class N8NClient:
                     f"Unexpected response structure after importing workflow: {imported_workflow_data}"
                 )
                 return None
-        except N8NClientError as e:
-            logger.error(f"Failed to import workflow into N8N: {e}")
+        except N8NClientError as n8n_error:
+            logger.error(f"Failed to import workflow into N8N: {n8n_error}")
             return None
-        except Exception as e:
-            logger.exception(f"Unexpected error during N8N workflow import: {e}")
+        except Exception as general_error:
+            logger.exception(
+                f"Unexpected error during N8N workflow import: {general_error}"
+            )
             return None
 
     def activate_workflow(self, workflow_id: str) -> bool:
@@ -200,12 +212,12 @@ class N8NClient:
             self._make_request("POST", f"workflows/{workflow_id}/activate")
             logger.info(f"Successfully activated workflow ID: {workflow_id}")
             return True
-        except N8NClientError as e:
-            logger.error(f"Failed to activate workflow ID {workflow_id}: {e}")
+        except N8NClientError as n8n_error:
+            logger.error(f"Failed to activate workflow ID {workflow_id}: {n8n_error}")
             return False
-        except Exception as e:
+        except Exception as general_error:
             logger.exception(
-                f"Unexpected error activating N8N workflow ID {workflow_id}: {e}"
+                f"Unexpected error activating N8N workflow ID {workflow_id}: {general_error}"
             )
             return False
 
@@ -215,12 +227,12 @@ class N8NClient:
             self._make_request("DELETE", f"workflows/{workflow_id}")
             logger.info(f"Successfully deleted workflow ID: {workflow_id}")
             return True
-        except N8NClientError as e:
-            logger.error(f"Failed to delete workflow ID {workflow_id}: {e}")
+        except N8NClientError as n8n_error:
+            logger.error(f"Failed to deactivate workflow ID {workflow_id}: {n8n_error}")
             return False
-        except Exception as e:
+        except Exception as general_error:
             logger.exception(
-                f"Unexpected error deleting N8N workflow ID {workflow_id}: {e}"
+                f"Unexpected error deactivating N8N workflow ID {workflow_id}: {general_error}"
             )
             return False
 
@@ -307,12 +319,14 @@ class N8NClient:
             logger.warning(f"No webhook nodes found in workflow {workflow_id}")
             return None
 
-        except N8NClientError as e:
-            logger.error(f"Failed to get webhooks for workflow ID {workflow_id}: {e}")
+        except N8NClientError as n8n_error:
+            logger.error(
+                f"Failed to get webhooks for workflow ID {workflow_id}: {n8n_error}"
+            )
             return None
-        except Exception as e:
+        except Exception as general_error:
             logger.exception(
-                f"Unexpected error getting webhooks for workflow ID {workflow_id}: {e}"
+                f"Unexpected error getting webhooks for workflow ID {workflow_id}: {general_error}"
             )
             return None
 
@@ -375,9 +389,9 @@ class N8NClient:
                                         f"Generated webhook URL from template: {webhook_url}"
                                     )
                                     return webhook_url
-            except Exception as e:
+            except Exception as template_error:
                 logger.error(
-                    f"Error attempting to generate webhook URL from template: {e}"
+                    f"Error attempting to generate webhook URL from template: {template_error}"
                 )
 
         # No se pudo obtener el webhook por ningún método
@@ -491,9 +505,9 @@ class N8NClient:
                                                 f"Generated webhook URL from template: {webhook_url}"
                                             )
                                             return webhook_url
-                        except Exception as e:
+                        except Exception as template_error:
                             logger.error(
-                                f"Error attempting to generate webhook URL from template: {e}"
+                                f"Error attempting to generate webhook URL from template: {template_error}"
                             )
 
                 # Si llegamos aquí, significa que no pudimos obtener el webhook URL del workflow existente
@@ -501,8 +515,8 @@ class N8NClient:
                     f"Could not get webhook URL from existing workflow {active_workflow.name}. Creating new one."
                 )
 
-        except Exception as e:
-            logger.error(f"Error checking existing workflows: {e}")
+        except Exception as workflow_check_error:
+            logger.error(f"Error checking existing workflows: {workflow_check_error}")
             # Continuamos con la creación de un nuevo workflow
 
         if not self.config.workflow_json_path:
@@ -517,9 +531,9 @@ class N8NClient:
         try:
             with open(workflow_file, "r") as f:
                 workflow_json_content = json.load(f)
-        except Exception as e:
+        except Exception as file_error:
             logger.error(
-                f"Failed to read or parse N8N workflow JSON from {workflow_file}: {e}"
+                f"Failed to read or parse N8N workflow JSON from {workflow_file}: {file_error}"
             )
             return None
 
@@ -615,7 +629,9 @@ if __name__ == "__main__":
                     )
             else:
                 print("Failed to initialize N8N client (base_url is None). Check logs.")
-        except N8NClientError as e:
-            print(f"N8NClientError during initialization or test: {e}")
-        except Exception as e:
-            print(f"An unexpected error occurred during N8NClient test: {e}")
+        except N8NClientError as n8n_error:
+            print(f"N8NClientError during initialization or test: {n8n_error}")
+        except Exception as general_error:
+            print(
+                f"An unexpected error occurred during N8NClient test: {general_error}"
+            )

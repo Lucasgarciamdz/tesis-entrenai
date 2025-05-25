@@ -1,6 +1,4 @@
-import os
-import re
-from datetime import datetime
+from pathlib import Path
 from typing import List, Optional, Dict
 
 from google import genai
@@ -8,6 +6,11 @@ from google.genai import types
 
 from src.entrenai.config import GeminiConfig
 from src.entrenai.config.logger import get_logger
+from src.entrenai.core.ai.common_utils import (
+    postprocess_markdown_content,
+    preprocess_text_content,
+    save_markdown_to_file,
+)
 
 logger = get_logger(__name__)
 
@@ -172,15 +175,7 @@ class GeminiWrapper:
         Returns:
             Texto limpio listo para la conversión a markdown.
         """
-
-        cleaned_text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-
-        cleaned_text = re.sub(r"^\s*\[.*?\]\s*$", "", cleaned_text, flags=re.MULTILINE)
-        cleaned_text = re.sub(
-            r"^\s*#\s*metadata:.*$", "", cleaned_text, flags=re.MULTILINE
-        )
-
-        return cleaned_text.strip()
+        return preprocess_text_content(text)
 
     def _postprocess_markdown_content(self, markdown: str) -> str:
         """
@@ -192,19 +187,7 @@ class GeminiWrapper:
         Returns:
             Markdown limpio y bien formateado.
         """
-        cleaned_markdown = re.sub(r"<think>.*?</think>", "", markdown, flags=re.DOTALL)
-
-        cleaned_markdown = re.sub(
-            r"^.*?(#|---|```)", r"\1", cleaned_markdown, flags=re.DOTALL, count=1
-        )
-
-        cleaned_markdown = re.sub(r"(#{1,6}.*?)(\n(?!\n))", r"\1\n\n", cleaned_markdown)
-
-        cleaned_markdown = re.sub(
-            r"```(\w*)\n?([^`]+)```", r"```\1\n\2\n```", cleaned_markdown
-        )
-
-        return cleaned_markdown.strip()
+        return postprocess_markdown_content(markdown)
 
     def format_to_markdown(
         self,
@@ -295,25 +278,4 @@ class GeminiWrapper:
 
     def _save_markdown_to_file(self, markdown_content: str, save_path: str) -> None:
         """Guarda el contenido Markdown en un archivo."""
-        try:
-            # Create directory if it doesn't exist
-            os.makedirs(os.path.dirname(os.path.abspath(save_path)), exist_ok=True)
-
-            # If save_path is a directory, generate a filename based on timestamp
-            if os.path.isdir(save_path):
-                filename = f"markdown_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-                full_path = os.path.join(save_path, filename)
-            else:
-                # Ensure file has .md extension
-                if not save_path.endswith(".md"):
-                    save_path += ".md"
-                full_path = save_path
-
-            # Write content to file usando modo binario para preservar codificación
-            with open(full_path, "wb") as f:
-                f.write(markdown_content.encode("utf-8"))
-
-            logger.info(f"Contenido Markdown guardado en {full_path}")
-        except Exception as e:
-            logger.error(f"Error guardando Markdown en {save_path}: {e}")
-            # No lanzamos excepción porque el guardado es secundario al formateo
+        save_markdown_to_file(markdown_content, Path(save_path))

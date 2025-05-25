@@ -83,7 +83,7 @@ def process_moodle_file_task(
             ai_client = OllamaWrapper(config=o_config)
 
         # 6. Instantiate EmbeddingManager
-        embedding_manager = EmbeddingManager(ai_wrapper=ai_client)
+        embedding_manager = EmbeddingManager(ollama_wrapper=ai_client)
 
         # 7. Create Path and ensure it exists
         download_dir_path = Path(download_dir_str)
@@ -128,7 +128,9 @@ def process_moodle_file_task(
             raw_text, save_path=markdown_file_path
         )
         if not markdown_text:
-            raise RuntimeError(f"No se pudo formatear el texto a markdown para: {filename}")
+            raise RuntimeError(
+                f"No se pudo formatear el texto a markdown para: {filename}"
+            )
         logger.info(
             f"Task ID: {self.request.id} - Markdown generated and saved to: {markdown_file_path}"
         )
@@ -162,9 +164,7 @@ def process_moodle_file_task(
         for i, chunk_text in enumerate(chunks):
             # Contextualizar cada chunk con información del archivo
             contextualized_text = embedding_manager.contextualize_chunk(
-                chunk_text,
-                filename,
-                f"chunk_{i+1}"
+                chunk_text, filename, f"chunk_{i + 1}"
             )
             contextualized_chunks.append(contextualized_text)
         logger.info(
@@ -192,7 +192,7 @@ def process_moodle_file_task(
             source_filename=filename,
             chunks_text=contextualized_chunks,
             embeddings=chunk_embeddings,
-            course_id=course_id
+            course_id=course_id,
         )
         logger.info(
             f"Task ID: {self.request.id} - Prepared {len(db_chunks)} chunks for DB for: {filename}"

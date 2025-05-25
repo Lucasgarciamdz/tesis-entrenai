@@ -1,4 +1,4 @@
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     const courseNamePlaceholder = document.getElementById('course-name-placeholder');
     const statusMessagesManage = document.getElementById('status-messages-manage');
     const refreshMoodleFilesButton = document.getElementById('refresh-moodle-files-button');
@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Initialization ---
-    function initializePage() {
+    async function initializePage() {
         const params = new URLSearchParams(window.location.search);
         courseId = params.get('course_id');
 
@@ -31,7 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
             courseNamePlaceholder.textContent = `ID ${courseId}`;
         }
         
-        loadIndexedFiles(courseId);
+        await loadIndexedFiles(courseId);
         setupEventListeners();
     }
 
@@ -80,13 +80,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     indexedFilesList.innerHTML = '<li>No hay archivos indexados.</li>';
                 } else {
                     const errorData = await response.json().catch(() => null);
-                    throw new Error(`Error ${response.status}: ${errorData?.detail || 'No se pudieron cargar los archivos indexados.'}`);
+                    const errorMessage = `Error ${response.status}: ${errorData?.detail || 'No se pudieron cargar los archivos indexados.'}`;
+                    updateStatusManage(errorMessage, 'error');
+                    if (indexedFilesList) indexedFilesList.innerHTML = '<li>Error al cargar archivos.</li>';
+                    return;
                 }
                 return;
             }
             const files = await response.json();
             if (!Array.isArray(files)) {
-                throw new Error("Respuesta inesperada del servidor al cargar archivos indexados.");
+                const errorMessage = "Respuesta inesperada del servidor al cargar archivos indexados.";
+                updateStatusManage(errorMessage, 'error');
+                if (indexedFilesList) indexedFilesList.innerHTML = '<li>Error al cargar archivos.</li>';
+                return;
             }
 
             if (files.length === 0) {
@@ -135,10 +141,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => null);
-                throw new Error(`Error ${response.status}: ${errorData?.detail || 'No se pudo eliminar el archivo.'}`);
+                const errorMessage = `Error ${response.status}: ${errorData?.detail || 'No se pudo eliminar el archivo.'}`;
+                updateStatusManage(errorMessage, 'error');
+                return;
             }
             
-            // const result = await response.json(); // If backend sends a JSON response
+
             updateStatusManage(`Archivo "${filename}" eliminado exitosamente.`, 'success');
             if (listItemElement) {
                 listItemElement.remove();
@@ -164,7 +172,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch(`${API_BASE_URL}/courses/${currentCourseId}/refresh-files`);
             if (!response.ok) {
                 const errorData = await response.json().catch(() => null);
-                throw new Error(`Error ${response.status}: ${errorData?.detail || 'No se pudo iniciar la actualización de archivos.'}`);
+                const errorMessage = `Error ${response.status}: ${errorData?.detail || 'No se pudo iniciar la actualización de archivos.'}`;
+                updateStatusManage(errorMessage, 'error');
+                refreshMoodleFilesButton.disabled = false;
+                return;
             }
             const result = await response.json();
             
@@ -234,7 +245,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (processingFilesList.children.length === 0) {
                         processingFilesList.innerHTML = '<li>No hay archivos procesándose actualmente.</li>';
                     }
-                    loadIndexedFiles(currentCourseId); // Refresh indexed files list
+                    await loadIndexedFiles(currentCourseId); // Refresh indexed files list
                 } else if (task.status === 'FAILURE') {
                     clearInterval(activeTasks[taskId]);
                     delete activeTasks[taskId];
@@ -255,5 +266,5 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Start ---
-    initializePage();
+    await initializePage();
 });
