@@ -1,37 +1,37 @@
-body { 
+body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
     margin: 0;
-    padding: 20px; 
-    background-color: #f0f2f5; 
+    padding: 30px 20px; /* Increased top/bottom padding */
+    background-color: #f0f2f5;
     color: #1c1e21;
     line-height: 1.6;
 }
 
-.container { 
+.container {
     max-width: 800px;
-    margin: 20px auto; 
-    background-color: #ffffff; 
-    padding: 25px 30px; 
-    border-radius: 8px; 
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1), 0 8px 16px rgba(0,0,0,0.1);
+    margin: 30px auto; /* Increased top/bottom margin */
+    background-color: #ffffff;
+    padding: 30px 40px; /* Increased padding */
+    border-radius: 10px; /* Slightly larger radius */
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1), 0 10px 20px rgba(0,0,0,0.1); /* Enhanced shadow */
 }
 
 h1 {
-    color: #007bff; /* Un azul primario */
+    color: #007bff;
     text-align: center;
-    margin-bottom: 10px;
+    margin-bottom: 20px; /* Increased margin */
 }
 
 h2 {
     color: #333;
     border-bottom: 1px solid #eee;
-    padding-bottom: 10px;
-    margin-top: 30px;
-    margin-bottom: 20px;
+    padding-bottom: 12px; /* Slightly increased padding */
+    margin-top: 40px; /* Increased margin */
+    margin-bottom: 25px; /* Increased margin */
 }
 
 p {
-    margin-bottom: 15px;
+    margin-bottom: 16px; /* Standardized margin */
 }
 
 .app-explanation {
@@ -81,94 +81,170 @@ p {
 .controls input[type="text"],
 .controls select {
     display: block;
-    width: calc(100% - 22px); /* Ajusta por padding */
-    padding: 10px;
+    width: 100%; /* Full width */
+    padding: 12px 15px; /* Increased padding for better touch targets and visual */
     margin-bottom: 15px;
     border: 1px solid #ccc;
     border-radius: 4px;
-    box-sizing: border-box; /* Para que padding no afecte el width total */
+    box-sizing: border-box;
+    appearance: none; /* Remove default system appearance */
+    -webkit-appearance: none; /* For Safari/Chrome */
+    -moz-appearance: none; /* For Firefox */
+    background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2020%2020%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20d%3D%22M5%207.5L10%2012.5L15%207.5%22%20stroke%3D%22%23666666%22%20stroke-width%3D%221.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E'); /* Custom arrow */
+    background-repeat: no-repeat;
+    background-position: right 15px center;
+    background-size: 16px 16px; /* Size of the arrow icon */
+    padding-right: 40px; /* Make space for the arrow */
+    cursor: pointer;
 }
+
+.controls select:hover {
+    border-color: #007bff; /* Highlight border on hover */
+}
+
+.controls select:focus {
+    outline: none; /* Remove default focus outline */
+    border-color: #007bff; /* Primary color for focus */
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25); /* Focus ring */
+}
+
+/* Remove custom arrow for IE/Edge as appearance:none is not fully supported */
+@media screen and (-ms-high-contrast: active), (-ms-high-contrast: none) {
+    .controls select::-ms-expand {
+        display: none; /* Hide default arrow in IE/Edge */
+    }
+    .controls select {
+        background-image: none; /* No custom arrow for IE/Edge */
+        padding-right: 15px; /* Adjust padding back */
+    }
+}
+
 
 .controls button { 
     display: block;
     width: 100%;
-    padding: 12px 15px; 
-    background-color: #007bff; 
-    color: white; 
-    border: none; 
-    border-radius: 4px; 
-    cursor: pointer; 
-    font-size: 16px;
-    transition: background-color 0.2s ease-in-out;
+    padding: 14px 18px; /* Slightly increased padding */
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 5px; /* Slightly larger radius */
+    cursor: pointer;
+    font-size: 17px; /* Slightly larger font */
+    font-weight: 500; /* Medium weight */
+    transition: background-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1); /* Subtle shadow */
 }
 
 .controls button:hover {
     background-color: #0056b3;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15); /* Enhanced shadow on hover */
 }
 
-/* Style for the new manage-files-button (can be the same as setup-ai-button) */
-#manage-files-button {
-    /* display: block; /* Already handled by inline style initially, but good for consistency if shown */
-    /* width: 100%; /* Already handled by .controls button */
-    /* padding: 12px 15px; /* Already handled by .controls button */
-    background-color: #6c757d; /* A secondary button color (e.g., grey) */
-    /* color: white; /* Already handled by .controls button */
-    /* border: none; /* Already handled by .controls button */
-    /* border-radius: 4px; /* Already handled by .controls button */
-    /* cursor: pointer; /* Already handled by .controls button */
-    /* font-size: 16px; /* Already handled by .controls button */
-    /* transition: background-color 0.2s ease-in-out; /* Already handled by .controls button */
+#setup-ai-button {
+    /* Primary button, styles are largely covered by .controls button */
 }
 
-#manage-files-button:hover {
-    background-color: #5a6268; /* Darker shade for hover */
+/* Secondary action buttons (e.g., manage files, refresh files) */
+#manage-files-button,
+#refresh-moodle-files-button { /* Added refresh button here */
+    background-color: #28a745; /* Green for positive/secondary actions */
+    /* box-shadow is inherited or can be customized if needed */
 }
 
-.controls button:disabled { 
-    background-color: #cccccc; 
+#manage-files-button:hover,
+#refresh-moodle-files-button:hover { /* Added refresh button here */
+    background-color: #218838; /* Darker green for hover */
+    /* box-shadow enhancement is inherited */
+}
+
+.controls button:disabled,
+#refresh-moodle-files-button:disabled { /* Ensure consistent disabled style */
+    background-color: #cccccc;
     cursor: not-allowed;
+    box-shadow: none; /* No shadow for disabled state */
 }
 
 #status-messages {
     margin-top: 20px;
+    margin-bottom: 20px; /* Added margin-bottom for spacing from content below */
 }
 
-#status-messages p { 
-    padding: 12px 15px; 
-    border-radius: 4px; 
-    margin-top: 10px; 
+#status-messages p, 
+#status-messages-manage p { /* Apply to both status message containers */
+    padding: 12px 15px 12px 40px; /* Increased left padding for icon */
+    border-radius: 5px; /* Consistent border-radius */
+    margin-top: 10px;
+    margin-bottom: 10px; /* Consistent margin */
     border-left-width: 5px;
     border-left-style: solid;
+    position: relative; /* For icon positioning */
+    font-size: 0.95em; /* Slightly larger for readability */
 }
 
-#status-messages .info { 
+#status-messages p::before,
+#status-messages-manage p::before {
+    content: ""; /* Default empty content */
+    position: absolute;
+    left: 15px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 1.2em; /* Icon size */
+}
+
+#status-messages .info,
+#status-messages-manage .info { 
     background-color: #e7f3fe; 
     border-left-color: #2196F3; 
     color: #0c5460;
 }
+#status-messages .info::before,
+#status-messages-manage .info::before {
+    content: "ℹ️"; /* Info icon */
+    color: #2196F3;
+}
 
-#status-messages .success { 
+#status-messages .success,
+#status-messages-manage .success { 
     background-color: #d4edda; 
     border-left-color: #28a745; 
     color: #155724;
 }
+#status-messages .success::before,
+#status-messages-manage .success::before {
+    content: "✅"; /* Success icon */
+    color: #28a745;
+}
 
-#status-messages .warning { 
+#status-messages .warning,
+#status-messages-manage .warning { 
     background-color: #fff3cd; 
     border-left-color: #ffc107; 
     color: #856404;
 }
+#status-messages .warning::before,
+#status-messages-manage .warning::before {
+    content: "⚠️"; /* Warning icon */
+    color: #ffc107;
+}
 
-#status-messages .error { 
+#status-messages .error,
+#status-messages-manage .error { 
     background-color: #f8d7da; 
     border-left-color: #dc3545; 
     color: #721c24;
 }
+#status-messages .error::before,
+#status-messages-manage .error::before {
+    content: "❗"; /* Error icon (using a different one from file processing for distinction) */
+    color: #dc3545;
+}
+
 
 /* Styles for manage_files.html */
 #course-title {
-    text-align: left; /* Override h1 center align if needed */
-    margin-bottom: 20px;
+    text-align: left; 
+    margin-top: 0; /* Adjust if container has enough padding */
+    margin-bottom: 10px; /* Reduced margin bottom */
 }
 
 #course-name-placeholder {
@@ -178,51 +254,349 @@ p {
 
 .back-link {
     display: inline-block;
-    margin-bottom: 20px;
+    margin-bottom: 30px; /* Increased space after link */
     color: #007bff;
     text-decoration: none;
+    font-size: 0.95em;
 }
 
 .back-link:hover {
     text-decoration: underline;
 }
 
+.manage-files-section { /* Optional: Add this class to divs wrapping sections in HTML for more control */
+    margin-bottom: 30px;
+}
+
+/* Adjusting existing h2 for manage_files page if needed, or use .manage-files-section h2 */
+#manage_files .container h2 { /* More specific selector if these h2s need different spacing */
+    margin-top: 30px;
+    margin-bottom: 15px; /* Space between h2 and its content/small-text */
+}
+
+
 .file-list {
     list-style: none;
     padding-left: 0;
-    margin-bottom: 20px;
+    margin-top: 10px; /* Space between small-text and list */
+    margin-bottom: 30px; /* Increased space after the list */
 }
 
 .file-list li {
-    background-color: #f9f9f9;
-    border: 1px solid #e0e0e0;
-    padding: 10px 15px;
-    margin-bottom: 8px;
-    border-radius: 4px;
+    background-color: #fff; /* Brighter background for list items */
+    border: 1px solid #ddd; /* Slightly softer border */
+    padding: 12px 18px; /* Increased padding */
+    margin-bottom: 10px; /* Increased space between items */
+    border-radius: 5px; /* Consistent with other elements */
     display: flex;
     justify-content: space-between;
     align-items: center;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05); /* Subtle shadow for depth */
+    transition: box-shadow 0.2s ease-in-out;
 }
 
-.file-list li span {
+.file-list li:hover {
+    box-shadow: 0 2px 4px rgba(0,0,0,0.08); /* Slightly more shadow on hover */
+}
+
+
+.file-list li span:not(.status-icon):not(.status-text) { /* Target the filename span specifically */
     flex-grow: 1;
-    margin-right: 10px; /* Space before delete button */
+    margin-right: 15px; /* Space before delete button or status text */
+    font-size: 0.95em;
+    color: #333;
 }
 
+.file-list li .status-text { /* Ensure status text is also well-styled */
+    flex-grow: 1; /* Allow it to take space */
+    font-size: 0.95em;
+    color: #333;
+}
 
 
 .small-text {
     font-size: 0.9em;
-    color: #666;
-    margin-top: -10px; /* Adjust spacing after buttons or headings */
-    margin-bottom: 15px;
+    color: #555; /* Slightly darker for better readability */
+    margin-top: 5px; /* Space after a heading if it's directly under */
+    margin-bottom: 10px; /* Space before the element it describes (e.g., a list or button) */
 }
 
+/* Specific adjustments for small-text under .controls on manage_files page */
+.controls .small-text {
+    margin-top: 8px; /* Space after the button */
+    margin-bottom: 0; /* No extra space if it's the last thing in .controls */
+}
+
+
 /* Ensure status messages on manage_files page uses the same styling */
+#status-messages-manage {
+    margin-bottom: 20px; /* Add some space below status messages */
+}
 #status-messages-manage p {
     /* Styles are already defined for #status-messages .info, .success, etc. */
-    /* If #status-messages-manage itself needs specific container styling: */
-    margin-top: 20px;
+    margin-top: 10px; 
+}
+
+/* Styles for file processing status indicators */
+.file-list li .status-icon {
+    margin-right: 8px;
+    font-size: 1.1em;
+    display: inline-block; /* Allows vertical alignment */
+    vertical-align: middle;
+}
+
+.file-list li .status-text {
+    vertical-align: middle;
+}
+
+.status-pending .status-icon::before {
+    content: "🕒"; /* Clock icon */
+    color: #ffa500; /* Orange */
+}
+
+.status-processing .status-icon.spinner {
+    width: 1em;
+    height: 1em;
+    border: 2px solid #ccc;
+    border-top-color: #007bff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-right: 8px;
+    display: inline-block;
+    vertical-align: middle;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.status-failure .status-icon::before {
+    content: "❌"; /* Cross icon */
+    color: #dc3545; /* Red */
+}
+
+.file-list li.status-failure {
+    background-color: #f8d7da; /* Light red background for failed tasks */
+    border-left: 5px solid #dc3545;
+}
+
+.file-list li.status-failure .status-text {
+    color: #721c24; /* Darker red text for failed tasks */
+}
+
+
+/* Delete button styling */
+.delete-btn {
+    background-color: #dc3545; /* Red */
+    color: white;
+    border: none;
+    padding: 8px 14px; /* Slightly increased padding for better tap area */
+    border-radius: 5px; /* Consistent with other buttons */
+    cursor: pointer;
+    font-size: 0.95em; /* Consistent with other buttons */
+    font-weight: 500; /* Consistent */
+    transition: background-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1); /* Subtle shadow */
+    display: inline-flex; /* Align icon and text if an icon were added */
+    align-items: center;
+    justify-content: center;
+}
+
+.delete-btn:hover {
+    background-color: #c82333; /* Darker red */
+    box-shadow: 0 2px 5px rgba(0,0,0,0.15); /* Enhanced shadow */
+}
+
+/* Spinner for buttons */
+.btn-spinner {
+    display: inline-block;
+    width: 1em; /* Relative to font-size */
+    height: 1em; /* Relative to font-size */
+    border: 2px solid currentColor; 
+    border-top-color: transparent; 
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-right: 8px;
+    vertical-align: -0.15em; 
+}
+
+/* --- Responsive Design --- */
+
+/* Tablets and larger phablets */
+@media (max-width: 768px) {
+    body {
+        padding: 20px 15px; /* Reduce body padding */
+    }
+
+    .container {
+        padding: 20px 25px; /* Reduce container padding */
+        margin: 20px auto;
+    }
+
+    h1 {
+        font-size: 1.8em; /* Reduce h1 font size */
+        margin-bottom: 15px;
+    }
+
+    h2 {
+        font-size: 1.4em; /* Reduce h2 font size */
+        margin-top: 30px;
+        margin-bottom: 20px;
+    }
+    
+    .controls input[type="text"],
+    .controls select {
+        padding: 12px 12px; /* Adjust padding, keeping right padding for custom arrow */
+        padding-right: 35px; /* Ensure custom arrow space */
+    }
+    .controls select {
+        background-position: right 12px center;
+    }
+
+    .controls button {
+        padding: 12px 15px; /* Adjust button padding */
+        font-size: 16px;
+    }
+
+    .delete-btn {
+        padding: 7px 12px;
+        font-size: 0.9em;
+    }
+
+    #status-messages p, 
+    #status-messages-manage p {
+        padding: 10px 12px 10px 35px; /* Adjust padding for status messages */
+        font-size: 0.9em;
+    }
+    #status-messages p::before,
+    #status-messages-manage p::before {
+        left: 12px; /* Adjust icon position */
+    }
+
+    .file-list li {
+        padding: 10px 15px;
+    }
+     .file-list li span:not(.status-icon):not(.status-text),
+     .file-list li .status-text {
+        font-size: 0.9em;
+     }
+}
+
+/* Mobile phones */
+@media (max-width: 480px) {
+    body {
+        padding: 15px 10px; /* Further reduce body padding */
+        font-size: 15px; /* Slightly adjust base font size */
+    }
+
+    .container {
+        padding: 15px; /* Further reduce container padding */
+        margin: 15px auto;
+        border-radius: 8px; /* Smaller border radius */
+    }
+
+    h1 {
+        font-size: 1.5em; /* Further reduce h1 */
+        margin-bottom: 15px;
+    }
+
+    h2 {
+        font-size: 1.25em; /* Further reduce h2 */
+        margin-top: 25px;
+        margin-bottom: 15px;
+        padding-bottom: 8px;
+    }
+
+    .app-explanation {
+        padding: 10px 15px;
+        border-left-width: 4px;
+    }
+    .app-explanation h3 {
+        font-size: 1.1em;
+    }
+
+    .controls {
+        padding: 10px;
+    }
+    
+    .controls label {
+        font-size: 0.95em;
+        margin-bottom: 6px;
+    }
+
+    .controls input[type="text"],
+    .controls select,
+    .controls button {
+        width: 100%; /* Ensure full width */
+        font-size: 15px; /* Adjust font size for mobile */
+        padding: 12px 15px; /* Consistent padding */
+    }
+    .controls select { /* Keep padding for select arrow */
+        padding-right: 40px; 
+    }
+
+
+    #setup-ai-button,
+    #manage-files-button,
+    #refresh-moodle-files-button {
+        padding: 14px 15px; /* Slightly larger tap target for main CTAs */
+    }
+    
+    .delete-btn {
+        padding: 10px 12px; /* Make delete button easier to tap */
+        font-size: 0.9em;
+    }
+
+    #status-messages p, 
+    #status-messages-manage p {
+        padding: 10px 12px 10px 30px; /* Adjust padding */
+        font-size: 0.85em;
+    }
+    #status-messages p::before,
+    #status-messages-manage p::before {
+        left: 10px; /* Adjust icon position */
+        font-size: 1.1em;
+    }
+    
+    .file-list {
+        margin-top: 8px;
+        margin-bottom: 20px;
+    }
+
+    .file-list li {
+        padding: 10px 12px; /* Reduce padding in list items */
+        margin-bottom: 8px;
+        flex-direction: column; /* Stack filename and button/status */
+        align-items: flex-start; /* Align items to the start */
+    }
+
+    .file-list li span:not(.status-icon):not(.status-text) { /* Filename span */
+        margin-bottom: 8px; /* Space between filename and button/status */
+        margin-right: 0; /* Remove right margin */
+        font-size: 0.9em;
+    }
+    
+    .file-list li .status-icon {
+        margin-right: 5px; /* Adjust icon spacing */
+    }
+    .file-list li .status-text { /* Status text line */
+        font-size: 0.85em;
+        width: 100%; /* Take full width in stacked layout */
+        margin-bottom: 5px; /* Space if button is also there */
+    }
+    
+    .file-list li .delete-btn {
+        align-self: flex-end; /* Push delete button to the right end */
+        margin-top: 5px; /* Space above if status text is also present */
+    }
+
+    .back-link {
+        margin-bottom: 20px;
+        font-size: 0.9em;
+    }
+    .small-text {
+        font-size: 0.85em;
+    }
 }
 
 

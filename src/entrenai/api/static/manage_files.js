@@ -6,40 +6,52 @@ document.addEventListener('DOMContentLoaded', async () => {
     const processingFilesList = document.getElementById('processing-files-list');
 
     const API_BASE_URL = 'http://localhost:8000/api/v1'; // Adjust if necessary
-    let courseId;
-    let activeTasks = {}; // To keep track of intervals for tasks
+    let courseId; // Stores the current course ID from URL parameters.
+    let activeTasks = {}; // Keeps track of active polling intervals for task progress.
 
-    // Verifica que los elementos existen antes de usarlos
+    // Ensure essential DOM elements are present before proceeding.
     if (!courseNamePlaceholder || !statusMessagesManage || !refreshMoodleFilesButton || !indexedFilesList || !processingFilesList) {
-        console.error('Faltan elementos del DOM requeridos en manage_files.html. Revisa el HTML.');
+        console.error('Error crítico: Faltan elementos del DOM requeridos en manage_files.html. La aplicación no puede iniciarse correctamente.');
+        if (statusMessagesManage) { // Attempt to show an error if the status element itself exists
+            updateStatusManage('Error de inicialización: Faltan componentes de la página.', 'error');
+        }
         return;
     }
 
     // --- Initialization ---
+
+    /**
+     * Initializes the page: retrieves course ID from URL, loads initial data,
+     * and sets up event listeners.
+     */
     async function initializePage() {
         const params = new URLSearchParams(window.location.search);
         courseId = params.get('course_id');
 
         if (!courseId) {
-            updateStatusManage('Error: No se ha especificado un ID de curso en la URL.', 'error');
+            updateStatusManage('Error: No se ha especificado un ID de curso en la URL. Por favor, vuelve a la página principal e inténtalo de nuevo.', 'error');
             disableAllControls();
             return;
         }
 
-        // For now, just display the ID. A future improvement could be to fetch course name.
-        if (courseNamePlaceholder) {
-            courseNamePlaceholder.textContent = `ID ${courseId}`;
-        }
+        // Display the course ID. Future enhancement: fetch and display course name.
+        courseNamePlaceholder.textContent = `ID ${courseId}`;
         
         await loadIndexedFiles(courseId);
         setupEventListeners();
     }
 
+    /**
+     * Disables all interactive controls on the page, typically used when a critical error occurs.
+     */
     function disableAllControls() {
         if (refreshMoodleFilesButton) refreshMoodleFilesButton.disabled = true;
-        // Further disabling of other controls can be added if necessary
+        // Consider disabling other controls if they are added in the future.
     }
 
+    /**
+     * Sets up event listeners for interactive elements on the page.
+     */
     function setupEventListeners() {
         if (refreshMoodleFilesButton) {
             refreshMoodleFilesButton.addEventListener('click', () => handleRefreshFiles(courseId));
@@ -47,13 +59,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // --- Status Updates ---
+
+    /**
+     * Displays a status message to the user in the designated status area.
+     * @param {string} message - The message to display.
+     * @param {string} type - The type of message ('info', 'success', 'warning', 'error').
+     * @param {HTMLElement} targetElement - The DOM element where the message should be appended.
+     */
     function updateStatusManage(message, type = 'info', targetElement = statusMessagesManage) {
-        if (!targetElement) return;
+        if (!targetElement) {
+            console.error("Target element for status message not found:", message);
+            return;
+        }
         const p = document.createElement('p');
-        p.className = type; // Assumes CSS classes 'info', 'success', 'warning', 'error' exist
+        p.className = type; // Assumes CSS classes 'info', 'success', 'warning', 'error' are defined.
         p.textContent = message;
         
-        // Prepend new message
+        // Prepend new message so latest is always at the top.
         if (targetElement.firstChild) {
             targetElement.insertBefore(p, targetElement.firstChild);
         } else {
@@ -70,69 +92,83 @@ document.addEventListener('DOMContentLoaded', async () => {
     async function loadIndexedFiles(currentCourseId) {
         if (!indexedFilesList) return;
         updateStatusManage(`Cargando archivos indexados para el curso ID ${currentCourseId}...`, 'info');
-        indexedFilesList.innerHTML = '<li>Cargando...</li>'; // Clear previous and show loading
+        indexedFilesList.innerHTML = '<li><span class="status-icon spinner"></span>Cargando archivos indexados...</li>';
 
         try {
             const response = await fetch(`${API_BASE_URL}/courses/${currentCourseId}/indexed-files`);
+            
             if (!response.ok) {
                 if (response.status === 404) {
-                    updateStatusManage(`No se encontraron archivos indexados para el curso ID ${currentCourseId}. Puede que necesites procesar algunos primero.`, 'warning');
-                    indexedFilesList.innerHTML = '<li>No hay archivos indexados.</li>';
+                    updateStatusManage(`No se encontraron archivos indexados para el curso ${currentCourseId}.`, 'warning');
+                    indexedFilesList.innerHTML = '<li>No hay archivos indexados actualmente.</li>';
                 } else {
-                    const errorData = await response.json().catch(() => null);
-                    const errorMessage = `Error ${response.status}: ${errorData?.detail || 'No se pudieron cargar los archivos indexados.'}`;
-                    updateStatusManage(errorMessage, 'error');
-                    if (indexedFilesList) indexedFilesList.innerHTML = '<li>Error al cargar archivos.</li>';
-                    return;
+                    let errorDetail = 'No se pudieron cargar los archivos indexados.';
+                    try {
+                        const errorData = await response.json();
+                        errorDetail = errorData.detail || errorDetail;
+                    } catch (e) { console.warn('Could not parse error response as JSON:', e); }
+                    updateStatusManage(`Error ${response.status}: ${errorDetail}`, 'error');
+                    indexedFilesList.innerHTML = '<li>Error al cargar la lista de archivos.</li>';
                 }
                 return;
             }
+
             const files = await response.json();
             if (!Array.isArray(files)) {
-                const errorMessage = "Respuesta inesperada del servidor al cargar archivos indexados.";
-                updateStatusManage(errorMessage, 'error');
-                if (indexedFilesList) indexedFilesList.innerHTML = '<li>Error al cargar archivos.</li>';
+                console.error("Respuesta inesperada del servidor: la lista de archivos indexados no es un array.", files);
+                updateStatusManage("Error: Formato de respuesta incorrecto al cargar archivos indexados.", 'error');
+                indexedFilesList.innerHTML = '<li>Error al procesar la lista de archivos.</li>';
                 return;
             }
 
             if (files.length === 0) {
-                indexedFilesList.innerHTML = '<li>No hay archivos indexados.</li>';
-                updateStatusManage('Lista de archivos indexados cargada. No se encontraron archivos.', 'info');
+                indexedFilesList.innerHTML = '<li>No hay archivos indexados actualmente.</li>';
+                updateStatusManage('No se encontraron archivos procesados para este curso.', 'info');
                 return;
             }
 
-            indexedFilesList.innerHTML = ''; // Clear loading/previous
+            indexedFilesList.innerHTML = ''; // Clear loading/previous messages.
             files.forEach(file => {
                 const li = document.createElement('li');
-                li.dataset.filename = file.filename; // Store filename for deletion
+                li.dataset.filename = file.filename; 
                 
                 const fileNameSpan = document.createElement('span');
-                fileNameSpan.textContent = `${file.filename} (Modificado Moodle: ${new Date(file.last_modified_moodle * 1000).toLocaleString()})`;
+                // Format the last_modified_moodle timestamp (assuming it's in seconds).
+                const lastModifiedDate = new Date(file.last_modified_moodle * 1000).toLocaleString();
+                fileNameSpan.textContent = `${file.filename} (Modificado en Moodle: ${lastModifiedDate})`;
                 li.appendChild(fileNameSpan);
 
                 const deleteButton = document.createElement('button');
                 deleteButton.textContent = 'Eliminar';
-                deleteButton.classList.add('delete-btn'); // For styling
+                deleteButton.classList.add('delete-btn');
                 deleteButton.addEventListener('click', () => handleDeleteFile(currentCourseId, file.filename, li));
                 li.appendChild(deleteButton);
                 
                 indexedFilesList.appendChild(li);
             });
-            updateStatusManage(`Lista de archivos indexados cargada para el curso ID ${currentCourseId}.`, 'success');
+            updateStatusManage(`Archivos indexados cargados correctamente para el curso ${currentCourseId}.`, 'success');
 
-        } catch (error) {
-            console.error('Error loading indexed files:', error);
-            updateStatusManage(`Error al cargar archivos indexados: ${error.message}`, 'error');
-            if (indexedFilesList) indexedFilesList.innerHTML = '<li>Error al cargar archivos.</li>';
+        } catch (networkError) {
+            console.error('Error de red al cargar archivos indexados:', networkError);
+            updateStatusManage('Error de red al cargar archivos. Verifica tu conexión e inténtalo de nuevo.', 'error');
+            if (indexedFilesList) indexedFilesList.innerHTML = '<li>Error de red al cargar archivos.</li>';
         }
     }
 
     // --- Delete File ---
+
+    /**
+     * Handles the deletion of an indexed file for a given course.
+     * Prompts the user for confirmation before proceeding.
+     * @param {string} currentCourseId - The ID of the course.
+     * @param {string} filename - The name of the file to delete.
+     * @param {HTMLElement} listItemElement - The list item element in the DOM to remove on success.
+     */
     async function handleDeleteFile(currentCourseId, filename, listItemElement) {
-        if (!confirm(`¿Estás seguro de que quieres eliminar el archivo "${filename}" y todos sus datos procesados? Esta acción no se puede deshacer.`)) {
+        if (!confirm(`¿Estás seguro de que quieres eliminar el archivo "${filename}" de la IA? Esta acción no se puede deshacer.`)) {
             return;
         }
-        updateStatusManage(`Eliminando archivo "${filename}"...`, 'info');
+        updateStatusManage(`Eliminando el archivo "${filename}"...`, 'info');
         try {
             const encodedFilename = encodeURIComponent(filename);
             const response = await fetch(`${API_BASE_URL}/courses/${currentCourseId}/indexed-files/${encodedFilename}`, {
@@ -140,131 +176,217 @@ document.addEventListener('DOMContentLoaded', async () => {
             });
 
             if (!response.ok) {
-                const errorData = await response.json().catch(() => null);
-                const errorMessage = `Error ${response.status}: ${errorData?.detail || 'No se pudo eliminar el archivo.'}`;
-                updateStatusManage(errorMessage, 'error');
+                let errorDetail = 'No se pudo eliminar el archivo.';
+                try {
+                    const errorData = await response.json();
+                    errorDetail = errorData.detail || errorDetail;
+                } catch (e) { console.warn('Could not parse error response as JSON for delete operation:', e); }
+                updateStatusManage(`Error ${response.status} al eliminar "${filename}": ${errorDetail}`, 'error');
                 return;
             }
             
-
-            updateStatusManage(`Archivo "${filename}" eliminado exitosamente.`, 'success');
+            updateStatusManage(`Archivo "${filename}" eliminado exitosamente de la IA.`, 'success');
             if (listItemElement) {
                 listItemElement.remove();
             }
-            // If the list becomes empty after deletion
             if (indexedFilesList && indexedFilesList.children.length === 0) {
-                indexedFilesList.innerHTML = '<li>No hay archivos indexados.</li>';
+                indexedFilesList.innerHTML = '<li>No hay archivos indexados actualmente.</li>';
             }
 
-        } catch (error) {
-            console.error('Error deleting file:', error);
-            updateStatusManage(`Error al eliminar "${filename}": ${error.message}`, 'error');
+        } catch (networkError) {
+            console.error('Error de red al eliminar archivo:', networkError);
+            updateStatusManage(`Error de red al eliminar "${filename}". Verifica tu conexión e inténtalo de nuevo.`, 'error');
         }
     }
 
     // --- Refresh Files from Moodle & Task Tracking ---
+
+    /**
+     * Initiates a request to the backend to refresh the list of files from Moodle for the current course.
+     * If new files are identified for processing, it starts tracking their progress.
+     * @param {string} currentCourseId - The ID of the course.
+     */
     async function handleRefreshFiles(currentCourseId) {
         if (!refreshMoodleFilesButton) return;
-        updateStatusManage('Solicitando actualización de archivos desde Moodle...', 'info');
+        
+        const originalButtonHTML = refreshMoodleFilesButton.innerHTML; // Store full HTML content
         refreshMoodleFilesButton.disabled = true;
+        refreshMoodleFilesButton.innerHTML = '<span class="btn-spinner"></span>Actualizando desde Moodle...';
+        updateStatusManage('Solicitando revisión de archivos en Moodle...', 'info');
 
         try {
             const response = await fetch(`${API_BASE_URL}/courses/${currentCourseId}/refresh-files`);
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => null);
-                const errorMessage = `Error ${response.status}: ${errorData?.detail || 'No se pudo iniciar la actualización de archivos.'}`;
-                updateStatusManage(errorMessage, 'error');
-                refreshMoodleFilesButton.disabled = false;
+            let result;
+            try {
+                 result = await response.json();
+            } catch (e) {
+                console.error('Could not parse refresh-files response as JSON:', e);
+                updateStatusManage(`Error inesperado del servidor (código ${response.status}) al revisar archivos.`, 'error');
+                // Don't re-enable button immediately if response is totally unparsable, state is unknown
                 return;
             }
-            const result = await response.json();
+
+            if (!response.ok) {
+                const errorMessage = `Error ${response.status}: ${result?.detail || 'No se pudo iniciar la actualización de archivos desde Moodle.'}`;
+                updateStatusManage(errorMessage, 'error');
+                // Consider re-enabling button here if the error is definitive and not a temporary server issue
+                // For now, keeping it disabled on API error to prevent repeated failed calls.
+                return; 
+            }
             
-            updateStatusManage(result.message || 'Proceso de actualización iniciado.', 'success');
+            updateStatusManage(result.message || 'Solicitud de actualización de archivos completada.', 'success');
 
             if (result.task_ids && result.task_ids.length > 0) {
-                if (processingFilesList && processingFilesList.innerHTML.includes('No hay archivos procesándose actualmente')) {
-                    processingFilesList.innerHTML = ''; // Clear "no files" message
+                // Clear "No hay archivos procesándose" message if it exists and is the only child
+                if (processingFilesList && processingFilesList.children.length === 1 && processingFilesList.firstChild.textContent === 'No hay archivos procesándose actualmente.') {
+                    processingFilesList.innerHTML = ''; 
                 }
                 result.task_ids.forEach(taskId => {
-                    // We don't have individual filenames here, so use task ID or a generic name
-                    const taskDisplayName = `Tarea de procesamiento ${taskId.substring(0,8)}`; 
-                    addOrUpdateProcessingFileStatus(taskId, taskDisplayName, 'PENDIENTE');
+                    const taskDisplayName = result.filenames_by_task_id?.[taskId] || `Tarea de procesamiento ${taskId.substring(0,8)}`;
+                    addOrUpdateProcessingFileStatus(taskId, taskDisplayName, 'PENDING');
                     trackTaskProgress(currentCourseId, taskId, taskDisplayName);
                 });
             } else if (result.files_identified_for_processing === 0) {
-                updateStatusManage('No se identificaron archivos nuevos o modificados para procesar.', 'info');
+                updateStatusManage('No se encontraron archivos nuevos o modificados en Moodle para procesar.', 'info');
             }
 
-        } catch (error) {
-            console.error('Error refreshing files:', error);
-            updateStatusManage(`Error al actualizar archivos: ${error.message}`, 'error');
+        } catch (networkError) {
+            console.error('Error de red al solicitar actualización de archivos:', networkError);
+            updateStatusManage('Error de red al actualizar archivos. Verifica tu conexión e inténtalo de nuevo.', 'error');
         } finally {
-            if (refreshMoodleFilesButton) refreshMoodleFilesButton.disabled = false;
+            // Always re-enable the button unless there was a severe, unrecoverable error.
+            if (refreshMoodleFilesButton) {
+                refreshMoodleFilesButton.disabled = false;
+                refreshMoodleFilesButton.innerHTML = originalButtonHTML;
+            }
         }
     }
     
-    function addOrUpdateProcessingFileStatus(taskId, displayName, statusText) {
+    /**
+     * Adds or updates a list item in the "Archivos en Procesamiento" list to reflect
+     * the status of a file processing task.
+     * @param {string} taskId - The ID of the task.
+     * @param {string} displayName - The name of the file or task to display.
+     * @param {string} status - The current status of the task (e.g., PENDING, PROCESSING, SUCCESS, FAILURE).
+     * @param {string|null} resultMessage - An optional message associated with the status (e.g., error details).
+     */
+    function addOrUpdateProcessingFileStatus(taskId, displayName, status, resultMessage = null) {
         if (!processingFilesList) return;
         let taskItem = processingFilesList.querySelector(`li[data-task-id="${taskId}"]`);
         if (!taskItem) {
             taskItem = document.createElement('li');
             taskItem.dataset.taskId = taskId;
-            if (processingFilesList.firstChild && processingFilesList.firstChild.textContent === 'No hay archivos procesándose actualmente.') {
-                processingFilesList.innerHTML = ''; // Clear "No hay archivos"
+            // Clear "No hay archivos" message if it's the only item
+            if (processingFilesList.children.length === 1 && processingFilesList.firstChild.textContent === 'No hay archivos procesándose actualmente.') {
+                processingFilesList.innerHTML = '';
             }
             processingFilesList.appendChild(taskItem);
         }
-        taskItem.textContent = `${displayName}: ${statusText}`;
+
+        taskItem.className = ''; // Reset classes for accurate status styling.
+        let iconHtml = '<span class="status-icon"></span>'; // Default icon placeholder.
+        let statusText = status; // Default to showing the raw status.
+
+        switch (status.toUpperCase()) {
+            case 'PENDING':
+                taskItem.classList.add('status-pending');
+                statusText = 'Pendiente de procesamiento';
+                break;
+            case 'STARTED': // Often used by Celery
+            case 'PROCESSING':
+                taskItem.classList.add('status-processing');
+                iconHtml = '<span class="status-icon spinner"></span>'; // Visual spinner for active processing.
+                statusText = 'Procesando...';
+                break;
+            case 'SUCCESS':
+                // SUCCESS items are typically removed by trackTaskProgress, but this provides a fallback.
+                taskItem.classList.add('status-success'); // You might want a temporary success style.
+                statusText = 'Completado exitosamente';
+                break;
+            case 'FAILURE':
+                taskItem.classList.add('status-failure');
+                statusText = `Error en procesamiento${resultMessage ? `: ${resultMessage}` : ''}`;
+                break;
+            case 'ERROR_CHECK': // Custom status for when checking task status fails
+                 taskItem.classList.add('status-warning'); // Or a specific 'error-check' style
+                 statusText = `Advertencia: No se pudo verificar estado (${resultMessage || 'detalle no disponible'})`;
+                 break;
+            case 'ERROR_NETWORK': // Custom status for network errors during polling
+                taskItem.classList.add('status-warning'); // Or a specific 'error-network' style
+                statusText = `Advertencia: Error de red al verificar estado (${resultMessage || 'reintentando'})`;
+                break;
+
+        }
+        taskItem.innerHTML = `${iconHtml}<span class="status-text">${displayName}: ${statusText}</span>`;
     }
 
+    /**
+     * Periodically polls the backend for the status of a given task.
+     * Updates the task's display in the processing list and handles completion or failure.
+     * @param {string} currentCourseId - The ID of the course (for reloading indexed files on success).
+     * @param {string} taskId - The ID of the task to track.
+     * @param {string} displayName - The display name for the task/file.
+     */
     function trackTaskProgress(currentCourseId, taskId, displayName) {
-        if (activeTasks[taskId]) {
-            clearInterval(activeTasks[taskId]); // Clear existing interval if any
+        if (activeTasks[taskId]) { // Clear any existing interval for this task ID.
+            clearInterval(activeTasks[taskId]);
         }
 
         activeTasks[taskId] = setInterval(async () => {
             try {
                 const response = await fetch(`${API_BASE_URL}/task/${taskId}/status`);
-                if (!response.ok) {
-                    // If task status endpoint itself fails, log and stop, but don't assume task failed
-                    console.warn(`Advertencia: No se pudo obtener el estado de la tarea ${taskId} (HTTP ${response.status}). Se reintentará.`);
-                    addOrUpdateProcessingFileStatus(taskId, displayName, `Error al obtener estado (HTTP ${response.status})`);
-                    // Consider stopping after several failed attempts to get status
-                    return; 
+                let task; 
+                try {
+                    task = await response.json();
+                } catch (e) {
+                    // Handle cases where the status endpoint returns non-JSON (e.g. server error page)
+                    console.warn(`Respuesta no JSON al obtener estado de tarea ${taskId} (HTTP ${response.status}).`, e);
+                    addOrUpdateProcessingFileStatus(taskId, displayName, 'ERROR_CHECK', `Respuesta inesperada del servidor (HTTP ${response.status})`);
+                    // Consider stopping polling if this happens repeatedly. For now, it will retry.
+                    return;
                 }
-                const task = await response.json();
 
-                addOrUpdateProcessingFileStatus(taskId, displayName, task.status);
+                if (!response.ok) {
+                    const errorDetail = task?.detail || `Error HTTP ${response.status}`;
+                    console.warn(`No se pudo obtener el estado de la tarea ${taskId} (${errorDetail}). Se reintentará.`);
+                    addOrUpdateProcessingFileStatus(taskId, displayName, 'ERROR_CHECK', errorDetail);
+                    return;
+                }
+                
+                // Update the UI with the fetched status.
+                addOrUpdateProcessingFileStatus(taskId, displayName, task.status, task.result);
 
                 if (task.status === 'SUCCESS') {
-                    clearInterval(activeTasks[taskId]);
+                    clearInterval(activeTasks[taskId]); // Stop polling.
                     delete activeTasks[taskId];
-                    updateStatusManage(`Procesamiento de '${displayName}' (Tarea ${taskId.substring(0,8)}) completado exitosamente.`, 'success');
+                    updateStatusManage(`Procesamiento de '${displayName}' (Tarea ${taskId.substring(0,8)}) completado.`, 'success');
                     const taskItem = processingFilesList.querySelector(`li[data-task-id="${taskId}"]`);
-                    if (taskItem) taskItem.remove();
+                    if (taskItem) taskItem.remove(); // Remove from "processing" list.
+                    
                     if (processingFilesList.children.length === 0) {
                         processingFilesList.innerHTML = '<li>No hay archivos procesándose actualmente.</li>';
                     }
-                    await loadIndexedFiles(currentCourseId); // Refresh indexed files list
+                    await loadIndexedFiles(currentCourseId); // Refresh the list of indexed files.
                 } else if (task.status === 'FAILURE') {
-                    clearInterval(activeTasks[taskId]);
+                    clearInterval(activeTasks[taskId]); // Stop polling.
                     delete activeTasks[taskId];
-                    const errorMessage = task.result || 'Error desconocido.';
-                    updateStatusManage(`Error en el procesamiento de '${displayName}' (Tarea ${taskId.substring(0,8)}): ${errorMessage}`, 'error');
-                    addOrUpdateProcessingFileStatus(taskId, displayName, `ERROR: ${errorMessage}`);
-                    // Keep it in the list with error status, or remove it
-                    // const taskItem = processingFilesList.querySelector(`li[data-task-id="${taskId}"]`);
-                    // if (taskItem) taskItem.classList.add('error-task'); // Add class for styling
+                    const errorMessage = task.result || 'Causa desconocida';
+                    updateStatusManage(`Error al procesar '${displayName}' (Tarea ${taskId.substring(0,8)}): ${errorMessage}`, 'error');
+                    // The item remains in the processing list with "Fallido" status due to addOrUpdateProcessingFileStatus.
                 }
-                // Other statuses (PENDING, STARTED, RETRY) will just update the text via addOrUpdateProcessingFileStatus
-            } catch (error) {
-                console.error(`Error tracking task ${taskId}:`, error);
-                // Don't clear interval due to network error, allow retries
-                addOrUpdateProcessingFileStatus(taskId, displayName, 'Error de red al verificar estado.');
+                // For PENDING, STARTED, RETRY statuses, the UI is updated by addOrUpdateProcessingFileStatus, and polling continues.
+            } catch (networkError) { // Catch network errors related to the fetch itself.
+                console.error(`Error de red al rastrear tarea ${taskId}:`, networkError);
+                addOrUpdateProcessingFileStatus(taskId, displayName, 'ERROR_NETWORK', 'Error de conexión');
+                // Polling continues, as network issues might be temporary.
             }
-        }, 3000); // Poll every 3 seconds
+        }, 3000); // Poll for status every 3 seconds.
     }
 
     // --- Start ---
-    await initializePage();
+    // Initialize the page as soon as the DOM is fully loaded.
+    initializePage().catch(error => {
+        console.error("Error crítico durante la inicialización de la página de gestión de archivos:", error);
+        updateStatusManage("Ocurrió un error grave al cargar la página. Por favor, recarga.", "error");
+    });
 });
