@@ -4,7 +4,7 @@ from typing import List, Dict, Any  # Ensure Dict and Any are imported
 
 import psycopg2  # Or psycopg if using version 3+
 from pgvector.psycopg2 import register_vector  # Or equivalent for psycopg3
-from psycopg2.extras import RealDictCursor  # Or appropriate cursor for dict results
+from psycopg2.extras import RealDictCursor, execute_values  # Or appropriate cursor for dict results
 
 from src.entrenai.api.models import (
     DocumentChunk,
@@ -116,8 +116,26 @@ class PgvectorWrapper:
                 (table_name,),
             )
             if self.cursor.fetchone()["exists"]:
-                # TODO: Add check for vector dimension and recreate if different (more complex in SQL)
-                # For now, assume if table exists, it's correct.
+                # Check the dimension of the existing 'embedding' column
+                dimension_check_sql = """
+                SELECT atttypmod FROM pg_attribute
+                WHERE attrelid = %s::regclass
+                  AND attname = 'embedding'
+                  AND NOT attisdropped;
+                """
+                self.cursor.execute(dimension_check_sql, (table_name,))
+                result = self.cursor.fetchone()
+                if result:
+                    retrieved_dimension = result.get("atttypmod")
+                    if retrieved_dimension is not None and retrieved_dimension != -1 and retrieved_dimension != vector_size:
+                        logger.warning(
+                            f"Table '{table_name}' exists but its 'embedding' column dimension ({retrieved_dimension}) "
+                            f"does not match the expected dimension ({vector_size}). This may cause issues."
+                        )
+                else:
+                    # This case should ideally not happen if the table exists and has an 'embedding' column
+                    logger.warning(f"Could not retrieve dimension for 'embedding' column in existing table '{table_name}'.")
+
                 logger.info(f"Table '{table_name}' already exists.")
                 return True
 
@@ -315,75 +333,69 @@ class PgvectorWrapper:
 
         table_name = self.get_table_name(course_name)
 
-        # Ensure table exists first (and matches vector size from the first valid chunk if possible)
-        # This is a simplification; ideally, vector_size is passed or known.
         first_valid_embedding_size = self.config.default_vector_size
+        valid_chunks_data = []
         for chunk in chunks:
-            if chunk.embedding is not None:
+            if chunk.embedding is None:
+                logger.warning(
+                    f"Chunk with ID '{chunk.id}' (course: {chunk.course_id}, doc: {chunk.document_id}) has no embedding. Skipping."
+                )
+                continue
+
+            if first_valid_embedding_size == self.config.default_vector_size: # Try to set it from the first valid chunk
                 first_valid_embedding_size = len(chunk.embedding)
-                break
+
+            metadata_to_insert = chunk.metadata
+            if isinstance(chunk.metadata, dict):
+                import json
+                metadata_to_insert = json.dumps(chunk.metadata)
+            
+            valid_chunks_data.append(
+                (
+                    chunk.id,
+                    str(chunk.course_id),
+                    chunk.document_id,
+                    chunk.text,
+                    metadata_to_insert,
+                    chunk.embedding,
+                )
+            )
+
+        if not valid_chunks_data:
+            logger.info(f"No valid chunks with embeddings found to upsert into '{table_name}'.")
+            return True
+
         if not self.ensure_table(course_name, first_valid_embedding_size):
             logger.error(f"Failed to ensure table '{table_name}' for upserting chunks.")
             return False
 
-        upserted_count = 0
         try:
-            for chunk in chunks:
-                if chunk.embedding is None:
-                    logger.warning(
-                        f"Chunk with ID '{chunk.id}' (course: {chunk.course_id}, doc: {chunk.document_id}) has no embedding. Skipping."
-                    )
-                    continue
-
-                # Ensure metadata is a valid JSON string if it's a dict
-                metadata_to_insert = chunk.metadata
-                if isinstance(chunk.metadata, dict):
-                    import json
-
-                    metadata_to_insert = json.dumps(chunk.metadata)
-
-                sql = f"""
-                INSERT INTO {table_name} (id, course_id, document_id, text, metadata, embedding)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (id) DO UPDATE SET
-                    course_id = EXCLUDED.course_id,
-                    document_id = EXCLUDED.document_id,
-                    text = EXCLUDED.text,
-                    metadata = EXCLUDED.metadata,
-                    embedding = EXCLUDED.embedding;
-                """
-                self.cursor.execute(
-                    sql,
-                    (
-                        chunk.id,
-                        str(
-                            chunk.course_id
-                        ),  # Ensure course_id is string if it's treated as such
-                        chunk.document_id,
-                        chunk.text,
-                        metadata_to_insert,  # Already JSON string or compatible
-                        chunk.embedding,
-                    ),
-                )
-                upserted_count += 1
+            sql_template = f"""
+            INSERT INTO {table_name} (id, course_id, document_id, text, metadata, embedding)
+            VALUES %s
+            ON CONFLICT (id) DO UPDATE SET
+                course_id = EXCLUDED.course_id,
+                document_id = EXCLUDED.document_id,
+                text = EXCLUDED.text,
+                metadata = EXCLUDED.metadata,
+                embedding = EXCLUDED.embedding;
+            """
+            
+            execute_values(self.cursor, sql_template, valid_chunks_data)
             self.conn.commit()
-            if upserted_count > 0:
-                logger.info(
-                    f"Successfully upserted {upserted_count} chunks into table '{table_name}'."
-                )
-            else:
-                logger.info(
-                    f"No valid chunks with embeddings were found to upsert into '{table_name}'."
-                )
+            
+            logger.info(
+                f"Successfully batch upserted {len(valid_chunks_data)} chunks into table '{table_name}'."
+            )
             return True
         except psycopg2.Error as e:
-            logger.error(f"Error upserting chunks into table '{table_name}': {e}")
+            logger.error(f"Error batch upserting chunks into table '{table_name}': {e}")
             if self.conn:
                 self.conn.rollback()
             return False
         except Exception as e:
             logger.error(
-                f"Unexpected error upserting chunks into table '{table_name}': {e}"
+                f"Unexpected error batch upserting chunks into table '{table_name}': {e}"
             )
             if self.conn:
                 self.conn.rollback()
@@ -394,6 +406,7 @@ class PgvectorWrapper:
         course_name: str,
         query_embedding: List[float],
         limit: int = 5,
+        ef_search_value: Optional[int] = None, 
         # score_threshold: Optional[float] = None, # pgvector uses distance, not score; 0 is perfect match for cosine
     ) -> List[
         Dict[str, Any]
@@ -410,6 +423,10 @@ class PgvectorWrapper:
 
         table_name = self.get_table_name(course_name)
         try:
+            if ef_search_value is not None:
+                self.cursor.execute("SET LOCAL hnsw.ef_search = %s;", (ef_search_value,))
+                logger.info(f"Setting hnsw.ef_search = {ef_search_value} for current query in table '{table_name}'.")
+
             # <=> is the cosine distance operator in pgvector
             # For L2 distance, use <->. For inner product, use <#>.
             # Ensure the vector size matches, or this query might fail/be slow.
