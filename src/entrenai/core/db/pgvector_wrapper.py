@@ -1,10 +1,13 @@
 import re
 import time  # Added for timestamping
-from typing import List, Dict, Any  # Ensure Dict and Any are imported
+from typing import List, Dict, Any, Optional  # Ensure Dict and Any are imported
 
 import psycopg2  # Or psycopg if using version 3+
 from pgvector.psycopg2 import register_vector  # Or equivalent for psycopg3
-from psycopg2.extras import RealDictCursor, execute_values  # Or appropriate cursor for dict results
+from psycopg2.extras import (
+    RealDictCursor,
+    execute_values,
+)  # Or appropriate cursor for dict results
 
 from src.entrenai.api.models import (
     DocumentChunk,
@@ -127,14 +130,20 @@ class PgvectorWrapper:
                 result = self.cursor.fetchone()
                 if result:
                     retrieved_dimension = result.get("atttypmod")
-                    if retrieved_dimension is not None and retrieved_dimension != -1 and retrieved_dimension != vector_size:
+                    if (
+                        retrieved_dimension is not None
+                        and retrieved_dimension != -1
+                        and retrieved_dimension != vector_size
+                    ):
                         logger.warning(
                             f"Table '{table_name}' exists but its 'embedding' column dimension ({retrieved_dimension}) "
                             f"does not match the expected dimension ({vector_size}). This may cause issues."
                         )
                 else:
                     # This case should ideally not happen if the table exists and has an 'embedding' column
-                    logger.warning(f"Could not retrieve dimension for 'embedding' column in existing table '{table_name}'.")
+                    logger.warning(
+                        f"Could not retrieve dimension for 'embedding' column in existing table '{table_name}'."
+                    )
 
                 logger.info(f"Table '{table_name}' already exists.")
                 return True
@@ -157,10 +166,27 @@ class PgvectorWrapper:
 
             self.cursor.execute(create_table_sql)
 
-            # Create an index (e.g., HNSW for approximate nearest neighbor search)
+            # Create an index for approximate nearest neighbor search
             # For cosine distance, use vector_cosine_ops. For L2, vector_l2_ops. For inner product, vector_ip_ops.
-            create_index_sql = f"CREATE INDEX ON {table_name} USING hnsw (embedding vector_cosine_ops);"
-            self.cursor.execute(create_index_sql)
+            # HNSW index has a limitation of 2000 dimensions, so use halfvec for larger vectors
+            # Create an index for approximate nearest neighbor search
+            # For cosine distance, use vector_cosine_ops. For L2, vector_l2_ops. For inner product, vector_ip_ops.
+            # HNSW index has a limitation of 2000 dimensions, so use halfvec for larger vectors
+            # The 'halfvec' type is used within the HNSW index for larger dimensions.
+            if vector_size <= 2000:
+                create_index_sql = f"CREATE INDEX ON {table_name} USING hnsw (embedding vector_cosine_ops);"
+                self.cursor.execute(create_index_sql)
+                logger.info(
+                    f"Created HNSW index for table '{table_name}' with vector size {vector_size}."
+                )
+            else:
+                # For vectors with more than 2000 dimensions, use halfvec type with HNSW index
+                # The syntax is ((embedding::halfvec(vector_size)) halfvec_cosine_ops)
+                create_index_sql = f"CREATE INDEX ON {table_name} USING hnsw ((embedding::halfvec({vector_size})) halfvec_cosine_ops);"
+                self.cursor.execute(create_index_sql)
+                logger.info(
+                    f"Created HNSW index with halfvec type for table '{table_name}' with vector size {vector_size}."
+                )
 
             self.conn.commit()
             logger.info(
@@ -342,14 +368,17 @@ class PgvectorWrapper:
                 )
                 continue
 
-            if first_valid_embedding_size == self.config.default_vector_size: # Try to set it from the first valid chunk
+            if (
+                first_valid_embedding_size == self.config.default_vector_size
+            ):  # Try to set it from the first valid chunk
                 first_valid_embedding_size = len(chunk.embedding)
 
             metadata_to_insert = chunk.metadata
             if isinstance(chunk.metadata, dict):
                 import json
+
                 metadata_to_insert = json.dumps(chunk.metadata)
-            
+
             valid_chunks_data.append(
                 (
                     chunk.id,
@@ -362,7 +391,9 @@ class PgvectorWrapper:
             )
 
         if not valid_chunks_data:
-            logger.info(f"No valid chunks with embeddings found to upsert into '{table_name}'.")
+            logger.info(
+                f"No valid chunks with embeddings found to upsert into '{table_name}'."
+            )
             return True
 
         if not self.ensure_table(course_name, first_valid_embedding_size):
@@ -380,10 +411,10 @@ class PgvectorWrapper:
                 metadata = EXCLUDED.metadata,
                 embedding = EXCLUDED.embedding;
             """
-            
+
             execute_values(self.cursor, sql_template, valid_chunks_data)
             self.conn.commit()
-            
+
             logger.info(
                 f"Successfully batch upserted {len(valid_chunks_data)} chunks into table '{table_name}'."
             )
@@ -406,7 +437,7 @@ class PgvectorWrapper:
         course_name: str,
         query_embedding: List[float],
         limit: int = 5,
-        ef_search_value: Optional[int] = None, 
+        ef_search_value: Optional[int] = None,
         # score_threshold: Optional[float] = None, # pgvector uses distance, not score; 0 is perfect match for cosine
     ) -> List[
         Dict[str, Any]
@@ -424,8 +455,12 @@ class PgvectorWrapper:
         table_name = self.get_table_name(course_name)
         try:
             if ef_search_value is not None:
-                self.cursor.execute("SET LOCAL hnsw.ef_search = %s;", (ef_search_value,))
-                logger.info(f"Setting hnsw.ef_search = {ef_search_value} for current query in table '{table_name}'.")
+                self.cursor.execute(
+                    "SET LOCAL hnsw.ef_search = %s;", (ef_search_value,)
+                )
+                logger.info(
+                    f"Setting hnsw.ef_search = {ef_search_value} for current query in table '{table_name}'."
+                )
 
             # <=> is the cosine distance operator in pgvector
             # For L2 distance, use <->. For inner product, use <#>.
@@ -440,10 +475,13 @@ class PgvectorWrapper:
             # We will return the raw distance and let the caller interpret or transform if needed, or transform to similarity here.
             # Let's return 'score' as cosine similarity: (1 - (embedding <=> query_embedding))
 
+            # For cosine similarity with pgvector: embedding <-> query_embedding gives cosine distance (0=identical, 2=opposite).
+            # To make it behave like Qdrant's score (higher = better similarity), we can use (1 - cosine_distance).
+            # When using halfvec, the casting is required for the comparison.
             query_sql = f"""
-            SELECT id, course_id, document_id, text, metadata, (1 - (embedding <=> %s)) AS score 
+            SELECT id, course_id, document_id, text, metadata, (1 - (embedding <=> %s::vector({len(query_embedding)}))) AS score 
             FROM {table_name}
-            ORDER BY embedding <=> %s
+            ORDER BY embedding::halfvec({len(query_embedding)}) <=> %s::halfvec({len(query_embedding)})
             LIMIT %s;
             """
             # query_sql = f"SELECT id, course_id, document_id, text, metadata, embedding <=> %s AS distance FROM {table_name} ORDER BY distance LIMIT %s;"

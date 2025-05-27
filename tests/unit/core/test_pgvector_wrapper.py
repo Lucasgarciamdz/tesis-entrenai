@@ -163,9 +163,16 @@ def test_ensure_table_creates_if_not_exists(
     )
 
     # Check for CREATE INDEX statement
-    expected_create_index_sql = (
-        f"CREATE INDEX ON {table_name} USING hnsw (embedding vector_cosine_ops);"
-    )
+    # For vector_size <= 2000, HNSW index is used
+    # For vector_size > 2000, halfvec index is used
+    if vector_size <= 2000:
+        expected_create_index_sql = (
+            f"CREATE INDEX ON {table_name} USING hnsw (embedding vector_cosine_ops);"
+        )
+    else:
+        expected_create_index_sql = (
+            f"CREATE INDEX ON {table_name} USING halfvec (embedding vector_cosine_ops);"
+        )
     assert any(
         normalize_sql(expected_create_index_sql) == normalize_sql(sql)
         for sql in executed_sqls
@@ -211,6 +218,63 @@ def test_ensure_table_exists(  # Renamed and simplified
 
 
 # test_ensure_collection_exists_recreates_if_config_mismatch is removed as pgvector logic is different.
+
+
+def test_ensure_table_creates_with_large_vector_dimensions(
+    pgvector_wrapper_with_mock_connection: tuple[PgvectorWrapper, MagicMock, MagicMock],
+):
+    """Test that ensure_table creates a table with halfvec index for large vector dimensions."""
+    wrapper, mock_conn, mock_cursor = pgvector_wrapper_with_mock_connection
+    course_name = "Large Vector Course"
+    table_name = wrapper.get_table_name(course_name)
+    vector_size = 3072  # Large vector size that exceeds HNSW limit of 2000
+
+    # Simulate table does not exist
+    mock_cursor.fetchone.return_value = {"exists": False}
+
+    assert wrapper.ensure_table(course_name, vector_size) is True
+
+    # Check for table existence query
+    mock_cursor.execute.assert_any_call(
+        "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s);",
+        (table_name,),
+    )
+
+    # Check for CREATE TABLE statement
+    expected_create_table_sql = f"""
+            CREATE TABLE {table_name} (
+                id TEXT PRIMARY KEY,
+                course_id TEXT, 
+                document_id TEXT,
+                text TEXT,
+                metadata JSONB,
+                embedding vector({vector_size})
+            );
+            """
+    # Normalize whitespace for comparison
+    executed_sqls = [
+        call_args[0][0] for call_args in mock_cursor.execute.call_args_list
+    ]
+
+    # Normalize SQL for comparison (basic whitespace normalization)
+    def normalize_sql(sql):
+        return " ".join(sql.strip().split())
+
+    assert any(
+        normalize_sql(expected_create_table_sql) == normalize_sql(sql)
+        for sql in executed_sqls
+    )
+
+    # Check for CREATE INDEX statement with halfvec for large vectors
+    expected_create_index_sql = (
+        f"CREATE INDEX ON {table_name} USING halfvec (embedding vector_cosine_ops);"
+    )
+    assert any(
+        normalize_sql(expected_create_index_sql) == normalize_sql(sql)
+        for sql in executed_sqls
+    )
+
+    mock_conn.commit.assert_called()  # Should be called after successful creation
 
 
 def test_ensure_table_handles_db_error(  # Renamed

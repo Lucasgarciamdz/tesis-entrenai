@@ -5,7 +5,7 @@ services:
     container_name: entrenai_moodle_db
     restart: unless-stopped
     ports:
-      - "${MOODLE_DB_HOST_PORT:-5432}:5432" # PostgreSQL port
+      - "${MOODLE_DB_HOST_PORT:-5433}:5432" # PostgreSQL port
     volumes:
       - moodle_db_data:/var/lib/postgresql/data
     environment:
@@ -54,11 +54,11 @@ services:
 
   # --- PGVector Database ---
   pgvector_db:
-    image: pgvector/pgvector:pg16 # Includes pgvector extension
+    image: pgvector/pgvector:0.8.0-pg17 # Includes pgvector extension
     container_name: entrenai_pgvector_db
     restart: unless-stopped
     ports:
-      - "${PGVECTOR_HOST_PORT:-5433}:5432" # Expose on a different host port if 5432 is taken
+      - "${PGVECTOR_HOST_PORT:-5432}:5432" # Expose on a different host port if 5432 is taken
     volumes:
       - pgvector_data:/var/lib/postgresql/data
       - ./src/entrenai/core/db/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -161,7 +161,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-  
+
   celery_worker:
     build: . # Assumes Dockerfile is in the root and copies src to /app/src
     container_name: entrenai_celery_worker
@@ -169,7 +169,7 @@ services:
     command: sh -c "celery -A src.entrenai.celery_app.app worker -l INFO -P eventlet"
     volumes:
       - ./src:/app/src # Mount local src to /app/src in container
-      - ./data:/app/data # Mount local data to /app/data in container (for file processing outputs like markdown)
+      - entrenai_data:/app/data # Use a named volume for data to avoid permission issues
     env_file:
       - .env # Load environment variables from .env file
     environment:
@@ -177,6 +177,7 @@ services:
       APP_ENV: docker # Indica al config.py que use la configuración de Docker para Pgvector
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
+      DATA_DIR: /app/data # Explicitly set the data directory path
 
       # Ensure PYTHONPATH is set if your Dockerfile doesn't handle it for 'src' imports
       # PYTHONUNBUFFERED: 1 # Good for seeing logs immediately
@@ -207,6 +208,8 @@ volumes:
   n8n_app_data:
     driver: local
   redis_data: # Added for Redis
+    driver: local
+  entrenai_data: # Added for Celery worker data
     driver: local
 
 networks:

@@ -1,4 +1,5 @@
 import logging
+import os
 import traceback  # For detailed error logging
 from pathlib import Path
 
@@ -86,7 +87,16 @@ def process_moodle_file_task(
         embedding_manager = EmbeddingManager(ollama_wrapper=ai_client)
 
         # 7. Create Path and ensure it exists
-        download_dir_path = Path(download_dir_str)
+        # Ensure download_dir_str is an absolute path
+        if not os.path.isabs(download_dir_str):
+            # If it's a relative path, make it absolute by prepending the base_config.data_dir
+            download_dir_path = Path(os.path.join(b_config.data_dir, download_dir_str))
+        else:
+            download_dir_path = Path(download_dir_str)
+
+        logger.info(
+            f"Task ID: {self.request.id} - Creating download directory at: {download_dir_path}"
+        )
         download_dir_path.mkdir(parents=True, exist_ok=True)
 
         # 8. Log start (already done)
@@ -106,7 +116,7 @@ def process_moodle_file_task(
 
         # 10. Extract text
         logger.info(f"Task ID: {self.request.id} - Processing file: {downloaded_path}")
-        raw_text, _ = file_processor.process_file(
+        raw_text = file_processor.process_file(
             downloaded_path
         )  # Assuming error handling inside or returns None
         if raw_text is None:
