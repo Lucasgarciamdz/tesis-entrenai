@@ -472,7 +472,7 @@ async def setup_ia_for_course(
         # New way:
         refresh_files_url = (
             str(request.base_url).rstrip("/")
-            + "/static/manage_files.html?course_id="
+            + "/ui/manage_files.html?course_id="
             + str(course_id)
         )
 

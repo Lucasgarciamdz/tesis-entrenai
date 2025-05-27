@@ -3,39 +3,124 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gestionar Archivos de IA</title>
+    <title>Entrenai - Gestionar Archivos</title>
     <link rel="stylesheet" href="style.css">
-
 </head>
 <body>
-    <div class="container">
-        <h1 id="course-title">Gestionar Archivos de IA para el Curso: <span id="course-name-placeholder">[Cargando nombre del curso...]</span></h1>
-        <a href="index.html" class="back-link">&larr; Volver a la página principal</a>
-
-        <div id="status-messages-manage">
-            <!-- Status messages will appear here -->
+    <header class="site-header">
+        <div class="logo-container">
+            <a href="index.html" class="site-title">Entrenai</a>
         </div>
-
-        <h2>Acciones del Curso</h2>
-        <div class="controls">
-            <button id="refresh-moodle-files-button">Actualizar Archivos desde Moodle</button>
-            <p class="small-text">Haz clic aquí para que Entrenai revise la carpeta del curso en Moodle en busca de archivos nuevos o actualizados para procesar.</p>
+        <nav class="main-nav">
+            <ul>
+                <li><a href="index.html">Panel de Control</a></li>
+                <li><a href="#" id="nav-manage-files" class="active">Archivos</a></li>
+                <li><a href="#">Configuración</a></li>
+                <li><a href="#">Ayuda</a></li>
+            </ul>
+        </nav>
+        <div class="user-profile-icon">
+            <img src="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👤</text></svg>" alt="Perfil">
         </div>
+    </header>
 
-        <h2>Archivos Indexados</h2>
-        <p class="small-text">Estos archivos ya han sido procesados y están siendo utilizados por la IA.</p>
-        <ul id="indexed-files-list" class="file-list">
-            <!-- Indexed files will be listed here by JavaScript -->
-            <li>No hay archivos indexados o aún no se han cargado.</li>
-        </ul>
+    <main class="main-content">
+        <div class="page-container">
+            <div class="page-header">
+                <h1>Gestionar Archivos para el Curso: <span id="course-name-placeholder">[Cargando...]</span></h1>
+                <a href="index.html" class="btn btn-sm btn-outline-primary mt-2">&larr; Volver al Panel de Control</a>
+            </div>
 
-        <h2>Archivos en Procesamiento</h2>
-        <p class="small-text">Estos archivos están siendo procesados actualmente por la IA. El estado se actualizará automáticamente.</p>
-        <ul id="processing-files-list" class="file-list">
-            <!-- Files being processed will be listed here by JavaScript -->
-            <li>No hay archivos procesándose actualmente.</li>
-        </ul>
-    </div>
+            <!-- Contenedor para mensajes de estado específicos de esta página -->
+            <div id="status-messages-manage-container">
+                <!-- Los mensajes de estado (alertas) aparecerán aquí -->
+            </div>
+            
+            <section class="card mb-4">
+                <div class="card-header">
+                    Acciones del Curso
+                </div>
+                <div class="card-body">
+                    <button id="refresh-moodle-files-button" class="btn btn-primary">
+                        <span class="btn-spinner d-none"></span>
+                        Actualizar Archivos desde Moodle
+                    </button>
+                    <p class="form-text mt-2">
+                        Haz clic aquí para que Entrenai revise la carpeta del curso en Moodle en busca de archivos nuevos o actualizados para procesar.
+                    </p>
+                </div>
+            </section>
+
+            <section class="card">
+                <div class="card-header">
+                    Archivos del Curso
+                </div>
+                <div class="card-body">
+                    <!-- Opcional: Barra de búsqueda y filtros (diseño para futuro) -->
+                    <!-- 
+                    <div class="actions-bar mb-3">
+                        <div class="search-filter-container">
+                            <input type="search" class="form-control" placeholder="Buscar archivos...">
+                            <select class="form-select">
+                                <option value="">Todos los estados</option>
+                                <option value="indexed">Indexado</option>
+                                <option value="processing">Procesando</option>
+                                <option value="pending">Pendiente</option>
+                                <option value="error">Error</option>
+                            </select>
+                        </div>
+                    </div>
+                    -->
+                    <div class="table-container">
+                        <table class="table" id="files-table">
+                            <thead>
+                                <tr>
+                                    <th>Nombre del Archivo</th>
+                                    <th>Estado</th>
+                                    <th>Progreso</th>
+                                    <th>Última Modificación (Moodle)</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="files-table-body">
+                                <!-- Las filas de archivos se insertarán aquí por JavaScript -->
+                                <tr>
+                                    <td colspan="5" class="text-center p-3">
+                                        <span class="btn-spinner"></span> Cargando archivos...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p id="no-files-message" class="text-center p-3 d-none">No hay archivos para mostrar.</p>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <footer class="site-footer">
+        © 2024-2025 Entrenai - Universidad de Mendoza. Todos los derechos reservados.
+    </footer>
+
     <script src="manage_files.js"></script>
+    <script>
+        // Script para el enlace de navegación de archivos, similar al de index.html
+        // pero adaptado ya que estamos en la página de archivos.
+        // Podría ser más útil para otros enlaces de navegación si se implementan.
+        document.getElementById('nav-manage-files').addEventListener('click', function(event) {
+            event.preventDefault();
+            // Ya estamos en la página de archivos, quizás recargar o mostrar un mensaje.
+            // O si el course_id no está, redirigir a index.html para seleccionar uno.
+            const params = new URLSearchParams(window.location.search);
+            const courseId = params.get('course_id');
+            if (!courseId) {
+                window.location.href = 'index.html'; // Si no hay course_id, volver al panel.
+            } else {
+                // Podríamos simplemente recargar la página actual si es necesario
+                // window.location.reload();
+                console.log("Ya estás en la página de gestión de archivos para el curso ID:", courseId);
+            }
+        });
+    </script>
 </body>
 </html>

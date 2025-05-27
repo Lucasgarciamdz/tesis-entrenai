@@ -1,19 +1,28 @@
 document.addEventListener('DOMContentLoaded', async () => {
     const courseNamePlaceholder = document.getElementById('course-name-placeholder');
-    const statusMessagesManage = document.getElementById('status-messages-manage');
+    // El contenedor de mensajes ahora es #status-messages-manage-container
+    const statusMessagesContainer = document.getElementById('status-messages-manage-container'); 
     const refreshMoodleFilesButton = document.getElementById('refresh-moodle-files-button');
-    const indexedFilesList = document.getElementById('indexed-files-list');
-    const processingFilesList = document.getElementById('processing-files-list');
+    const refreshButtonSpinner = refreshMoodleFilesButton ? refreshMoodleFilesButton.querySelector('.btn-spinner') : null;
+    
+    // Elementos de la nueva tabla
+    const filesTableBody = document.getElementById('files-table-body');
+    const noFilesMessage = document.getElementById('no-files-message');
+
 
     const API_BASE_URL = 'http://localhost:8000/api/v1'; // Adjust if necessary
     let courseId; // Stores the current course ID from URL parameters.
-    let activeTasks = {}; // Keeps track of active polling intervals for task progress.
+    let courseDisplayName = ''; // Para guardar el nombre del curso
+    // activeTasks almacenará objetos con: { pollIntervalId, animationFrameId, simulatedProgress, realStatus, filename }
+    let activeTasks = {}; 
+    let taskQueue = []; // Cola para taskIds que se procesarán secuencialmente
+    let isCurrentlyProcessing = false; // Flag para evitar múltiples procesamientos simultáneos desde la cola
 
     // Ensure essential DOM elements are present before proceeding.
-    if (!courseNamePlaceholder || !statusMessagesManage || !refreshMoodleFilesButton || !indexedFilesList || !processingFilesList) {
+    if (!courseNamePlaceholder || !statusMessagesContainer || !refreshMoodleFilesButton || !filesTableBody || !noFilesMessage) {
         console.error('Error crítico: Faltan elementos del DOM requeridos en manage_files.html. La aplicación no puede iniciarse correctamente.');
-        if (statusMessagesManage) { // Attempt to show an error if the status element itself exists
-            updateStatusManage('Error de inicialización: Faltan componentes de la página.', 'error');
+        if (statusMessagesContainer) { 
+            updateStatusManage('Error de inicialización: Faltan componentes clave de la página.', 'error');
         }
         return;
     }
@@ -29,16 +38,45 @@ document.addEventListener('DOMContentLoaded', async () => {
         courseId = params.get('course_id');
 
         if (!courseId) {
-            updateStatusManage('Error: No se ha especificado un ID de curso en la URL. Por favor, vuelve a la página principal e inténtalo de nuevo.', 'error');
+            updateStatusManage('Error: No se ha especificado un ID de curso. Vuelve al Panel de Control.', 'danger');
             disableAllControls();
+            if (filesTableBody) filesTableBody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">ID de curso no especificado.</td></tr>`;
+            if (noFilesMessage) noFilesMessage.classList.remove('d-none');
             return;
         }
-
-        // Display the course ID. Future enhancement: fetch and display course name.
-        courseNamePlaceholder.textContent = `ID ${courseId}`;
         
-        await loadIndexedFiles(courseId);
+        // Intentar obtener y mostrar el nombre del curso
+        await fetchCourseDetails(courseId); 
+        
+        await loadAndDisplayFiles(courseId); // Carga combinada de archivos indexados y en proceso
         setupEventListeners();
+    }
+
+    async function fetchCourseDetails(currentCourseId) {
+        try {
+            // Asumimos que tienes un endpoint para obtener detalles del curso, incluyendo el nombre.
+            // Si no, al menos mantenemos el ID.
+            // Este es un ejemplo, ajusta el endpoint según tu API.
+            const response = await fetch(`${API_BASE_URL}/courses/${currentCourseId}`); // O un endpoint general de cursos y filtrar
+            if (response.ok) {
+                const courseData = await response.json(); // Suponiendo que devuelve { id, displayname, ... }
+                // Si es un array de cursos, busca el específico
+                let foundCourse = Array.isArray(courseData) ? courseData.find(c => c.id == currentCourseId) : courseData;
+
+                if (foundCourse && (foundCourse.displayname || foundCourse.fullname)) {
+                    courseDisplayName = foundCourse.displayname || foundCourse.fullname;
+                    courseNamePlaceholder.textContent = courseDisplayName;
+                } else {
+                    courseNamePlaceholder.textContent = `ID ${currentCourseId}`;
+                }
+            } else {
+                console.warn(`No se pudo obtener el nombre del curso ${currentCourseId}. Mostrando ID.`);
+                courseNamePlaceholder.textContent = `ID ${currentCourseId}`;
+            }
+        } catch (error) {
+            console.error('Error al obtener detalles del curso:', error);
+            courseNamePlaceholder.textContent = `ID ${currentCourseId}`;
+        }
     }
 
     /**
@@ -66,94 +104,220 @@ document.addEventListener('DOMContentLoaded', async () => {
      * @param {string} type - The type of message ('info', 'success', 'warning', 'error').
      * @param {HTMLElement} targetElement - The DOM element where the message should be appended.
      */
-    function updateStatusManage(message, type = 'info', targetElement = statusMessagesManage) {
-        if (!targetElement) {
-            console.error("Target element for status message not found:", message);
-            return;
-        }
-        const p = document.createElement('p');
-        p.className = type; // Assumes CSS classes 'info', 'success', 'warning', 'error' are defined.
-        p.textContent = message;
-        
-        // Prepend new message so latest is always at the top.
-        if (targetElement.firstChild) {
-            targetElement.insertBefore(p, targetElement.firstChild);
-        } else {
-            targetElement.appendChild(p);
-        }
+    function updateStatusManage(message, type = 'info') {
+        if (!statusMessagesContainer) return;
+        const alertType = type === 'error' ? 'danger' : type; // Map to Bootstrap alert class
 
-        // Limit number of messages
-        while (targetElement.children.length > 8) {
-            targetElement.removeChild(targetElement.lastChild);
+        const alertDiv = document.createElement('div');
+        alertDiv.className = `alert alert-${alertType} alert-dismissible fade show`;
+        alertDiv.setAttribute('role', 'alert');
+        
+        let iconClass = '';
+        if (alertType === 'success') iconClass = '✅ ';
+        else if (alertType === 'danger') iconClass = '❗ ';
+        else if (alertType === 'warning') iconClass = '⚠️ ';
+        else if (alertType === 'info') iconClass = 'ℹ️ ';
+
+        alertDiv.innerHTML = `
+            <span class="alert-icon">${iconClass}</span>
+            ${message}
+            <button type="button" class="btn-close" style="background: none; border: none; font-size: 1.2rem; float: right; cursor: pointer; line-height: 1;" aria-label="Close">&times;</button>
+        `;
+        
+        statusMessagesContainer.prepend(alertDiv);
+
+        const autoDismissTimer = setTimeout(() => {
+            alertDiv.style.transition = 'opacity 0.5s ease';
+            alertDiv.style.opacity = '0';
+            setTimeout(() => alertDiv.remove(), 500);
+        }, 7000); // Longer display for manage page
+
+        alertDiv.querySelector('.btn-close').addEventListener('click', () => {
+            clearTimeout(autoDismissTimer);
+            alertDiv.style.transition = 'opacity 0.5s ease';
+            alertDiv.style.opacity = '0';
+            setTimeout(() => alertDiv.remove(), 500);
+        });
+
+        while (statusMessagesContainer.children.length > 5) {
+            statusMessagesContainer.removeChild(statusMessagesContainer.lastChild);
         }
     }
 
-    // --- Load Indexed Files ---
-    async function loadIndexedFiles(currentCourseId) {
-        if (!indexedFilesList) return;
-        updateStatusManage(`Cargando archivos indexados para el curso ID ${currentCourseId}...`, 'info');
-        indexedFilesList.innerHTML = '<li><span class="status-icon spinner"></span>Cargando archivos indexados...</li>';
+    // --- Load and Display Files (Combined Logic) ---
+    async function loadAndDisplayFiles(currentCourseId) {
+        if (!filesTableBody || !noFilesMessage) return;
+        
+        updateStatusManage(`Cargando archivos para el curso ID ${currentCourseId}...`, 'info');
+        filesTableBody.innerHTML = `<tr><td colspan="5" class="text-center p-3"><span class="btn-spinner"></span> Cargando...</td></tr>`;
+        noFilesMessage.classList.add('d-none');
 
         try {
-            const response = await fetch(`${API_BASE_URL}/courses/${currentCourseId}/indexed-files`);
+            // Fetch indexed files
+            const indexedResponse = await fetch(`${API_BASE_URL}/courses/${currentCourseId}/indexed-files`);
+            let indexedFiles = [];
+            if (indexedResponse.ok) {
+                indexedFiles = await indexedResponse.json();
+                if (!Array.isArray(indexedFiles)) indexedFiles = [];
+            } else if (indexedResponse.status !== 404) { // 404 is fine (no files), other errors are not
+                const errorData = await indexedResponse.json().catch(() => ({}));
+                updateStatusManage(`Error ${indexedResponse.status} al cargar archivos indexados: ${errorData.detail || 'Error desconocido'}`, 'danger');
+            }
             
-            if (!response.ok) {
-                if (response.status === 404) {
-                    updateStatusManage(`No se encontraron archivos indexados para el curso ${currentCourseId}.`, 'warning');
-                    indexedFilesList.innerHTML = '<li>No hay archivos indexados actualmente.</li>';
-                } else {
-                    let errorDetail = 'No se pudieron cargar los archivos indexados.';
-                    try {
-                        const errorData = await response.json();
-                        errorDetail = errorData.detail || errorDetail;
-                    } catch (e) { console.warn('Could not parse error response as JSON:', e); }
-                    updateStatusManage(`Error ${response.status}: ${errorDetail}`, 'error');
-                    indexedFilesList.innerHTML = '<li>Error al cargar la lista de archivos.</li>';
-                }
-                return;
+            // Fetch processing tasks (if your backend provides such an endpoint)
+            // For now, we'll rely on refresh-files to populate processing tasks.
+            // Or, if tasks are stored and can be queried by course_id:
+            // const processingResponse = await fetch(`${API_BASE_URL}/courses/${currentCourseId}/processing-tasks`);
+            // let processingTasks = []; // Populate this if you have an endpoint
+
+            renderFilesTable(indexedFiles, []); // Pass empty array for processing tasks for now
+
+            if (indexedFiles.length === 0 /* && processingTasks.length === 0 */) {
+                noFilesMessage.classList.remove('d-none');
+                filesTableBody.innerHTML = ''; // Clear loading spinner
+                updateStatusManage('No se encontraron archivos para este curso.', 'info');
+            } else {
+                updateStatusManage(`Archivos cargados para el curso ${currentCourseId}.`, 'success');
             }
-
-            const files = await response.json();
-            if (!Array.isArray(files)) {
-                console.error("Respuesta inesperada del servidor: la lista de archivos indexados no es un array.", files);
-                updateStatusManage("Error: Formato de respuesta incorrecto al cargar archivos indexados.", 'error');
-                indexedFilesList.innerHTML = '<li>Error al procesar la lista de archivos.</li>';
-                return;
-            }
-
-            if (files.length === 0) {
-                indexedFilesList.innerHTML = '<li>No hay archivos indexados actualmente.</li>';
-                updateStatusManage('No se encontraron archivos procesados para este curso.', 'info');
-                return;
-            }
-
-            indexedFilesList.innerHTML = ''; // Clear loading/previous messages.
-            files.forEach(file => {
-                const li = document.createElement('li');
-                li.dataset.filename = file.filename; 
-                
-                const fileNameSpan = document.createElement('span');
-                // Format the last_modified_moodle timestamp (assuming it's in seconds).
-                const lastModifiedDate = new Date(file.last_modified_moodle * 1000).toLocaleString();
-                fileNameSpan.textContent = `${file.filename} (Modificado en Moodle: ${lastModifiedDate})`;
-                li.appendChild(fileNameSpan);
-
-                const deleteButton = document.createElement('button');
-                deleteButton.textContent = 'Eliminar';
-                deleteButton.classList.add('delete-btn');
-                deleteButton.addEventListener('click', () => handleDeleteFile(currentCourseId, file.filename, li));
-                li.appendChild(deleteButton);
-                
-                indexedFilesList.appendChild(li);
-            });
-            updateStatusManage(`Archivos indexados cargados correctamente para el curso ${currentCourseId}.`, 'success');
 
         } catch (networkError) {
-            console.error('Error de red al cargar archivos indexados:', networkError);
-            updateStatusManage('Error de red al cargar archivos. Verifica tu conexión e inténtalo de nuevo.', 'error');
-            if (indexedFilesList) indexedFilesList.innerHTML = '<li>Error de red al cargar archivos.</li>';
+            console.error('Error de red al cargar archivos:', networkError);
+            updateStatusManage('Error de red al cargar archivos. Verifica tu conexión.', 'danger');
+            filesTableBody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">Error de red al cargar archivos.</td></tr>`;
+            noFilesMessage.classList.remove('d-none');
         }
     }
+    
+    function renderFilesTable(indexedFiles, processingTasks) {
+        if (!filesTableBody || !noFilesMessage) return;
+        filesTableBody.innerHTML = ''; // Clear previous content or loading message
+        noFilesMessage.classList.add('d-none');
+
+        let allFileEntries = [];
+
+        indexedFiles.forEach(file => {
+            allFileEntries.push({
+                name: file.filename,
+                status: 'Indexado',
+                progress: 100,
+                lastModified: file.last_modified_moodle ? new Date(file.last_modified_moodle * 1000).toLocaleString() : 'N/A',
+                rawLastModified: file.last_modified_moodle,
+                actions: [{ type: 'delete', filename: file.filename }]
+            });
+        });
+
+        processingTasks.forEach(task => {
+            // This part assumes `task` object structure from your backend
+            // e.g., { taskId, filename, status ('PENDING', 'PROCESSING'), progressPercent }
+            allFileEntries.push({
+                name: task.filename || `Tarea ${task.taskId.substring(0,8)}`,
+                status: task.status, // PENDING, PROCESSING, etc.
+                progress: task.progressPercent || (task.status === 'PROCESSING' ? null : 0), // null for indeterminate progress bar
+                lastModified: 'N/A', // Or task creation time
+                actions: [], // No actions while processing, or maybe "cancel"
+                taskId: task.taskId
+            });
+        });
+        
+        if (allFileEntries.length === 0) {
+            noFilesMessage.classList.remove('d-none');
+            return;
+        }
+
+        // Sort files: by status (processing first), then by name or date
+        allFileEntries.sort((a, b) => {
+            const statusOrder = { 'PROCESSING': 0, 'PENDING': 1, 'Indexado': 2, 'FAILURE': 3 };
+            const statusA = statusOrder[a.status] ?? 99;
+            const statusB = statusOrder[b.status] ?? 99;
+            if (statusA !== statusB) return statusA - statusB;
+            return (b.rawLastModified || 0) - (a.rawLastModified || 0); // Newest first for indexed
+        });
+
+
+        allFileEntries.forEach(entry => {
+            const row = filesTableBody.insertRow();
+            row.dataset.fileName = entry.name; // For easier selection if needed
+            if (entry.taskId) row.dataset.taskId = entry.taskId;
+
+            row.insertCell().textContent = entry.name;
+            
+            const statusCell = row.insertCell();
+            renderStatusIndicator(statusCell, entry.status, entry.taskId);
+
+            const progressCell = row.insertCell();
+            renderProgressBar(progressCell, entry.status, entry.progress);
+            
+            row.insertCell().textContent = entry.lastModified;
+            
+            const actionsCell = row.insertCell();
+            entry.actions.forEach(action => {
+                if (action.type === 'delete') {
+                    const deleteButton = document.createElement('button');
+                    deleteButton.textContent = 'Eliminar';
+                    deleteButton.classList.add('btn', 'btn-sm', 'btn-danger');
+                    deleteButton.addEventListener('click', () => handleDeleteFile(courseId, action.filename, row));
+                    actionsCell.appendChild(deleteButton);
+                }
+                // Add other actions here if needed
+            });
+        });
+    }
+
+    function renderStatusIndicator(cell, status, taskId = null) {
+        let statusText = status;
+        let statusClass = '';
+        let icon = '';
+
+        switch (status.toUpperCase()) {
+            case 'INDEXADO': statusText = 'Indexado'; statusClass = 'status-success'; icon = '✅'; break;
+            case 'PENDING': statusText = 'Pendiente'; statusClass = 'status-warning'; icon = '🕒'; break;
+            case 'STARTED':
+            case 'PROCESSING': 
+                statusText = 'Procesando'; statusClass = 'status-processing'; 
+                // Spinner will be handled by progress bar or a dedicated class
+                break;
+            case 'FAILURE': statusText = 'Error'; statusClass = 'status-danger'; icon = '❌'; break;
+            default: statusText = status; statusClass = 'status-info'; icon = 'ℹ️'; break;
+        }
+        
+        cell.innerHTML = `<span class="status-indicator ${statusClass}">
+                            ${status.toUpperCase() === 'PROCESSING' && !taskId ? '<span class="btn-spinner" style="width:0.8em; height:0.8em; border-width:1.5px; margin-right: 0.3em;"></span>' : `<span class="status-indicator-icon">${icon}</span>`}
+                            ${statusText}
+                          </span>`;
+    }
+
+    function renderProgressBar(cell, status, progressPercent) {
+        const upperStatus = status.toUpperCase();
+        
+        if (upperStatus === 'PROCESSING' || upperStatus === 'STARTED' || upperStatus === 'PENDING') {
+            // Usar progressPercent para la simulación, si está disponible y es un número
+            const displayPercent = (typeof progressPercent === 'number' && progressPercent >= 0 && progressPercent <= 100) ? progressPercent : 0;
+            // Si es una simulación activa (no 0 y no 100), o si es indeterminado (progressPercent es null)
+            const isSimulating = (displayPercent > 0 && displayPercent < 99); 
+                                    // O si queremos que la barra indeterminada sea 100% width con animación:
+                                    // const barWidth = (progressPercent === null || progressPercent === undefined) ? 100 : displayPercent;
+            const barWidth = displayPercent;
+
+
+            cell.innerHTML = `
+                <div class="progress" style="height: 1.2em;">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: ${barWidth}%" aria-valuenow="${barWidth}" aria-valuemin="0" aria-valuemax="100">${isSimulating ? barWidth + '%' : ''}</div>
+                </div>`;
+        } else if (upperStatus === 'INDEXADO' || upperStatus === 'SUCCESS') {
+             cell.innerHTML = `
+                <div class="progress" style="height: 1.2em;">
+                    <div class="progress-bar bg-success" role="progressbar" style="width: 100%" aria-valuenow="100" aria-valuemin="0" aria-valuemax="100"></div>
+                </div>`;
+        } else if (upperStatus === 'FAILURE') {
+            cell.innerHTML = `
+                <div class="progress" style="height: 1.2em;">
+                    <div class="progress-bar bg-danger" role="progressbar" style="width: 100%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                </div>`;
+        } else {
+            cell.textContent = 'N/A';
+        }
+    }
+
 
     // --- Delete File ---
 
@@ -164,11 +328,14 @@ document.addEventListener('DOMContentLoaded', async () => {
      * @param {string} filename - The name of the file to delete.
      * @param {HTMLElement} listItemElement - The list item element in the DOM to remove on success.
      */
-    async function handleDeleteFile(currentCourseId, filename, listItemElement) {
+    async function handleDeleteFile(currentCourseId, filename, tableRowElement) {
         if (!confirm(`¿Estás seguro de que quieres eliminar el archivo "${filename}" de la IA? Esta acción no se puede deshacer.`)) {
             return;
         }
         updateStatusManage(`Eliminando el archivo "${filename}"...`, 'info');
+        // Optionally, disable the delete button on the row
+        const deleteButton = tableRowElement.querySelector('.btn-danger');
+        if (deleteButton) deleteButton.disabled = true;
         try {
             const encodedFilename = encodeURIComponent(filename);
             const response = await fetch(`${API_BASE_URL}/courses/${currentCourseId}/indexed-files/${encodedFilename}`, {
@@ -186,32 +353,28 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
             
             updateStatusManage(`Archivo "${filename}" eliminado exitosamente de la IA.`, 'success');
-            if (listItemElement) {
-                listItemElement.remove();
+            if (tableRowElement) {
+                tableRowElement.remove();
             }
-            if (indexedFilesList && indexedFilesList.children.length === 0) {
-                indexedFilesList.innerHTML = '<li>No hay archivos indexados actualmente.</li>';
+            if (filesTableBody && filesTableBody.rows.length === 0) {
+                noFilesMessage.classList.remove('d-none');
             }
+            // TODO: Potentially update dashboard stats if they are displayed on this page or fetched globally
 
         } catch (networkError) {
             console.error('Error de red al eliminar archivo:', networkError);
-            updateStatusManage(`Error de red al eliminar "${filename}". Verifica tu conexión e inténtalo de nuevo.`, 'error');
+            updateStatusManage(`Error de red al eliminar "${filename}". Verifica tu conexión e inténtalo de nuevo.`, 'danger');
+            if (deleteButton) deleteButton.disabled = false; // Re-enable on error
         }
     }
 
     // --- Refresh Files from Moodle & Task Tracking ---
 
-    /**
-     * Initiates a request to the backend to refresh the list of files from Moodle for the current course.
-     * If new files are identified for processing, it starts tracking their progress.
-     * @param {string} currentCourseId - The ID of the course.
-     */
     async function handleRefreshFiles(currentCourseId) {
-        if (!refreshMoodleFilesButton) return;
+        if (!refreshMoodleFilesButton || !refreshButtonSpinner) return;
         
-        const originalButtonHTML = refreshMoodleFilesButton.innerHTML; // Store full HTML content
         refreshMoodleFilesButton.disabled = true;
-        refreshMoodleFilesButton.innerHTML = '<span class="btn-spinner"></span>Actualizando desde Moodle...';
+        refreshButtonSpinner.classList.remove('d-none');
         updateStatusManage('Solicitando revisión de archivos en Moodle...', 'info');
 
         try {
@@ -221,170 +384,265 @@ document.addEventListener('DOMContentLoaded', async () => {
                  result = await response.json();
             } catch (e) {
                 console.error('Could not parse refresh-files response as JSON:', e);
-                updateStatusManage(`Error inesperado del servidor (código ${response.status}) al revisar archivos.`, 'error');
-                // Don't re-enable button immediately if response is totally unparsable, state is unknown
-                return;
+                updateStatusManage(`Error inesperado del servidor (código ${response.status}) al revisar archivos.`, 'danger');
+                return; // Keep button disabled, state is unknown
             }
 
             if (!response.ok) {
-                const errorMessage = `Error ${response.status}: ${result?.detail || 'No se pudo iniciar la actualización de archivos desde Moodle.'}`;
-                updateStatusManage(errorMessage, 'error');
-                // Consider re-enabling button here if the error is definitive and not a temporary server issue
-                // For now, keeping it disabled on API error to prevent repeated failed calls.
-                return; 
+                const errorMessage = `Error ${response.status}: ${result?.detail || 'No se pudo iniciar la actualización de archivos.'}`;
+                updateStatusManage(errorMessage, 'danger');
+                return; // Keep button disabled on API error
             }
             
             updateStatusManage(result.message || 'Solicitud de actualización de archivos completada.', 'success');
 
             if (result.task_ids && result.task_ids.length > 0) {
-                // Clear "No hay archivos procesándose" message if it exists and is the only child
-                if (processingFilesList && processingFilesList.children.length === 1 && processingFilesList.firstChild.textContent === 'No hay archivos procesándose actualmente.') {
-                    processingFilesList.innerHTML = ''; 
-                }
+                noFilesMessage.classList.add('d-none'); // Hide "no files" message
+                
                 result.task_ids.forEach(taskId => {
-                    const taskDisplayName = result.filenames_by_task_id?.[taskId] || `Tarea de procesamiento ${taskId.substring(0,8)}`;
-                    addOrUpdateProcessingFileStatus(taskId, taskDisplayName, 'PENDING');
-                    trackTaskProgress(currentCourseId, taskId, taskDisplayName);
+                    const taskFilename = result.filenames_by_task_id?.[taskId] || `Tarea ${taskId.substring(0,8)}`;
+                    if (!taskQueue.find(t => t.taskId === taskId) && !activeTasks[taskId]) {
+                        taskQueue.push({ taskId, filename: taskFilename });
+                        // Añadir a la tabla con estado 'En Cola' o 'Pendiente'
+                        addOrUpdateFileInTable(taskId, taskFilename, 'PENDING', 0); 
+                    }
                 });
+                processNextInQueue(currentCourseId); // Intenta procesar la siguiente tarea de la cola
             } else if (result.files_identified_for_processing === 0) {
                 updateStatusManage('No se encontraron archivos nuevos o modificados en Moodle para procesar.', 'info');
             }
 
         } catch (networkError) {
             console.error('Error de red al solicitar actualización de archivos:', networkError);
-            updateStatusManage('Error de red al actualizar archivos. Verifica tu conexión e inténtalo de nuevo.', 'error');
+            updateStatusManage('Error de red al actualizar archivos. Verifica tu conexión.', 'danger');
         } finally {
-            // Always re-enable the button unless there was a severe, unrecoverable error.
-            if (refreshMoodleFilesButton) {
+            if (refreshMoodleFilesButton && refreshButtonSpinner) {
                 refreshMoodleFilesButton.disabled = false;
-                refreshMoodleFilesButton.innerHTML = originalButtonHTML;
+                refreshButtonSpinner.classList.add('d-none');
             }
         }
     }
     
-    /**
-     * Adds or updates a list item in the "Archivos en Procesamiento" list to reflect
-     * the status of a file processing task.
-     * @param {string} taskId - The ID of the task.
-     * @param {string} displayName - The name of the file or task to display.
-     * @param {string} status - The current status of the task (e.g., PENDING, PROCESSING, SUCCESS, FAILURE).
-     * @param {string|null} resultMessage - An optional message associated with the status (e.g., error details).
-     */
-    function addOrUpdateProcessingFileStatus(taskId, displayName, status, resultMessage = null) {
-        if (!processingFilesList) return;
-        let taskItem = processingFilesList.querySelector(`li[data-task-id="${taskId}"]`);
-        if (!taskItem) {
-            taskItem = document.createElement('li');
-            taskItem.dataset.taskId = taskId;
-            // Clear "No hay archivos" message if it's the only item
-            if (processingFilesList.children.length === 1 && processingFilesList.firstChild.textContent === 'No hay archivos procesándose actualmente.') {
-                processingFilesList.innerHTML = '';
+    function addOrUpdateFileInTable(taskId, filename, status, progressPercent, resultMessage = null, lastModified = 'N/A') {
+        if (!filesTableBody) return;
+        let row = filesTableBody.querySelector(`tr[data-task-id="${taskId}"]`);
+        
+        if (!row) { // If task row doesn't exist, create it
+            // Check if a row for this filename (as an indexed file) exists
+            let existingFileRow = filesTableBody.querySelector(`tr[data-file-name="${filename}"]`);
+            if (existingFileRow && status.toUpperCase() !== 'INDEXADO') {
+                // If an indexed file is now being re-processed, update its row
+                row = existingFileRow;
+                row.dataset.taskId = taskId; // Add taskId to it
+            } else if (existingFileRow && status.toUpperCase() === 'INDEXADO') {
+                // If we are trying to add an indexed file that's already there, just update it
+                row = existingFileRow;
             }
-            processingFilesList.appendChild(taskItem);
+            else {
+                row = filesTableBody.insertRow(0); // Insert new tasks at the top
+                row.dataset.taskId = taskId;
+                row.dataset.fileName = filename; // Also store filename for consistency
+                row.insertCell(); // Filename
+                row.insertCell(); // Status
+                row.insertCell(); // Progress
+                row.insertCell(); // Last Modified
+                row.insertCell(); // Actions
+            }
         }
 
-        taskItem.className = ''; // Reset classes for accurate status styling.
-        let iconHtml = '<span class="status-icon"></span>'; // Default icon placeholder.
-        let statusText = status; // Default to showing the raw status.
+        row.cells[0].textContent = filename;
+        renderStatusIndicator(row.cells[1], status, taskId);
+        renderProgressBar(row.cells[2], status, progressPercent);
+        row.cells[3].textContent = (status.toUpperCase() === 'INDEXADO' && lastModified !== 'N/A') ? lastModified : (row.cells[3].textContent || 'N/A'); // Keep existing if not indexed
 
-        switch (status.toUpperCase()) {
-            case 'PENDING':
-                taskItem.classList.add('status-pending');
-                statusText = 'Pendiente de procesamiento';
-                break;
-            case 'STARTED': // Often used by Celery
-            case 'PROCESSING':
-                taskItem.classList.add('status-processing');
-                iconHtml = '<span class="status-icon spinner"></span>'; // Visual spinner for active processing.
-                statusText = 'Procesando...';
-                break;
-            case 'SUCCESS':
-                // SUCCESS items are typically removed by trackTaskProgress, but this provides a fallback.
-                taskItem.classList.add('status-success'); // You might want a temporary success style.
-                statusText = 'Completado exitosamente';
-                break;
-            case 'FAILURE':
-                taskItem.classList.add('status-failure');
-                statusText = `Error en procesamiento${resultMessage ? `: ${resultMessage}` : ''}`;
-                break;
-            case 'ERROR_CHECK': // Custom status for when checking task status fails
-                 taskItem.classList.add('status-warning'); // Or a specific 'error-check' style
-                 statusText = `Advertencia: No se pudo verificar estado (${resultMessage || 'detalle no disponible'})`;
-                 break;
-            case 'ERROR_NETWORK': // Custom status for network errors during polling
-                taskItem.classList.add('status-warning'); // Or a specific 'error-network' style
-                statusText = `Advertencia: Error de red al verificar estado (${resultMessage || 'reintentando'})`;
-                break;
-
+        // Clear and set actions
+        row.cells[4].innerHTML = '';
+        if (status.toUpperCase() === 'INDEXADO') {
+            const deleteButton = document.createElement('button');
+            deleteButton.textContent = 'Eliminar';
+            deleteButton.classList.add('btn', 'btn-sm', 'btn-danger');
+            deleteButton.addEventListener('click', () => handleDeleteFile(courseId, filename, row));
+            row.cells[4].appendChild(deleteButton);
+        } else if (status.toUpperCase() === 'FAILURE') {
+            // Optionally add a "Retry" button or "View Log"
+            const errorText = document.createElement('span');
+            errorText.textContent = resultMessage || 'Fallo';
+            errorText.className = 'text-danger';
+            row.cells[4].appendChild(errorText);
         }
-        taskItem.innerHTML = `${iconHtml}<span class="status-text">${displayName}: ${statusText}</span>`;
+        
+        // If it was a "no files" message row, remove it
+        if (noFilesMessage && !noFilesMessage.classList.contains('d-none')) {
+            noFilesMessage.classList.add('d-none');
+        }
+         if (filesTableBody.rows.length === 1 && filesTableBody.rows[0].cells[0].colSpan === 5) { // Is loading row
+            filesTableBody.innerHTML = ''; // Clear loading row before adding actual data
+            // Re-add the current row as it was cleared
+            filesTableBody.appendChild(row);
+        }
     }
 
-    /**
-     * Periodically polls the backend for the status of a given task.
-     * Updates the task's display in the processing list and handles completion or failure.
-     * @param {string} currentCourseId - The ID of the course (for reloading indexed files on success).
-     * @param {string} taskId - The ID of the task to track.
-     * @param {string} displayName - The display name for the task/file.
-     */
-    function trackTaskProgress(currentCourseId, taskId, displayName) {
-        if (activeTasks[taskId]) { // Clear any existing interval for this task ID.
-            clearInterval(activeTasks[taskId]);
+    function trackTaskProgress(currentCourseId, taskId, filename) {
+        if (activeTasks[taskId] && activeTasks[taskId].pollIntervalId) {
+            clearInterval(activeTasks[taskId].pollIntervalId);
         }
 
-        activeTasks[taskId] = setInterval(async () => {
+        activeTasks[taskId] = {
+            ...activeTasks[taskId], // Conservar simulación si ya existe
+            pollIntervalId: null,
+            realStatus: activeTasks[taskId]?.realStatus || 'PENDING', // Mantener estado si ya existe
+            filename: filename // Guardar filename para re-uso
+        };
+        
+        activeTasks[taskId].pollIntervalId = setInterval(async () => {
+            if (!activeTasks[taskId]) { // Si la tarea fue eliminada mientras el intervalo estaba activo
+                // Esto puede pasar si la tarea se completa y se elimina de activeTasks, pero el intervalo aún no se limpió
+                // o si processNextInQueue limpia una tarea que falló antes de que este intervalo se ejecute.
+                const thisIntervalId = activeTasks[taskId]?.pollIntervalId; // Intentar obtener el ID para limpiarlo
+                if (thisIntervalId) clearInterval(thisIntervalId);
+                // No podemos estar seguros de qué intervalo es, así que es mejor no limpiar todos los intervalos aquí.
+                // La limpieza principal ocurre cuando la tarea termina (SUCCESS/FAILURE) o se cancela.
+                return;
+            }
             try {
                 const response = await fetch(`${API_BASE_URL}/task/${taskId}/status`);
-                let task; 
+                let taskData;
                 try {
-                    task = await response.json();
+                    taskData = await response.json();
                 } catch (e) {
-                    // Handle cases where the status endpoint returns non-JSON (e.g. server error page)
-                    console.warn(`Respuesta no JSON al obtener estado de tarea ${taskId} (HTTP ${response.status}).`, e);
-                    addOrUpdateProcessingFileStatus(taskId, displayName, 'ERROR_CHECK', `Respuesta inesperada del servidor (HTTP ${response.status})`);
-                    // Consider stopping polling if this happens repeatedly. For now, it will retry.
+                    console.warn(`Respuesta no JSON para tarea ${taskId} (HTTP ${response.status}).`, e);
+                    if (activeTasks[taskId]) activeTasks[taskId].realStatus = 'ERROR_CHECK';
+                    addOrUpdateFileInTable(taskId, filename, 'ERROR_CHECK', activeTasks[taskId]?.simulatedProgress || 0, `Respuesta inesperada (HTTP ${response.status})`);
                     return;
                 }
 
                 if (!response.ok) {
-                    const errorDetail = task?.detail || `Error HTTP ${response.status}`;
-                    console.warn(`No se pudo obtener el estado de la tarea ${taskId} (${errorDetail}). Se reintentará.`);
-                    addOrUpdateProcessingFileStatus(taskId, displayName, 'ERROR_CHECK', errorDetail);
+                    const errorDetail = taskData?.detail || `Error HTTP ${response.status}`;
+                    console.warn(`No se pudo obtener estado de tarea ${taskId} (${errorDetail}).`);
+                    if (activeTasks[taskId]) activeTasks[taskId].realStatus = 'ERROR_CHECK';
+                    addOrUpdateFileInTable(taskId, filename, 'ERROR_CHECK', activeTasks[taskId]?.simulatedProgress || 0, errorDetail);
                     return;
                 }
                 
-                // Update the UI with the fetched status.
-                addOrUpdateProcessingFileStatus(taskId, displayName, task.status, task.result);
+                if (activeTasks[taskId]) activeTasks[taskId].realStatus = taskData.status;
+                let displayProgress = activeTasks[taskId]?.simulatedProgress || 0;
 
-                if (task.status === 'SUCCESS') {
-                    clearInterval(activeTasks[taskId]); // Stop polling.
-                    delete activeTasks[taskId];
-                    updateStatusManage(`Procesamiento de '${displayName}' (Tarea ${taskId.substring(0,8)}) completado.`, 'success');
-                    const taskItem = processingFilesList.querySelector(`li[data-task-id="${taskId}"]`);
-                    if (taskItem) taskItem.remove(); // Remove from "processing" list.
-                    
-                    if (processingFilesList.children.length === 0) {
-                        processingFilesList.innerHTML = '<li>No hay archivos procesándose actualmente.</li>';
+                if (taskData.status === 'SUCCESS' || taskData.status === 'FAILURE') {
+                    if (activeTasks[taskId]?.animationFrameId) {
+                        cancelAnimationFrame(activeTasks[taskId].animationFrameId);
                     }
-                    await loadIndexedFiles(currentCourseId); // Refresh the list of indexed files.
-                } else if (task.status === 'FAILURE') {
-                    clearInterval(activeTasks[taskId]); // Stop polling.
-                    delete activeTasks[taskId];
-                    const errorMessage = task.result || 'Causa desconocida';
-                    updateStatusManage(`Error al procesar '${displayName}' (Tarea ${taskId.substring(0,8)}): ${errorMessage}`, 'error');
-                    // The item remains in the processing list with "Fallido" status due to addOrUpdateProcessingFileStatus.
+                    if (activeTasks[taskId]?.pollIntervalId) { // Asegurarse de limpiar el intervalo correcto
+                        clearInterval(activeTasks[taskId].pollIntervalId);
+                    }
+                    
+                    displayProgress = (taskData.status === 'SUCCESS') ? 100 : 0;
+                    addOrUpdateFileInTable(taskId, filename, taskData.status, displayProgress, taskData.result);
+                    
+                    if (taskData.status === 'SUCCESS') {
+                        updateStatusManage(`Procesamiento de '${filename}' completado.`, 'success');
+                        const indexedFileRow = filesTableBody.querySelector(`tr[data-task-id="${taskId}"]`);
+                        if(indexedFileRow) {
+                           const modDate = indexedFileRow.cells[3].textContent !== 'N/A' ? indexedFileRow.cells[3].textContent : new Date().toLocaleString();
+                           addOrUpdateFileInTable(taskId, filename, 'INDEXADO', 100, null, modDate);
+                        }
+                    } else {
+                        updateStatusManage(`Error al procesar '${filename}': ${taskData.result || 'Causa desconocida'}`, 'danger');
+                    }
+                    delete activeTasks[taskId]; 
+                    isCurrentlyProcessing = false; // Liberar el flag de procesamiento
+                    processNextInQueue(currentCourseId); // Intentar procesar la siguiente
+                } else {
+                    // Si la tarea aún está en proceso, actualizamos la tabla con el progreso simulado
+                    addOrUpdateFileInTable(taskId, filename, taskData.status, displayProgress, taskData.result);
                 }
-                // For PENDING, STARTED, RETRY statuses, the UI is updated by addOrUpdateProcessingFileStatus, and polling continues.
-            } catch (networkError) { // Catch network errors related to the fetch itself.
+            } catch (networkError) { 
                 console.error(`Error de red al rastrear tarea ${taskId}:`, networkError);
-                addOrUpdateProcessingFileStatus(taskId, displayName, 'ERROR_NETWORK', 'Error de conexión');
-                // Polling continues, as network issues might be temporary.
+                if (activeTasks[taskId]) activeTasks[taskId].realStatus = 'ERROR_NETWORK';
+                addOrUpdateFileInTable(taskId, filename, 'ERROR_NETWORK', activeTasks[taskId]?.simulatedProgress || 0, 'Error de conexión');
             }
-        }, 3000); // Poll for status every 3 seconds.
+        }, 5000); 
+    }
+
+    function startProgressSimulation(taskId, filename) {
+        if (!activeTasks[taskId]) { // Debería existir por trackTaskProgress
+             activeTasks[taskId] = { pollIntervalId: null, animationFrameId: null, simulatedProgress: 0, realStatus: 'PROCESSING', filename };
+        }
+        activeTasks[taskId].simulatedProgress = 0; // Reiniciar simulación
+        activeTasks[taskId].realStatus = 'PROCESSING'; // Asegurar que el estado es de procesamiento
+
+        let startTime = null;
+        const durationUntil90Percent = 20000; // 10 segundos para llegar al 90%
+        const durationUntil99Percent = 30000; // 30 segundos adicionales para llegar al 99% (total 40s)
+        const targetSlowDownStart = 90; 
+        const absoluteMaxSimulated = 99; 
+
+        function animate(timestamp) {
+            if (!activeTasks[taskId] || activeTasks[taskId].realStatus === 'SUCCESS' || activeTasks[taskId].realStatus === 'FAILURE') {
+                if(activeTasks[taskId] && activeTasks[taskId].animationFrameId) {
+                    cancelAnimationFrame(activeTasks[taskId].animationFrameId);
+                    activeTasks[taskId].animationFrameId = null;
+                }
+                return;
+            }
+
+            if (!startTime) startTime = timestamp;
+            const elapsed = timestamp - startTime;
+            let currentSimulatedProgress;
+
+            if (activeTasks[taskId].simulatedProgress < targetSlowDownStart) {
+                const progressRatio = Math.min(elapsed / durationUntil90Percent, 1);
+                currentSimulatedProgress = Math.floor(progressRatio * targetSlowDownStart);
+            } else {
+                const elapsedInSlowPhase = Math.max(0, elapsed - durationUntil90Percent);
+                const progressInSlowPhaseRatio = Math.min(elapsedInSlowPhase / durationUntil99Percent, 1);
+                currentSimulatedProgress = targetSlowDownStart + Math.floor(progressInSlowPhaseRatio * (absoluteMaxSimulated - targetSlowDownStart));
+            }
+            
+            activeTasks[taskId].simulatedProgress = Math.min(currentSimulatedProgress, absoluteMaxSimulated);
+            addOrUpdateFileInTable(taskId, filename, activeTasks[taskId].realStatus, activeTasks[taskId].simulatedProgress);
+
+            if (activeTasks[taskId].simulatedProgress < absoluteMaxSimulated && 
+                (activeTasks[taskId].realStatus === 'PROCESSING' || activeTasks[taskId].realStatus === 'PENDING' || activeTasks[taskId].realStatus === 'STARTED') ) {
+                activeTasks[taskId].animationFrameId = requestAnimationFrame(animate);
+            } else {
+                 if(activeTasks[taskId]) activeTasks[taskId].animationFrameId = null;
+            }
+        }
+        if (activeTasks[taskId].animationFrameId) { // Cancelar animación previa si existe
+            cancelAnimationFrame(activeTasks[taskId].animationFrameId);
+        }
+        activeTasks[taskId].animationFrameId = requestAnimationFrame(animate);
+    }
+
+    function processNextInQueue(currentCourseId) {
+        if (isCurrentlyProcessing || taskQueue.length === 0) {
+            return; // No procesar si ya hay algo o la cola está vacía
+        }
+
+        isCurrentlyProcessing = true;
+        const nextTask = taskQueue.shift(); // Tomar el primer elemento
+        
+        if (nextTask) {
+            const { taskId, filename } = nextTask;
+            // Asegurar que la tarea no esté ya activa de alguna forma (aunque isCurrentlyProcessing debería prevenirlo)
+            if (activeTasks[taskId]) {
+                console.warn(`Intento de procesar tarea ${taskId} que ya está en activeTasks.`);
+                isCurrentlyProcessing = false; 
+                processNextInQueue(currentCourseId); // Intentar con la siguiente
+                return;
+            }
+
+            updateStatusManage(`Iniciando procesamiento para: ${filename}`, 'info');
+            // Marcar como 'PROCESSING' en la tabla y comenzar simulación y polling
+            addOrUpdateFileInTable(taskId, filename, 'PROCESSING', 0); // Inicia progreso en 0
+            startProgressSimulation(taskId, filename);
+            trackTaskProgress(currentCourseId, taskId, filename);
+        } else {
+            isCurrentlyProcessing = false; // No había nada que procesar
+        }
     }
 
     // --- Start ---
-    // Initialize the page as soon as the DOM is fully loaded.
     initializePage().catch(error => {
         console.error("Error crítico durante la inicialización de la página de gestión de archivos:", error);
         updateStatusManage("Ocurrió un error grave al cargar la página. Por favor, recarga.", "error");

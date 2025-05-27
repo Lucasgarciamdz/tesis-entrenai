@@ -2,8 +2,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // const courseSearchInput = document.getElementById('course-search'); // Removed
     const courseSelect = document.getElementById('course-select');
     const setupAiButton = document.getElementById('setup-ai-button');
-    const statusMessages = document.getElementById('status-messages');
+    // El contenedor de mensajes de estado ahora es #status-messages-container
+    const statusMessagesContainer = document.getElementById('status-messages-container'); 
     const manageFilesButton = document.getElementById('manage-files-button'); // Get the button
+    const setupAiButtonSpinner = setupAiButton ? setupAiButton.querySelector('.btn-spinner') : null;
 
     let allCourses = []; // Para guardar la lista completa de cursos
 
@@ -13,11 +15,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const API_BASE_URL = 'http://localhost:8000/api/v1';
 
     // Ensure essential DOM elements are present before proceeding.
-    if (!courseSelect || !setupAiButton || !statusMessages || !manageFilesButton) {
+    if (!courseSelect || !setupAiButton || !statusMessagesContainer || !manageFilesButton) {
         console.error('Error crítico: Faltan elementos del DOM requeridos en index.html. La aplicación no puede iniciarse correctamente.');
-        // Optionally, display a message to the user in a more visible way if possible,
-        // though `statusMessages` might be one of the missing elements.
-        if (statusMessages) {
+        if (statusMessagesContainer) { // Usar el nuevo contenedor
             updateStatus('Error de inicialización: Faltan componentes de la página.', 'error');
         }
         return;
@@ -29,6 +29,13 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     async function fetchCourses() {
         updateStatus('Cargando cursos disponibles desde Moodle...', 'info');
+        // Actualizar estadísticas (ejemplo, podrías tener endpoints específicos para esto)
+        document.getElementById('stat-cursos-configurados').textContent = '...';
+        document.getElementById('stat-archivos-procesados').textContent = '...';
+        document.getElementById('stat-archivos-en-proceso').textContent = '...';
+        document.getElementById('stat-estado-moodle').textContent = 'Verificando...';
+
+
         try {
             // This endpoint typically uses a default Moodle teacher ID if `moodle_user_id` is not provided.
             const response = await fetch(`${API_BASE_URL}/courses`);
@@ -62,13 +69,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (allCourses.length > 0) {
                 updateStatus('Cursos cargados exitosamente. Por favor, selecciona un curso para continuar.', 'success');
+                // Simulación de actualización de estadísticas
+                document.getElementById('stat-cursos-configurados').textContent = allCourses.filter(c => c.is_ai_configured).length; // Suponiendo que tienes esta info
+                document.getElementById('stat-estado-moodle').textContent = 'Conectado'; // O basado en la respuesta
             } else {
                 updateStatus('No se encontraron cursos disponibles para el usuario configurado en Moodle.', 'warning');
+                document.getElementById('stat-estado-moodle').textContent = 'Sin cursos';
             }
         } catch (networkError) {
             console.error('Error de red al cargar cursos:', networkError);
             updateStatus('Error de red al cargar cursos. Verifica tu conexión e inténtalo de nuevo.', 'error');
             courseSelect.innerHTML = '<option value="">Error de red al cargar</option>';
+            document.getElementById('stat-estado-moodle').textContent = 'Error de Red';
         }
     }
 
@@ -140,8 +152,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const courseDisplayName = selectedCourse.displayname || selectedCourse.fullname;
         updateStatus(`Iniciando configuración de IA para el curso: "${courseDisplayName}" (ID: ${selectedCourseId})... Esto puede tardar unos minutos. Por favor, espera.`, 'info');
         
-        // Disable controls during AI setup
+        // Disable controls and show spinner
         setupAiButton.disabled = true;
+        if (setupAiButtonSpinner) setupAiButtonSpinner.classList.remove('d-none');
         courseSelect.disabled = true;
         if(manageFilesButton) manageFilesButton.disabled = true;
 
@@ -176,30 +189,63 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Error de red durante la configuración de IA:', networkError);
             updateStatus(`Error de red al configurar IA para "${courseDisplayName}". Verifica tu conexión e inténtalo de nuevo.`, 'error');
         } finally {
-            // Re-enable controls after the operation is complete (success or failure).
+            // Re-enable controls and hide spinner
             setupAiButton.disabled = false;
+            if (setupAiButtonSpinner) setupAiButtonSpinner.classList.add('d-none');
             courseSelect.disabled = false;
             if(manageFilesButton) manageFilesButton.disabled = false;
         }
     });
 
     /**
-     * Displays a status message to the user.
-     * Prepends the new message to the status area and limits the number of messages shown.
+     * Displays a status message to the user using the new alert-style messages.
      * @param {string} message - The message to display.
-     * @param {string} type - The type of message ('info', 'success', 'warning', 'error').
+     * @param {string} type - The type of message ('info', 'success', 'warning', 'danger' for error).
      */
     function updateStatus(message, type = 'info') {
-        if (!statusMessages) return; // Guard clause if statusMessages is not found
-        const p = document.createElement('p');
-        p.className = type; // CSS classes like 'info', 'success', etc., should be defined in style.css
-        p.textContent = message;
+        if (!statusMessagesContainer) return;
+
+        // Map old types to new alert types if necessary (e.g., 'error' to 'danger')
+        const alertType = type === 'error' ? 'danger' : type;
+
+        const alertDiv = document.createElement('div');
+        // Basic alert classes + specific type. Add dismissible for a close button.
+        alertDiv.className = `alert alert-${alertType} alert-dismissible fade show`; 
+        alertDiv.setAttribute('role', 'alert');
         
-        statusMessages.prepend(p); // Add the new message at the beginning of the status container.
+        // Icon mapping (optional, could be done with CSS ::before too)
+        let iconClass = '';
+        if (alertType === 'success') iconClass = '✅ ';
+        else if (alertType === 'danger') iconClass = '❗ ';
+        else if (alertType === 'warning') iconClass = '⚠️ ';
+        else if (alertType === 'info') iconClass = 'ℹ️ ';
+
+        alertDiv.innerHTML = `
+            <span class="alert-icon">${iconClass}</span>
+            ${message}
+            <button type="button" class="btn-close" style="background: none; border: none; font-size: 1.2rem; float: right; cursor: pointer; line-height: 1;" aria-label="Close">&times;</button>
+        `;
         
-        // Limit the number of status messages displayed to avoid clutter.
-        while (statusMessages.children.length > 5) { // Keep the 5 most recent messages.
-            statusMessages.removeChild(statusMessages.lastChild);
+        statusMessagesContainer.prepend(alertDiv); // Add new message at the top
+
+        // Auto-dismiss after 5 seconds
+        const autoDismissTimer = setTimeout(() => {
+            alertDiv.style.transition = 'opacity 0.5s ease';
+            alertDiv.style.opacity = '0';
+            setTimeout(() => alertDiv.remove(), 500);
+        }, 5000);
+
+        // Manual dismiss
+        alertDiv.querySelector('.btn-close').addEventListener('click', () => {
+            clearTimeout(autoDismissTimer); // Clear auto-dismiss if manually closed
+            alertDiv.style.transition = 'opacity 0.5s ease';
+            alertDiv.style.opacity = '0';
+            setTimeout(() => alertDiv.remove(), 500);
+        });
+
+        // Limit number of messages
+        while (statusMessagesContainer.children.length > 5) {
+            statusMessagesContainer.removeChild(statusMessagesContainer.lastChild);
         }
     }
 

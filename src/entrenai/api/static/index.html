@@ -3,42 +3,149 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Entrenai - Configuración de IA</title>
+    <title>Entrenai - Panel de Control</title>
     <link rel="stylesheet" href="style.css">
+    <!-- Podríamos añadir un icono para el logo si lo tuviéramos -->
+    <!-- <link rel="icon" href="favicon.ico" type="image/x-icon"> -->
 </head>
 <body>
-    <div class="container">
-        <h1>Bienvenido a Entrenai</h1>
-        <p>Entrenai te permite crear una IA personalizada para tus cursos de Moodle, utilizando el material que proporciones para responder preguntas de los estudiantes.</p>
+    <header class="site-header">
+        <div class="logo-container">
+            <!-- <img src="path/to/logo.png" alt="Entrenai Logo"> -->
+            <a href="index.html" class="site-title">Entrenai</a>
+        </div>
+        <nav class="main-nav">
+            <ul>
+                <li><a href="index.html" class="active">Panel de Control</a></li>
+                <li><a href="#" id="nav-manage-files">Archivos</a></li> <!-- Se activará con JS o llevará a seleccionar curso -->
+                <li><a href="#">Configuración</a></li>
+                <li><a href="#">Ayuda</a></li>
+            </ul>
+        </nav>
+        <div class="user-profile-icon">
+            <!-- Podríamos poner un avatar genérico o iniciales -->
+            <img src="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👤</text></svg>" alt="Perfil">
+        </div>
+    </header>
 
-        <div class="app-explanation">
-            <h3>¿Qué es Entrenai?</h3>
-            <p>Entrenai es tu asistente de IA para Moodle. Transforma los materiales de tu curso (PDFs, DOCXs, PPTXs) en una base de conocimiento interactiva. Esto permite a tus estudiantes obtener respuestas instantáneas y precisas a sus preguntas, directamente dentro de Moodle.</p>
-            <h3>¿Cómo empezar?</h3>
-            <ol>
-                <li><strong>Selecciona tu curso</strong> de la lista desplegable.</li>
-                <li>Pulsa en <strong>"Crear IA para este Curso"</strong>. Esto configurará automáticamente una sección de IA en tu curso de Moodle.</li>
-                <li>Una vez hecho, podrás <strong>gestionar los archivos</strong> que usará la IA y supervisar su aprendizaje.</li>
-            </ol>
-        </div>
-        
-        <h2>Configurar IA para un Curso</h2>
-        
-        <div class="controls">
-            <label for="course-select">Selecciona un Curso:</label>
-            <select id="course-select" name="course-select">
-                <option value="">Cargando cursos...</option>
-            </select>
+    <main class="main-content">
+        <div class="page-container">
+            <div class="page-header">
+                <h1>Panel de Control</h1>
+            </div>
+
+            <!-- Sección de Estadísticas -->
+            <section class="dashboard-grid mb-4">
+                <div class="card stat-card">
+                    <div class="stat-value" id="stat-cursos-configurados">0</div>
+                    <div class="stat-label">Cursos Configurados</div>
+                </div>
+                <div class="card stat-card">
+                    <div class="stat-value" id="stat-archivos-procesados">0</div>
+                    <div class="stat-label">Archivos Procesados (Total)</div>
+                </div>
+                <div class="card stat-card">
+                    <div class="stat-value" id="stat-archivos-en-proceso">0</div>
+                    <div class="stat-label">Archivos en Procesamiento</div>
+                </div>
+                <div class="card stat-card">
+                    <div class="stat-value" id="stat-estado-moodle">N/A</div>
+                    <div class="stat-label">Integración Moodle</div>
+                </div>
+            </section>
+
+            <!-- Sección de Configuración de Curso -->
+            <section class="card mb-4">
+                <div class="card-header">
+                    Configurar IA para un Curso
+                </div>
+                <div class="card-body">
+                    <div class="form-group">
+                        <label for="course-select" class="form-label">Selecciona un Curso de Moodle:</label>
+                        <select id="course-select" name="course-select" class="form-select">
+                            <option value="">Cargando cursos...</option>
+                        </select>
+                    </div>
+                    
+                    <div class="d-flex" style="gap: 1rem;">
+                        <button id="setup-ai-button" class="btn btn-primary" style="flex-grow: 1;">
+                            <span class="btn-spinner d-none"></span>
+                            Crear/Actualizar IA para este Curso
+                        </button>
+                        <button id="manage-files-button" class="btn btn-secondary" style="display:none; flex-grow: 1;">
+                            Gestionar Archivos del Curso
+                        </button>
+                    </div>
+                </div>
+            </section>
             
-            <button id="setup-ai-button">Crear IA para este Curso</button>
-            <button id="manage-files-button" style="display:none; margin-top: 10px;">Gestionar Archivos de IA</button>
+            <!-- Contenedor para mensajes de estado globales (se moverá aquí desde script.js) -->
+            <div id="status-messages-container">
+                <!-- Los mensajes de estado (alertas) aparecerán aquí -->
+            </div>
+
+            <!-- Sección de Información (opcional, podría ir a Ayuda) -->
+            <section class="card">
+                <div class="card-header">
+                    ¿Qué es Entrenai?
+                </div>
+                <div class="card-body">
+                    <p>Entrenai es tu asistente de IA para Moodle. Transforma los materiales de tu curso (PDFs, DOCXs, PPTXs) en una base de conocimiento interactiva. Esto permite a tus estudiantes obtener respuestas instantáneas y precisas a sus preguntas, directamente dentro de Moodle.</p>
+                    <h4>¿Cómo empezar?</h4>
+                    <ol>
+                        <li><strong>Selecciona tu curso</strong> de la lista desplegable.</li>
+                        <li>Pulsa en <strong>"Crear/Actualizar IA para este Curso"</strong>. Esto configurará o actualizará la sección de IA en tu curso de Moodle.</li>
+                        <li>Una vez hecho, podrás <strong>gestionar los archivos</strong> que usará la IA y supervisar su aprendizaje.</li>
+                    </ol>
+                </div>
+            </section>
         </div>
-        
-        <div id="status-messages">
-            <!-- Los mensajes de estado aparecerán aquí -->
-        </div>
-    </div>
+    </main>
+
+    <footer class="site-footer">
+        © 2024-2025 Entrenai - Universidad de Mendoza. Todos los derechos reservados.
+    </footer>
     
+    <!-- El script.js se mantiene, pero necesitará ajustes para el nuevo DOM y mensajes -->
     <script src="script.js"></script>
+    <script>
+        // Pequeño script para manejar el enlace de "Archivos" en la navegación
+        document.getElementById('nav-manage-files').addEventListener('click', function(event) {
+            event.preventDefault();
+            const courseSelect = document.getElementById('course-select');
+            const selectedCourseId = courseSelect ? courseSelect.value : null;
+            const statusMessagesContainer = document.getElementById('status-messages-container');
+
+            function showAlert(message, type = 'warning') {
+                if (!statusMessagesContainer) return;
+                const alertDiv = document.createElement('div');
+                alertDiv.className = `alert alert-${type} alert-dismissible fade show`; // Bootstrap-like classes
+                alertDiv.setAttribute('role', 'alert');
+                alertDiv.innerHTML = `
+                    ${message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close" style="background: none; border: none; font-size: 1.2rem; float: right; cursor: pointer;">&times;</button>
+                `;
+                statusMessagesContainer.appendChild(alertDiv);
+                // Auto-dismiss
+                setTimeout(() => {
+                    alertDiv.style.opacity = '0';
+                    setTimeout(() => alertDiv.remove(), 500);
+                }, 5000);
+
+                alertDiv.querySelector('.btn-close').addEventListener('click', () => {
+                    alertDiv.style.opacity = '0';
+                    setTimeout(() => alertDiv.remove(), 500);
+                });
+            }
+
+            if (selectedCourseId) {
+                window.location.href = `/ui/manage_files.html?course_id=${selectedCourseId}`;
+            } else {
+                showAlert('Por favor, selecciona un curso primero desde el Panel de Control para gestionar sus archivos.');
+                // Opcional: hacer scroll hasta el selector de curso
+                // courseSelect.focus(); 
+            }
+        });
+    </script>
 </body>
 </html>

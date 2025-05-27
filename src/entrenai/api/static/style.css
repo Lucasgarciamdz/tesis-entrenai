@@ -1,602 +1,788 @@
+/* Reset Básico y Normalización */
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    font-size: 16px; /* Base para REM */
+    scroll-behavior: smooth;
+}
+
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
-    margin: 0;
-    padding: 30px 20px; /* Increased top/bottom padding */
-    background-color: #f0f2f5;
-    color: #1c1e21;
     line-height: 1.6;
+    background-color: var(--color-background-light);
+    color: var(--color-text-primary);
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    padding-top: 70px; /* Espacio para el header fijo */
 }
 
-.container {
-    max-width: 800px;
-    margin: 30px auto; /* Increased top/bottom margin */
-    background-color: #ffffff;
-    padding: 30px 40px; /* Increased padding */
-    border-radius: 10px; /* Slightly larger radius */
-    box-shadow: 0 4px 8px rgba(0,0,0,0.1), 0 10px 20px rgba(0,0,0,0.1); /* Enhanced shadow */
-}
-
-h1 {
-    color: #007bff;
-    text-align: center;
-    margin-bottom: 20px; /* Increased margin */
-}
-
-h2 {
-    color: #333;
-    border-bottom: 1px solid #eee;
-    padding-bottom: 12px; /* Slightly increased padding */
-    margin-top: 40px; /* Increased margin */
-    margin-bottom: 25px; /* Increased margin */
-}
-
-p {
-    margin-bottom: 16px; /* Standardized margin */
-}
-
-.app-explanation {
-    background-color: #e7f3fe; /* Light blue background */
-    border: 1px solid #bed4f0; /* Slightly darker blue border */
-    border-left: 5px solid #007bff; /* Primary blue left border for emphasis */
-    padding: 15px 20px;
-    margin-top: 20px;
-    margin-bottom: 30px;
-    border-radius: 5px;
-}
-
-.app-explanation h3 {
-    color: #0056b3; /* Darker blue for headings */
-    margin-top: 0;
-    margin-bottom: 10px;
-}
-
-.app-explanation p, .app-explanation ol {
-    margin-bottom: 10px;
-    color: #333; /* Dark grey for text for readability */
-}
-
-.app-explanation ol {
-    padding-left: 20px;
-}
-
-.app-explanation li {
-    margin-bottom: 5px;
-}
-
-.controls { 
-    margin-bottom: 25px; 
-    padding: 15px;
-    background-color: #f9f9f9;
-    border-radius: 6px;
-    border: 1px solid #e0e0e0;
-}
-
-.controls label {
+img, picture, video, canvas, svg {
     display: block;
-    margin-bottom: 8px;
-    font-weight: bold;
-    color: #555;
+    max-width: 100%;
 }
 
-.controls input[type="text"],
-.controls select {
-    display: block;
-    width: 100%; /* Full width */
-    padding: 12px 15px; /* Increased padding for better touch targets and visual */
-    margin-bottom: 15px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    box-sizing: border-box;
-    appearance: none; /* Remove default system appearance */
-    -webkit-appearance: none; /* For Safari/Chrome */
-    -moz-appearance: none; /* For Firefox */
-    background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2220%22%20height%3D%2220%22%20viewBox%3D%220%200%2020%2020%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20d%3D%22M5%207.5L10%2012.5L15%207.5%22%20stroke%3D%22%23666666%22%20stroke-width%3D%221.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E'); /* Custom arrow */
-    background-repeat: no-repeat;
-    background-position: right 15px center;
-    background-size: 16px 16px; /* Size of the arrow icon */
-    padding-right: 40px; /* Make space for the arrow */
+input, button, textarea, select {
+    font: inherit;
+}
+
+/* Variables CSS */
+:root {
+    --color-primary: #007bff; /* Azul primario (similar a EduDocs/RAG Manager) */
+    --color-primary-dark: #0056b3;
+    --color-primary-light: #e7f3fe;
+
+    --color-secondary: #6c757d; /* Gris secundario */
+    --color-success: #28a745;
+    --color-success-dark: #1e7e34;
+    --color-success-light: #d4edda;
+    --color-danger: #dc3545;
+    --color-danger-dark: #c82333;
+    --color-danger-light: #f8d7da;
+    --color-warning: #ffc107;
+    --color-warning-dark: #d39e00;
+    --color-warning-light: #fff3cd;
+    --color-info: #17a2b8;
+    --color-info-dark: #117a8b;
+    --color-info-light: #d1ecf1;
+
+    --color-text-primary: #212529;
+    --color-text-secondary: #6c757d;
+    --color-text-muted: #868e96;
+    --color-text-on-primary: #ffffff;
+    --color-text-on-dark: #ffffff;
+
+    --color-background-light: #f0f2f5; /* Fondo general de la página */
+    --color-background-card: #ffffff; /* Fondo de las tarjetas */
+    --color-border: #dee2e6;
+
+    --font-family-sans-serif: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+    
+    --border-radius-sm: 0.2rem;
+    --border-radius: 0.375rem; /* Bootstrap 5 default: 0.375rem */
+    --border-radius-lg: 0.5rem;
+
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+    --shadow: 0 4px 8px rgba(0,0,0,0.1);
+    --shadow-lg: 0 10px 20px rgba(0,0,0,0.1);
+
+    --header-height: 70px;
+}
+
+/* Estructura Principal */
+.site-header {
+    background-color: var(--color-background-card);
+    padding: 0 1.5rem;
+    height: var(--header-height);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: var(--shadow-sm);
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+}
+
+.logo-container {
+    display: flex;
+    align-items: center;
+}
+
+.logo-container img {
+    height: 30px; /* Ajusta según tu logo */
+    margin-right: 0.5rem;
+}
+
+.logo-container .site-title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--color-primary);
+    text-decoration: none;
+}
+
+.main-nav ul {
+    list-style: none;
+    display: flex;
+    gap: 1rem;
+}
+
+.main-nav a {
+    text-decoration: none;
+    color: var(--color-text-secondary);
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--border-radius-sm);
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.main-nav a:hover,
+.main-nav a.active {
+    color: var(--color-primary);
+    background-color: var(--color-primary-light);
+}
+
+.user-profile-icon img {
+    height: 35px;
+    width: 35px;
+    border-radius: 50%;
+    object-fit: cover;
     cursor: pointer;
 }
 
-.controls select:hover {
-    border-color: #007bff; /* Highlight border on hover */
+.main-content {
+    flex-grow: 1;
+    padding: 2rem 1.5rem;
+    max-width: 1200px;
+    width: 100%;
+    margin: 0 auto; /* Centra el contenido */
 }
 
-.controls select:focus {
-    outline: none; /* Remove default focus outline */
-    border-color: #007bff; /* Primary color for focus */
-    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25); /* Focus ring */
+.site-footer {
+    background-color: var(--color-background-card);
+    color: var(--color-text-muted);
+    text-align: center;
+    padding: 1.5rem;
+    border-top: 1px solid var(--color-border);
+    font-size: 0.9rem;
 }
 
-/* Remove custom arrow for IE/Edge as appearance:none is not fully supported */
-@media screen and (-ms-high-contrast: active), (-ms-high-contrast: none) {
-    .controls select::-ms-expand {
-        display: none; /* Hide default arrow in IE/Edge */
-    }
-    .controls select {
-        background-image: none; /* No custom arrow for IE/Edge */
-        padding-right: 15px; /* Adjust padding back */
-    }
+/* Contenedor General de Página (para index, manage_files) */
+.page-container {
+    background-color: var(--color-background-card);
+    padding: 2rem;
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--shadow);
+}
+
+.page-header {
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.page-header h1 {
+    font-size: 1.75rem;
+    color: var(--color-text-primary);
+    font-weight: 600;
+}
+.page-header h2 {
+    font-size: 1.5rem;
+    color: var(--color-text-primary);
+    font-weight: 500;
+    margin-top: 1.5rem;
+    margin-bottom: 1rem;
 }
 
 
-.controls button { 
+/* Componentes Comunes */
+.btn {
+    display: inline-block;
+    font-weight: 500;
+    line-height: 1.5;
+    color: var(--color-text-on-primary);
+    text-align: center;
+    vertical-align: middle;
+    cursor: pointer;
+    user-select: none;
+    background-color: transparent;
+    border: 1px solid transparent;
+    padding: 0.5rem 1rem; /* Ajustado para consistencia */
+    font-size: 1rem;
+    border-radius: var(--border-radius);
+    transition: color 0.15s ease-in-out, background-color 0.15s ease-in-out, border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+.btn-primary {
+    background-color: var(--color-primary);
+    border-color: var(--color-primary);
+    color: var(--color-text-on-primary);
+}
+.btn-primary:hover {
+    background-color: var(--color-primary-dark);
+    border-color: var(--color-primary-dark);
+}
+
+.btn-secondary {
+    background-color: var(--color-secondary);
+    border-color: var(--color-secondary);
+    color: var(--color-text-on-primary);
+}
+.btn-secondary:hover {
+    background-color: #5a6268;
+    border-color: #545b62;
+}
+
+.btn-success {
+    background-color: var(--color-success);
+    border-color: var(--color-success);
+    color: var(--color-text-on-primary);
+}
+.btn-success:hover {
+    background-color: var(--color-success-dark);
+    border-color: var(--color-success-dark);
+}
+
+.btn-danger {
+    background-color: var(--color-danger);
+    border-color: var(--color-danger);
+    color: var(--color-text-on-primary);
+}
+.btn-danger:hover {
+    background-color: var(--color-danger-dark);
+    border-color: var(--color-danger-dark);
+}
+
+.btn-warning {
+    background-color: var(--color-warning);
+    border-color: var(--color-warning);
+    color: var(--color-text-primary); /* Texto oscuro para warning */
+}
+.btn-warning:hover {
+    background-color: var(--color-warning-dark);
+    border-color: var(--color-warning-dark);
+}
+
+.btn-info {
+    background-color: var(--color-info);
+    border-color: var(--color-info);
+    color: var(--color-text-on-primary);
+}
+.btn-info:hover {
+    background-color: var(--color-info-dark);
+    border-color: var(--color-info-dark);
+}
+
+.btn-light {
+    background-color: var(--color-background-light);
+    border-color: var(--color-border);
+    color: var(--color-text-primary);
+}
+.btn-light:hover {
+    background-color: #e2e6ea;
+    border-color: #dae0e5;
+}
+
+.btn-outline-primary {
+    color: var(--color-primary);
+    border-color: var(--color-primary);
+}
+.btn-outline-primary:hover {
+    color: var(--color-text-on-primary);
+    background-color: var(--color-primary);
+    border-color: var(--color-primary);
+}
+/* ... otros btn-outline ... */
+
+.btn:disabled,
+.btn.disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+.btn-block {
     display: block;
     width: 100%;
-    padding: 14px 18px; /* Slightly increased padding */
-    background-color: #007bff;
-    color: white;
-    border: none;
-    border-radius: 5px; /* Slightly larger radius */
-    cursor: pointer;
-    font-size: 17px; /* Slightly larger font */
-    font-weight: 500; /* Medium weight */
-    transition: background-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1); /* Subtle shadow */
 }
 
-.controls button:hover {
-    background-color: #0056b3;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.15); /* Enhanced shadow on hover */
+.btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+    border-radius: var(--border-radius-sm);
 }
 
-#setup-ai-button {
-    /* Primary button, styles are largely covered by .controls button */
+.btn-lg {
+    padding: 0.75rem 1.5rem;
+    font-size: 1.25rem;
+    border-radius: var(--border-radius-lg);
 }
 
-/* Secondary action buttons (e.g., manage files, refresh files) */
-#manage-files-button,
-#refresh-moodle-files-button { /* Added refresh button here */
-    background-color: #28a745; /* Green for positive/secondary actions */
-    /* box-shadow is inherited or can be customized if needed */
-}
-
-#manage-files-button:hover,
-#refresh-moodle-files-button:hover { /* Added refresh button here */
-    background-color: #218838; /* Darker green for hover */
-    /* box-shadow enhancement is inherited */
-}
-
-.controls button:disabled,
-#refresh-moodle-files-button:disabled { /* Ensure consistent disabled style */
-    background-color: #cccccc;
-    cursor: not-allowed;
-    box-shadow: none; /* No shadow for disabled state */
-}
-
-#status-messages {
-    margin-top: 20px;
-    margin-bottom: 20px; /* Added margin-bottom for spacing from content below */
-}
-
-#status-messages p, 
-#status-messages-manage p { /* Apply to both status message containers */
-    padding: 12px 15px 12px 40px; /* Increased left padding for icon */
-    border-radius: 5px; /* Consistent border-radius */
-    margin-top: 10px;
-    margin-bottom: 10px; /* Consistent margin */
-    border-left-width: 5px;
-    border-left-style: solid;
-    position: relative; /* For icon positioning */
-    font-size: 0.95em; /* Slightly larger for readability */
-}
-
-#status-messages p::before,
-#status-messages-manage p::before {
-    content: ""; /* Default empty content */
-    position: absolute;
-    left: 15px;
-    top: 50%;
-    transform: translateY(-50%);
-    font-size: 1.2em; /* Icon size */
-}
-
-#status-messages .info,
-#status-messages-manage .info { 
-    background-color: #e7f3fe; 
-    border-left-color: #2196F3; 
-    color: #0c5460;
-}
-#status-messages .info::before,
-#status-messages-manage .info::before {
-    content: "ℹ️"; /* Info icon */
-    color: #2196F3;
-}
-
-#status-messages .success,
-#status-messages-manage .success { 
-    background-color: #d4edda; 
-    border-left-color: #28a745; 
-    color: #155724;
-}
-#status-messages .success::before,
-#status-messages-manage .success::before {
-    content: "✅"; /* Success icon */
-    color: #28a745;
-}
-
-#status-messages .warning,
-#status-messages-manage .warning { 
-    background-color: #fff3cd; 
-    border-left-color: #ffc107; 
-    color: #856404;
-}
-#status-messages .warning::before,
-#status-messages-manage .warning::before {
-    content: "⚠️"; /* Warning icon */
-    color: #ffc107;
-}
-
-#status-messages .error,
-#status-messages-manage .error { 
-    background-color: #f8d7da; 
-    border-left-color: #dc3545; 
-    color: #721c24;
-}
-#status-messages .error::before,
-#status-messages-manage .error::before {
-    content: "❗"; /* Error icon (using a different one from file processing for distinction) */
-    color: #dc3545;
-}
-
-
-/* Styles for manage_files.html */
-#course-title {
-    text-align: left; 
-    margin-top: 0; /* Adjust if container has enough padding */
-    margin-bottom: 10px; /* Reduced margin bottom */
-}
-
-#course-name-placeholder {
-    font-weight: normal;
-    color: #555;
-}
-
-.back-link {
+.btn-spinner {
     display: inline-block;
-    margin-bottom: 30px; /* Increased space after link */
-    color: #007bff;
-    text-decoration: none;
-    font-size: 0.95em;
-}
-
-.back-link:hover {
-    text-decoration: underline;
-}
-
-.manage-files-section { /* Optional: Add this class to divs wrapping sections in HTML for more control */
-    margin-bottom: 30px;
-}
-
-/* Adjusting existing h2 for manage_files page if needed, or use .manage-files-section h2 */
-#manage_files .container h2 { /* More specific selector if these h2s need different spacing */
-    margin-top: 30px;
-    margin-bottom: 15px; /* Space between h2 and its content/small-text */
-}
-
-
-.file-list {
-    list-style: none;
-    padding-left: 0;
-    margin-top: 10px; /* Space between small-text and list */
-    margin-bottom: 30px; /* Increased space after the list */
-}
-
-.file-list li {
-    background-color: #fff; /* Brighter background for list items */
-    border: 1px solid #ddd; /* Slightly softer border */
-    padding: 12px 18px; /* Increased padding */
-    margin-bottom: 10px; /* Increased space between items */
-    border-radius: 5px; /* Consistent with other elements */
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.05); /* Subtle shadow for depth */
-    transition: box-shadow 0.2s ease-in-out;
-}
-
-.file-list li:hover {
-    box-shadow: 0 2px 4px rgba(0,0,0,0.08); /* Slightly more shadow on hover */
-}
-
-
-.file-list li span:not(.status-icon):not(.status-text) { /* Target the filename span specifically */
-    flex-grow: 1;
-    margin-right: 15px; /* Space before delete button or status text */
-    font-size: 0.95em;
-    color: #333;
-}
-
-.file-list li .status-text { /* Ensure status text is also well-styled */
-    flex-grow: 1; /* Allow it to take space */
-    font-size: 0.95em;
-    color: #333;
-}
-
-
-.small-text {
-    font-size: 0.9em;
-    color: #555; /* Slightly darker for better readability */
-    margin-top: 5px; /* Space after a heading if it's directly under */
-    margin-bottom: 10px; /* Space before the element it describes (e.g., a list or button) */
-}
-
-/* Specific adjustments for small-text under .controls on manage_files page */
-.controls .small-text {
-    margin-top: 8px; /* Space after the button */
-    margin-bottom: 0; /* No extra space if it's the last thing in .controls */
-}
-
-
-/* Ensure status messages on manage_files page uses the same styling */
-#status-messages-manage {
-    margin-bottom: 20px; /* Add some space below status messages */
-}
-#status-messages-manage p {
-    /* Styles are already defined for #status-messages .info, .success, etc. */
-    margin-top: 10px; 
-}
-
-/* Styles for file processing status indicators */
-.file-list li .status-icon {
-    margin-right: 8px;
-    font-size: 1.1em;
-    display: inline-block; /* Allows vertical alignment */
-    vertical-align: middle;
-}
-
-.file-list li .status-text {
-    vertical-align: middle;
-}
-
-.status-pending .status-icon::before {
-    content: "🕒"; /* Clock icon */
-    color: #ffa500; /* Orange */
-}
-
-.status-processing .status-icon.spinner {
     width: 1em;
     height: 1em;
-    border: 2px solid #ccc;
-    border-top-color: #007bff;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
     border-radius: 50%;
-    animation: spin 1s linear infinite;
-    margin-right: 8px;
-    display: inline-block;
-    vertical-align: middle;
+    animation: spin 0.8s linear infinite;
+    margin-right: 0.5rem;
+    vertical-align: -0.15em;
 }
 
 @keyframes spin {
     to { transform: rotate(360deg); }
 }
 
-.status-failure .status-icon::before {
-    content: "❌"; /* Cross icon */
-    color: #dc3545; /* Red */
+/* Formularios */
+.form-group {
+    margin-bottom: 1rem;
 }
 
-.file-list li.status-failure {
-    background-color: #f8d7da; /* Light red background for failed tasks */
-    border-left: 5px solid #dc3545;
-}
-
-.file-list li.status-failure .status-text {
-    color: #721c24; /* Darker red text for failed tasks */
-}
-
-
-/* Delete button styling */
-.delete-btn {
-    background-color: #dc3545; /* Red */
-    color: white;
-    border: none;
-    padding: 8px 14px; /* Slightly increased padding for better tap area */
-    border-radius: 5px; /* Consistent with other buttons */
-    cursor: pointer;
-    font-size: 0.95em; /* Consistent with other buttons */
-    font-weight: 500; /* Consistent */
-    transition: background-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1); /* Subtle shadow */
-    display: inline-flex; /* Align icon and text if an icon were added */
-    align-items: center;
-    justify-content: center;
-}
-
-.delete-btn:hover {
-    background-color: #c82333; /* Darker red */
-    box-shadow: 0 2px 5px rgba(0,0,0,0.15); /* Enhanced shadow */
-}
-
-/* Spinner for buttons */
-.btn-spinner {
+.form-label {
     display: inline-block;
-    width: 1em; /* Relative to font-size */
-    height: 1em; /* Relative to font-size */
-    border: 2px solid currentColor; 
-    border-top-color: transparent; 
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-    margin-right: 8px;
-    vertical-align: -0.15em; 
+    margin-bottom: 0.5rem;
+    font-weight: 500;
 }
 
-/* --- Responsive Design --- */
+.form-control,
+.form-select {
+    display: block;
+    width: 100%;
+    padding: 0.625rem 0.75rem; /* Ajustado */
+    font-size: 1rem;
+    font-weight: 400;
+    line-height: 1.5;
+    color: var(--color-text-primary);
+    background-color: var(--color-background-card);
+    background-clip: padding-box;
+    border: 1px solid var(--color-border);
+    appearance: none;
+    border-radius: var(--border-radius);
+    transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
 
-/* Tablets and larger phablets */
+.form-control:focus,
+.form-select:focus {
+    border-color: var(--color-primary);
+    outline: 0;
+    box-shadow: 0 0 0 0.25rem rgba(var(--color-primary), 0.25); /* Arreglar para que tome el color primario */
+}
+/* Para que el box-shadow funcione con variable RGB: */
+/* :root { --color-primary-rgb: 0, 123, 255; } */
+/* box-shadow: 0 0 0 0.25rem rgba(var(--color-primary-rgb), 0.25); */
+
+
+.form-select {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23343a40' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 16px 12px;
+    padding-right: 2.25rem; /* Espacio para el icono */
+}
+
+.form-control::placeholder {
+    color: var(--color-text-muted);
+    opacity: 1;
+}
+
+.form-control:disabled, .form-control[readonly] {
+    background-color: #e9ecef;
+    opacity: 1;
+}
+
+.form-text {
+    font-size: 0.875em;
+    color: var(--color-text-muted);
+    margin-top: 0.25rem;
+}
+
+/* Tarjetas (Cards) */
+.card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    word-wrap: break-word;
+    background-color: var(--color-background-card);
+    background-clip: border-box;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--shadow-sm);
+    margin-bottom: 1.5rem;
+}
+
+.card-header {
+    padding: 1rem 1.25rem;
+    margin-bottom: 0;
+    background-color: rgba(0,0,0,.03);
+    border-bottom: 1px solid var(--color-border);
+    font-size: 1.1rem;
+    font-weight: 500;
+}
+.card-header:first-child {
+    border-radius: var(--border-radius-lg) var(--border-radius-lg) 0 0;
+}
+
+.card-body {
+    flex: 1 1 auto;
+    padding: 1.25rem;
+}
+
+.card-title {
+    margin-bottom: 0.5rem;
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.card-subtitle {
+    margin-top: -0.25rem;
+    margin-bottom: 0.5rem;
+    color: var(--color-text-secondary);
+}
+
+.card-text:last-child {
+    margin-bottom: 0;
+}
+
+.card-footer {
+    padding: 1rem 1.25rem;
+    background-color: rgba(0,0,0,.03);
+    border-top: 1px solid var(--color-border);
+}
+.card-footer:last-child {
+    border-radius: 0 0 var(--border-radius-lg) var(--border-radius-lg);
+}
+
+/* Alertas / Mensajes de Estado */
+.alert {
+    position: relative;
+    padding: 1rem 1rem;
+    margin-bottom: 1rem;
+    border: 1px solid transparent;
+    border-radius: var(--border-radius);
+    display: flex;
+    align-items: center;
+}
+.alert-icon {
+    margin-right: 0.75rem;
+    font-size: 1.25rem;
+}
+
+.alert-primary { color: #004085; background-color: #cce5ff; border-color: #b8daff; }
+.alert-secondary { color: #383d41; background-color: #e2e3e5; border-color: #d6d8db; }
+.alert-success { color: var(--color-success-dark); background-color: var(--color-success-light); border-color: #c3e6cb; }
+.alert-danger { color: var(--color-danger-dark); background-color: var(--color-danger-light); border-color: #f5c6cb; }
+.alert-warning { color: #856404; background-color: #fff3cd; border-color: #ffeeba; } /* Texto oscuro para warning */
+.alert-info { color: var(--color-info-dark); background-color: var(--color-info-light); border-color: #bee5eb; }
+
+#status-messages-container { /* Contenedor para mensajes globales */
+    position: fixed;
+    top: calc(var(--header-height) + 1rem);
+    right: 1.5rem;
+    z-index: 1050;
+    width: 350px;
+    max-width: 90%;
+}
+#status-messages-container .alert {
+    box-shadow: var(--shadow);
+}
+
+/* Tablas */
+.table-container {
+    overflow-x: auto; /* Para responsividad en tablas anchas */
+}
+.table {
+    width: 100%;
+    margin-bottom: 1rem;
+    color: var(--color-text-primary);
+    border-collapse: collapse;
+}
+.table th,
+.table td {
+    padding: 0.75rem;
+    vertical-align: top;
+    border-top: 1px solid var(--color-border);
+}
+.table thead th {
+    vertical-align: bottom;
+    border-bottom: 2px solid var(--color-border);
+    text-align: left;
+    font-weight: 600;
+    background-color: #f8f9fa; /* Un gris muy claro para el encabezado */
+}
+.table tbody tr:nth-of-type(odd) {
+    /* background-color: rgba(0,0,0,.02); Opcional: zebra striping */
+}
+.table tbody tr:hover {
+    background-color: rgba(0,0,0,.05);
+}
+.table-sm th,
+.table-sm td {
+    padding: 0.3rem;
+}
+
+/* Indicadores de Estado en Tablas (Estilo Píldora/Badge) */
+.status-indicator {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.35em 0.65em; /* Un poco más de padding */
+    font-size: 0.8rem;    /* Ligeramente más pequeño para un look refinado */
+    font-weight: 500;     /* Un poco menos bold que 600 */
+    line-height: 1;
+    text-align: center;
+    white-space: nowrap;
+    vertical-align: middle; /* Mejor alineación vertical */
+    border-radius: var(--border-radius-lg); /* Más redondeado, como píldora */
+    text-transform: capitalize; /* Para que PENDING sea Pendiente, etc. si el JS no lo hace */
+}
+.status-indicator-icon {
+    margin-right: 0.4em; /* Un poco más de espacio para el icono */
+    font-size: 0.9em; /* Ajustar tamaño del icono si es un carácter de fuente */
+}
+
+/* Colores específicos para los badges de estado */
+.status-indicator.status-success { background-color: var(--color-success-light); color: var(--color-success-dark); border: 1px solid var(--color-success-dark); }
+.status-indicator.status-danger { background-color: var(--color-danger-light); color: var(--color-danger-dark); border: 1px solid var(--color-danger-dark); }
+.status-indicator.status-warning { background-color: var(--color-warning-light); color: #856404; border: 1px solid var(--color-warning-dark); }
+.status-indicator.status-info { background-color: var(--color-info-light); color: var(--color-info-dark); border: 1px solid var(--color-info-dark); }
+.status-indicator.status-processing { background-color: var(--color-primary-light); color: var(--color-primary-dark); border: 1px solid var(--color-primary-dark); }
+.status-indicator.status-default { background-color: var(--color-secondary-light, #e9ecef); color: var(--color-secondary); border: 1px solid var(--color-secondary); }
+
+
+/* Barra de Progreso Mejorada */
+.progress {
+    display: flex;
+    height: 0.75rem; /* Más delgada, como en la Imagen 1 */
+    overflow: hidden;
+    font-size: .75rem; /* No relevante si no mostramos texto dentro */
+    background-color: #e9ecef; /* Fondo de la barra */
+    border-radius: var(--border-radius); /* Bordes redondeados */
+    width: 100%; /* Asegurar que ocupe el contenedor */
+    min-width: 100px; /* Mínimo para que no desaparezca si la celda es muy pequeña */
+}
+.progress-bar {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    overflow: hidden;
+    color: var(--color-text-on-primary);
+    text-align: center;
+    white-space: nowrap;
+    background-color: var(--color-primary); /* Color por defecto de la barra de progreso */
+    transition: width .6s ease;
+    border-radius: var(--border-radius); /* Para que la barra interna también sea redondeada */
+}
+.progress-bar.bg-success { background-color: var(--color-success) !important; }
+.progress-bar.bg-danger { background-color: var(--color-danger) !important; }
+.progress-bar.bg-warning { background-color: var(--color-warning) !important; }
+.progress-bar.bg-info { background-color: var(--color-info) !important; }
+
+
+.progress-bar-striped {
+    background-image: linear-gradient(45deg,rgba(255,255,255,.15) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.15) 50%,rgba(255,255,255,.15) 75%,transparent 75%,transparent);
+    background-size: 0.5rem 0.5rem; /* Rayas más pequeñas */
+}
+.progress-bar-animated {
+    animation: progress-bar-stripes 1s linear infinite;
+}
+@keyframes progress-bar-stripes {
+    0% { background-position-x: 0.5rem; }
+}
+
+/* Ajustes específicos para la tabla de archivos */
+#files-table td, #files-table th {
+    vertical-align: middle; /* Centrar contenido verticalmente en celdas */
+}
+
+#files-table .cell-actions { /* Si usamos una clase para la celda de acciones */
+    text-align: right; /* Alinear acciones a la derecha */
+}
+
+#files-table .btn-sm { /* Asegurar que los botones de acción sean pequeños */
+    padding: 0.2rem 0.5rem;
+    font-size: 0.8rem;
+}
+
+/* Icono de tres puntos para acciones (ejemplo) */
+.actions-menu-btn {
+    background: none;
+    border: none;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+}
+.actions-menu-btn:hover {
+    color: var(--color-primary);
+}
+.actions-menu-btn::after {
+    content: '⋮'; /* O un SVG icon */
+    font-size: 1.25rem;
+    font-weight: bold;
+}
+
+
+/* Clases de utilidad */
+.text-center { text-align: center !important; }
+.text-right { text-align: right !important; }
+.text-left { text-align: left !important; }
+.d-none { display: none !important; }
+.d-block { display: block !important; }
+.d-flex { display: flex !important; }
+.justify-content-between { justify-content: space-between !important; }
+.align-items-center { align-items: center !important; }
+.mt-1 { margin-top: 0.25rem !important; }
+.mt-2 { margin-top: 0.5rem !important; }
+.mt-3 { margin-top: 1rem !important; }
+.mt-4 { margin-top: 1.5rem !important; }
+.mt-5 { margin-top: 3rem !important; }
+.mb-1 { margin-bottom: 0.25rem !important; }
+.mb-2 { margin-bottom: 0.5rem !important; }
+.mb-3 { margin-bottom: 1rem !important; }
+.mb-4 { margin-bottom: 1.5rem !important; }
+.mb-5 { margin-bottom: 3rem !important; }
+.p-1 { padding: 0.25rem !important; }
+.p-2 { padding: 0.5rem !important; }
+.p-3 { padding: 1rem !important; }
+.p-4 { padding: 1.5rem !important; }
+.p-5 { padding: 3rem !important; }
+.w-100 { width: 100% !important; }
+
+/* Estilos específicos para el Dashboard (index.html) */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+.stat-card {
+    padding: 1.5rem;
+    text-align: center;
+}
+.stat-card .stat-value {
+    font-size: 2.5rem;
+    font-weight: 600;
+    color: var(--color-primary);
+    margin-bottom: 0.25rem;
+}
+.stat-card .stat-label {
+    font-size: 1rem;
+    color: var(--color-text-secondary);
+}
+
+/* Estilos específicos para manage_files.html */
+.actions-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap; /* Para responsividad */
+    gap: 1rem;
+}
+.actions-bar .search-filter-container {
+    display: flex;
+    gap: 1rem;
+    flex-grow: 1; /* Para que ocupe espacio */
+}
+.actions-bar .search-filter-container .form-control {
+    min-width: 200px; /* Ancho mínimo para el input de búsqueda */
+}
+
+/* Responsividad */
+@media (max-width: 992px) {
+    .main-nav {
+        /* Aquí podrías implementar un menú hamburguesa */
+        /* Por ahora, simplemente ocultamos la navegación en pantallas pequeñas si no cabe */
+    }
+    .dashboard-grid {
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    }
+}
+
 @media (max-width: 768px) {
     body {
-        padding: 20px 15px; /* Reduce body padding */
+        padding-top: 60px; /* Ajustar para header más pequeño si es necesario */
     }
-
-    .container {
-        padding: 20px 25px; /* Reduce container padding */
-        margin: 20px auto;
+    .site-header {
+        height: 60px;
+        padding: 0 1rem;
     }
-
-    h1 {
-        font-size: 1.8em; /* Reduce h1 font size */
-        margin-bottom: 15px;
+    .logo-container .site-title {
+        font-size: 1.25rem;
     }
-
-    h2 {
-        font-size: 1.4em; /* Reduce h2 font size */
-        margin-top: 30px;
-        margin-bottom: 20px;
+    .main-content {
+        padding: 1.5rem 1rem;
     }
-    
-    .controls input[type="text"],
-    .controls select {
-        padding: 12px 12px; /* Adjust padding, keeping right padding for custom arrow */
-        padding-right: 35px; /* Ensure custom arrow space */
+    .page-container {
+        padding: 1.5rem;
     }
-    .controls select {
-        background-position: right 12px center;
+    .page-header h1 {
+        font-size: 1.5rem;
     }
-
-    .controls button {
-        padding: 12px 15px; /* Adjust button padding */
-        font-size: 16px;
+    .actions-bar {
+        flex-direction: column;
+        align-items: stretch;
     }
-
-    .delete-btn {
-        padding: 7px 12px;
-        font-size: 0.9em;
+    .actions-bar .search-filter-container {
+        flex-direction: column;
     }
-
-    #status-messages p, 
-    #status-messages-manage p {
-        padding: 10px 12px 10px 35px; /* Adjust padding for status messages */
-        font-size: 0.9em;
+    .actions-bar .btn {
+        width: 100%; /* Botones ocupan todo el ancho */
     }
-    #status-messages p::before,
-    #status-messages-manage p::before {
-        left: 12px; /* Adjust icon position */
+    .table {
+        font-size: 0.9rem; /* Reducir tamaño de fuente en tablas */
     }
-
-    .file-list li {
-        padding: 10px 15px;
-    }
-     .file-list li span:not(.status-icon):not(.status-text),
-     .file-list li .status-text {
-        font-size: 0.9em;
-     }
-}
-
-/* Mobile phones */
-@media (max-width: 480px) {
-    body {
-        padding: 15px 10px; /* Further reduce body padding */
-        font-size: 15px; /* Slightly adjust base font size */
-    }
-
-    .container {
-        padding: 15px; /* Further reduce container padding */
-        margin: 15px auto;
-        border-radius: 8px; /* Smaller border radius */
-    }
-
-    h1 {
-        font-size: 1.5em; /* Further reduce h1 */
-        margin-bottom: 15px;
-    }
-
-    h2 {
-        font-size: 1.25em; /* Further reduce h2 */
-        margin-top: 25px;
-        margin-bottom: 15px;
-        padding-bottom: 8px;
-    }
-
-    .app-explanation {
-        padding: 10px 15px;
-        border-left-width: 4px;
-    }
-    .app-explanation h3 {
-        font-size: 1.1em;
-    }
-
-    .controls {
-        padding: 10px;
-    }
-    
-    .controls label {
-        font-size: 0.95em;
-        margin-bottom: 6px;
-    }
-
-    .controls input[type="text"],
-    .controls select,
-    .controls button {
-        width: 100%; /* Ensure full width */
-        font-size: 15px; /* Adjust font size for mobile */
-        padding: 12px 15px; /* Consistent padding */
-    }
-    .controls select { /* Keep padding for select arrow */
-        padding-right: 40px; 
-    }
-
-
-    #setup-ai-button,
-    #manage-files-button,
-    #refresh-moodle-files-button {
-        padding: 14px 15px; /* Slightly larger tap target for main CTAs */
-    }
-    
-    .delete-btn {
-        padding: 10px 12px; /* Make delete button easier to tap */
-        font-size: 0.9em;
-    }
-
-    #status-messages p, 
-    #status-messages-manage p {
-        padding: 10px 12px 10px 30px; /* Adjust padding */
-        font-size: 0.85em;
-    }
-    #status-messages p::before,
-    #status-messages-manage p::before {
-        left: 10px; /* Adjust icon position */
-        font-size: 1.1em;
-    }
-    
-    .file-list {
-        margin-top: 8px;
-        margin-bottom: 20px;
-    }
-
-    .file-list li {
-        padding: 10px 12px; /* Reduce padding in list items */
-        margin-bottom: 8px;
-        flex-direction: column; /* Stack filename and button/status */
-        align-items: flex-start; /* Align items to the start */
-    }
-
-    .file-list li span:not(.status-icon):not(.status-text) { /* Filename span */
-        margin-bottom: 8px; /* Space between filename and button/status */
-        margin-right: 0; /* Remove right margin */
-        font-size: 0.9em;
-    }
-    
-    .file-list li .status-icon {
-        margin-right: 5px; /* Adjust icon spacing */
-    }
-    .file-list li .status-text { /* Status text line */
-        font-size: 0.85em;
-        width: 100%; /* Take full width in stacked layout */
-        margin-bottom: 5px; /* Space if button is also there */
-    }
-    
-    .file-list li .delete-btn {
-        align-self: flex-end; /* Push delete button to the right end */
-        margin-top: 5px; /* Space above if status text is also present */
-    }
-
-    .back-link {
-        margin-bottom: 20px;
-        font-size: 0.9em;
-    }
-    .small-text {
-        font-size: 0.85em;
+    .table th, .table td {
+        padding: 0.5rem;
     }
 }
 
+@media (max-width: 576px) {
+    .main-nav ul {
+        /* Ocultar o transformar a menú hamburguesa */
+        display: none; /* Ejemplo simple */
+    }
+    .user-profile-icon {
+        /* Ajustar si es necesario */
+    }
+    .stat-card .stat-value {
+        font-size: 2rem;
+    }
+    #status-messages-container {
+        width: 100%;
+        right: 0;
+        top: var(--header-height);
+        border-radius: 0;
+        padding: 0 0.5rem;
+    }
+    #status-messages-container .alert {
+        margin-bottom: 0.5rem;
+    }
+}
 
+/* Estilos para la lista de archivos en procesamiento (temporal hasta que se integre en tabla) */
+.file-list {
+    list-style: none;
+    padding-left: 0;
+    margin-top: 10px;
+    margin-bottom: 30px;
+}
+
+.file-list li {
+    background-color: #fff;
+    border: 1px solid var(--color-border);
+    padding: 12px 18px;
+    margin-bottom: 10px;
+    border-radius: var(--border-radius);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: var(--shadow-sm);
+}
+
+.file-list li .status-icon {
+    margin-right: 8px;
+    font-size: 1.1em;
+}
+.file-list li .status-icon.spinner {
+    width: 1em;
+    height: 1em;
+    border: 2px solid #ccc;
+    border-top-color: var(--color-primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    display: inline-block;
+}
+.file-list li.status-failure {
+    background-color: var(--color-danger-light);
+    border-left: 5px solid var(--color-danger);
+}
+.file-list li.status-failure .status-text {
+    color: var(--color-danger-dark);
+}
