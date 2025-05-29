@@ -310,10 +310,27 @@ async def setup_ia_for_course(
         alias="courseName",
         description="Nombre del curso para la IA (opcional, se intentará obtener de Moodle).",
     ),
+    initial_messages: Optional[str] = Query(
+        None,
+        alias="initialMessages",
+        description="Mensajes iniciales para el chat de IA.",
+    ),
+    system_message: Optional[str] = Query(
+        None,
+        alias="systemMessage",
+        description="Mensaje del sistema para el agente de IA (se añadirá al mensaje por defecto).",
+    ),
+    input_placeholder: Optional[str] = Query(
+        None,
+        alias="inputPlaceholder",
+        description="Texto de marcador de posición para el campo de entrada del chat.",
+    ),
+    chat_title: Optional[str] = Query(
+        None, alias="chatTitle", description="Título del chat de IA."
+    ),
     moodle: MoodleClient = Depends(get_moodle_client),
     pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper),
-    # Updated dependency
-    ai_client=Depends(get_ai_client),
+    ai_client=Depends(get_ai_client),  # Updated dependency
     n8n: N8NClient = Depends(get_n8n_client),
 ):
     """Configura la IA para un curso específico de Moodle."""
@@ -426,10 +443,14 @@ async def setup_ia_for_course(
             }
 
         n8n_chat_url_str = n8n.configure_and_deploy_chat_workflow(
-            course_id,
-            course_name_str,
-            pgvector_table_name,
-            ai_params,  # Updated variable
+            course_id=course_id,
+            course_name=course_name_str,
+            qdrant_collection_name=pgvector_table_name,
+            ai_config_params=ai_params,
+            initial_messages=initial_messages,
+            system_message=system_message,
+            input_placeholder=input_placeholder,
+            chat_title=chat_title,
         )
 
         if not n8n_chat_url_str:
@@ -480,6 +501,12 @@ async def setup_ia_for_course(
             str(response_details.n8n_chat_url) if response_details.n8n_chat_url else "#"
         )
 
+        # Mensaje para el profesor sobre la edición
+        edit_instruction_message = """
+<p><strong>Nota para el profesor:</strong> Los textos de bienvenida, el mensaje del sistema, el marcador de posición y el título del chat que configuró inicialmente se muestran a continuación. Puede modificar estos textos directamente en este resumen de la sección de Moodle. Al actualizar los archivos del curso (usando el enlace 'Refrescar Archivos'), estos cambios se sincronizarán automáticamente con el chat de IA.</p>
+"""
+
+        # Construir el summary HTML con los nuevos campos
         html_summary = f"""
 <h4>Recursos de Entrenai IA</h4>
 <p>Utilice esta sección para interactuar con la Inteligencia Artificial de asistencia para este curso.</p>
@@ -487,6 +514,15 @@ async def setup_ia_for_course(
     <li><a href="{n8n_chat_url_for_moodle}" target="_blank">{moodle_chat_link_name}</a>: Acceda aquí para chatear con la IA.</li>
     <li>Carpeta "<strong>{moodle_folder_name}</strong>": Suba aquí los documentos PDF, DOCX, PPTX que la IA utilizará como base de conocimiento.</li>
     <li><a href="{refresh_files_url}" target="_blank">{moodle_refresh_link_name}</a>: Haga clic aquí después de subir nuevos archivos o modificar existentes en la carpeta "{moodle_folder_name}" para que la IA los procese.</li>
+    <li><a href="{str(request.base_url).rstrip('/')}/ui/workflow_editor.html?course_id={course_id}" target="_blank">Editar Configuración del Chat de IA</a>: Modifique los textos de bienvenida, el mensaje del sistema, el marcador de posición y el título del chat.</li>
+</ul>
+{edit_instruction_message}
+<h5>Configuración del Chat de IA:</h5>
+<ul>
+    <li><strong>Mensajes Iniciales:</strong> {initial_messages if initial_messages else 'No especificado'}</li>
+    <li><strong>Mensaje del Sistema:</strong> {system_message if system_message else 'No especificado'}</li>
+    <li><strong>Marcador de Posición de Entrada:</strong> {input_placeholder if input_placeholder else 'No especificado'}</li>
+    <li><strong>Título del Chat:</strong> {chat_title if chat_title else 'No especificado'}</li>
 </ul>
 """
 
@@ -863,6 +899,97 @@ async def get_task_status(task_id: str):
     logger.debug(f"Estado de la tarea {task_id}: {status_response}")
     return status_response
 
+
+@router.get("/courses/{course_id}/n8n-workflow-config")
+async def get_n8n_workflow_config(
+    course_id: int,
+    moodle: MoodleClient = Depends(get_moodle_client),
+    n8n: N8NClient = Depends(get_n8n_client),
+):
+    """
+    Obtiene la configuración actual de los parámetros del workflow de n8n
+    (initialMessages, inputPlaceholder, title, systemMessage) para un curso.
+    """
+    logger.info(f"Solicitud para obtener configuración de workflow n8n para curso ID: {course_id}")
+
+    try:
+        course_name_for_n8n = await _get_course_name_for_operations(course_id, moodle)
+        workflow_name_prefix = f"Entrenai - {course_id}"
+        exact_workflow_name = f"{workflow_name_prefix} - {course_name_for_n8n}"
+
+        # Buscar el workflow por nombre
+        workflows = n8n.get_workflows_list()
+        target_workflow = None
+        for wf in workflows:
+            if wf.name == exact_workflow_name:
+                target_workflow = wf
+                break
+            # Fallback: si no hay coincidencia exacta, buscar por prefijo y tomar el primero activo
+            if not target_workflow and wf.name and wf.name.startswith(workflow_name_prefix) and wf.active:
+                target_workflow = wf
+
+        if not target_workflow or not target_workflow.id:
+            logger.warning(f"No se encontró workflow de n8n para el curso ID: {course_id} con nombre '{exact_workflow_name}'.")
+            raise HTTPException(
+                status_code=404,
+                detail=f"No se encontró un workflow de n8n activo para el curso ID {course_id}.",
+            )
+
+        workflow_details = n8n.get_workflow_details(target_workflow.id)
+        
+        config_data: Dict[str, Optional[str]] = {
+            "initialMessages": None,
+            "inputPlaceholder": None,
+            "chatTitle": None,
+            "systemMessage": None,
+        }
+
+        if workflow_details: # Añadir esta comprobación explícita
+            # Extraer los parámetros del nodo 'When chat message received'
+            chat_trigger_node = next(
+                (
+                    node
+                    for node in workflow_details.nodes
+                    if node.type == "@n8n/n8n-nodes-langchain.chatTrigger"
+                ),
+                None,
+            )
+            
+            # Extraer los parámetros del nodo 'AI Agent'
+            ai_agent_node = next(
+                (
+                    node
+                    for node in workflow_details.nodes
+                    if node.type == "@n8n/n8n-nodes-langchain.agent"
+                ),
+                None,
+            )
+
+            if chat_trigger_node and chat_trigger_node.parameters:
+                config_data["initialMessages"] = chat_trigger_node.parameters.initialMessages
+                if chat_trigger_node.parameters.options: # Check if options dict exists
+                    config_data["inputPlaceholder"] = chat_trigger_node.parameters.options.get("inputPlaceholder")
+                    config_data["chatTitle"] = chat_trigger_node.parameters.options.get("title")
+
+            if ai_agent_node and ai_agent_node.parameters and ai_agent_node.parameters.options: # Check if options dict exists
+                config_data["systemMessage"] = ai_agent_node.parameters.options.get("systemMessage")
+        else:
+            logger.error(f"No se pudieron obtener los detalles del workflow n8n ID: {target_workflow.id}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"No se pudieron obtener los detalles del workflow n8n para el curso ID {course_id}.",
+            )
+
+        logger.info(f"Configuración de workflow n8n obtenida para curso ID {course_id}: {config_data}")
+        return config_data
+
+    except HTTPException as http_exc:
+        raise http_exc
+    except Exception as e:
+        logger.exception(f"Error inesperado al obtener la configuración del workflow n8n para el curso {course_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Error interno del servidor: {str(e)}"
+        )
 
 @router.get("/courses/{course_id}/indexed-files", response_model=List[IndexedFile])
 async def get_indexed_files_for_course(

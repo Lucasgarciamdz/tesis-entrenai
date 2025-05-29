@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -69,11 +69,36 @@ class DocumentChunk(BaseModel):
 # Placeholder for now.
 
 
+class N8NNodeParameters(BaseModel):
+    # This model will be flexible to accommodate various node parameters
+    # Use Field(default_factory=dict) for nested dictionaries that might not always be present
+    initialMessages: Optional[str] = None
+    options: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    # Add other common parameters if needed, or keep it flexible with **kwargs
+    # For now, we only care about initialMessages and options for chatTrigger
+    # and systemMessage for agent node.
+
+class N8NNode(BaseModel):
+    id: str
+    name: str
+    type: str
+    typeVersion: float
+    position: List[float]
+    parameters: Optional[N8NNodeParameters] = None
+    credentials: Optional[Dict[str, Any]] = None # Credentials can be complex, keep as dict for now
+    # Add other fields that might be present in a node definition
+
 class N8NWorkflow(BaseModel):
     id: str
     name: str
     active: bool
-    webhook_url: Optional[HttpUrl] = None
+    nodes: List[N8NNode] = Field(default_factory=list)
+    connections: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    settings: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    staticData: Optional[Dict[str, Any]] = None
+    webhook_url: Optional[HttpUrl] = None # This might be derived, not directly from N8N API response
+    meta: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    tags: Optional[List[str]] = Field(default_factory=list)
 
 
 # --- API Request/Response Models (FastAPI) ---

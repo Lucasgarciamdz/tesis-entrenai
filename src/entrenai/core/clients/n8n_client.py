@@ -98,7 +98,7 @@ class N8NClient:
     def get_workflows_list(
         self, limit: Optional[int] = None, tags: Optional[str] = None
     ) -> List[N8NWorkflow]:
-        params = {}
+        params: Dict[str, Any] = {}  # Explicitly type params as Dict[str, Any]
         if limit is not None:
             params["limit"] = limit
         if tags is not None:
@@ -259,61 +259,39 @@ class N8NClient:
                         return urljoin(self.config.url, f"webhook/{webhook_id}")
         return None
 
-    def get_workflow_webhooks(self, workflow_id: str) -> Optional[List[Dict[str, Any]]]:
+    def get_workflow_webhooks(
+        self, workflow_id: str
+    ) -> Optional[List[Dict[str, Any]]]:
         """Get all webhook URLs for a workflow directly from the N8N API."""
         try:
-            # Approach 1: Try to get the workflow execution data which might contain webhook info
-            # This endpoint is more likely to exist in different versions of n8n
-            workflow_details = self.get_workflow_details(workflow_id)
-            if not workflow_details:
+            # Get the full workflow JSON content
+            workflow_json_content = self._make_request("GET", f"workflows/{workflow_id}")
+
+            if not workflow_json_content:
+                logger.warning(f"No workflow JSON content found for ID: {workflow_id}")
                 return None
 
-            # Manual extraction of webhook information from workflow nodes
             webhook_nodes = []
-            if hasattr(workflow_details, "nodes") and workflow_details.nodes:
-                for node in workflow_details.nodes:
-                    # Check for webhook nodes
-                    if (
-                        getattr(node, "type", "").endswith("Trigger")
-                        or "webhook" in getattr(node, "type", "").lower()
-                    ):
-                        webhook_data = {
-                            "nodeId": getattr(node, "id", None),
-                            "name": getattr(node, "name", None),
-                            "webhookId": getattr(node, "webhookId", None),
-                            "type": getattr(node, "type", None),
-                        }
-                        webhook_nodes.append(webhook_data)
+            nodes_list = workflow_json_content.get("nodes", [])
+            for node in nodes_list:
+                # Check for webhook nodes
+                if (
+                    node.get("type", "").endswith("Trigger")
+                    or "webhook" in node.get("type", "").lower()
+                ):
+                    webhook_data = {
+                        "nodeId": node.get("id", None),
+                        "name": node.get("name", None),
+                        "webhookId": node.get("webhookId", None),
+                        "type": node.get("type", None),
+                    }
+                    webhook_nodes.append(webhook_data)
 
             if webhook_nodes:
                 logger.info(
                     f"Found {len(webhook_nodes)} webhook nodes in workflow {workflow_id}"
                 )
                 return webhook_nodes
-
-            # Approach 2: If we can't directly extract from nodes, try using the model_dump() method
-            if hasattr(workflow_details, "model_dump"):
-                workflow_data = workflow_details.model_dump()
-                if "nodes" in workflow_data:
-                    webhook_nodes = []
-                    for node in workflow_data["nodes"]:
-                        if (
-                            node.get("type", "").endswith("Trigger")
-                            or "webhook" in node.get("type", "").lower()
-                        ):
-                            webhook_data = {
-                                "nodeId": node.get("id"),
-                                "name": node.get("name"),
-                                "webhookId": node.get("webhookId"),
-                                "type": node.get("type"),
-                            }
-                            webhook_nodes.append(webhook_data)
-
-                    if webhook_nodes:
-                        logger.info(
-                            f"Found {len(webhook_nodes)} webhook nodes in workflow {workflow_id} using model_dump"
-                        )
-                        return webhook_nodes
 
             # If no webhooks found, return None
             logger.warning(f"No webhook nodes found in workflow {workflow_id}")
@@ -399,14 +377,14 @@ class N8NClient:
 
     def configure_and_deploy_chat_workflow(
         self,
-        course_id: int,  # For logging and potential future use in parametrization
+        course_id: int,
         course_name: str,
-        # For logging and potential future use in parametrization
         qdrant_collection_name: str,
-        # For potential future use in parametrization
-        ollama_config_params: Dict[
-            str, Any
-        ],  # For potential future use in parametrization
+        ai_config_params: Dict[str, Any],  # Unified AI config params
+        initial_messages: Optional[str] = None,
+        system_message: Optional[str] = None,
+        input_placeholder: Optional[str] = None,
+        chat_title: Optional[str] = None,
     ) -> Optional[str]:
         logger.info(
             f"Configuring and deploying N8N chat workflow for course_id: {course_id}"
@@ -537,18 +515,112 @@ class N8NClient:
             )
             return None
 
-        # TODO: Parameterize workflow_json_content here if needed (Option B)
-        # For now, we assume Option A: workflow is generic or configured via N8N UI/env vars.
-        # Example for Option B (modifying Qdrant collection name):
-        # for node in workflow_json_content.get("nodes", []):
-        #     if node.get("type") == "@n8n/n8n-nodes-langchain.vectorStoreQdrant":
-        #         if "parameters" in node and "qdrantCollection" in node["parameters"]:
-        #             node["parameters"]["qdrantCollection"]["value"] = qdrant_collection_name
-        #             node["parameters"]["qdrantCollection"]["cachedResultName"] = qdrant_collection_name
-        #             logger.info(f"Patched Qdrant collection in workflow JSON to: {qdrant_collection_name}")
-        #             break
+        # Modificar el contenido del JSON del workflow
+        # Asegurarse de que el JSON se modifique bien y no rompa la estructura.
+        # Los campos a modificar son:
+        # - initialMessages: dentro de nodes[0].parameters.initialMessages
+        # - inputPlaceholder: dentro de nodes[0].parameters.options.inputPlaceholder
+        # - title: dentro de nodes[0].parameters.options.title
+        # - systemMessage: dentro de nodes[1].parameters.options.systemMessage
 
+        # Cargar el contenido del workflow JSON
+        workflow_file = Path(self.config.workflow_json_path)
+        if not workflow_file.is_file():
+            logger.error(f"N8N workflow JSON file not found at: {workflow_file}")
+            return None
+
+        try:
+            with open(workflow_file, "r") as f:
+                workflow_json_content = json.load(f)
+        except Exception as file_error:
+            logger.error(
+                f"Failed to read or parse N8N workflow JSON from {workflow_file}: {file_error}"
+            )
+            return None
+
+        # Modificar el nombre del workflow
         workflow_json_content["name"] = f"Entrenai - {course_id} - {course_name}"
+
+        # Modificar los parámetros del nodo 'When chat message received' (índice 0)
+        chat_trigger_node = next(
+            (
+                node
+                for node in workflow_json_content.get("nodes", [])
+                if node.get("type") == "@n8n/n8n-nodes-langchain.chatTrigger"
+            ),
+            None,
+        )
+        if chat_trigger_node and "parameters" in chat_trigger_node:
+            if initial_messages is not None:
+                chat_trigger_node["parameters"]["initialMessages"] = initial_messages
+                logger.info(f"Updated initialMessages to: {initial_messages}")
+            if "options" in chat_trigger_node["parameters"]:
+                if input_placeholder is not None:
+                    chat_trigger_node["parameters"]["options"][
+                        "inputPlaceholder"
+                    ] = input_placeholder
+                    logger.info(f"Updated inputPlaceholder to: {input_placeholder}")
+                if chat_title is not None:
+                    chat_trigger_node["parameters"]["options"]["title"] = chat_title
+                    logger.info(f"Updated chat_title to: {chat_title}")
+        else:
+            logger.warning(
+                "Chat trigger node or its parameters not found in workflow JSON. Cannot update initial messages/options."
+            )
+
+        # Modificar los parámetros del nodo 'AI Agent' (índice 1)
+        ai_agent_node = next(
+            (
+                node
+                for node in workflow_json_content.get("nodes", [])
+                if node.get("type") == "@n8n/n8n-nodes-langchain.agent"
+            ),
+            None,
+        )
+        if ai_agent_node and "parameters" in ai_agent_node:
+            if "options" in ai_agent_node["parameters"]:
+                if system_message is not None:
+                    ai_agent_node["parameters"]["options"]["systemMessage"] = (
+                        ai_agent_node["parameters"]["options"].get("systemMessage", "")
+                        + "\n"
+                        + system_message
+                    )
+                    logger.info(f"Appended systemMessage with: {system_message}")
+        else:
+            logger.warning(
+                "AI Agent node or its parameters not found in workflow JSON. Cannot update system message."
+            )
+
+        # Actualizar la colección de Qdrant (ahora Pgvector) y los parámetros del modelo de IA
+        for node in workflow_json_content.get("nodes", []):
+            if node.get("type") == "@n8n/n8n-nodes-langchain.vectorStorePGVector":
+                if "parameters" in node and "tableName" in node["parameters"]:
+                    node["parameters"]["tableName"] = qdrant_collection_name
+                    logger.info(
+                        f"Patched Pgvector table name in workflow JSON to: {qdrant_collection_name}"
+                    )
+            elif node.get("type") == "@n8n/n8n-nodes-langchain.lmChatGoogleGemini":
+                if "parameters" in node and "modelName" in node["parameters"]:
+                    if ai_config_params.get("selected_provider") == "gemini":
+                        node["parameters"]["modelName"] = ai_config_params.get(
+                            "qa_model"
+                        )
+                        logger.info(
+                            f"Patched Gemini QA model in workflow JSON to: {ai_config_params.get('qa_model')}"
+                        )
+            elif node.get("type") == "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini":
+                if "parameters" in node and "modelName" in node["parameters"]:
+                    if ai_config_params.get("selected_provider") == "gemini":
+                        node["parameters"]["modelName"] = ai_config_params.get(
+                            "embedding_model"
+                        )
+                        logger.info(
+                            f"Patched Gemini Embedding model in workflow JSON to: {ai_config_params.get('embedding_model')}"
+                        )
+            # Add logic for Ollama if needed, similar to Gemini
+            # For Ollama, the 'lmChatOllama' and 'embeddingsOllama' nodes would need to be targeted.
+            # The current workflow JSON only has Gemini nodes.
+
         imported_workflow = self.import_workflow(workflow_json_content)
         if not imported_workflow or not imported_workflow.id:
             logger.error("Failed to import the N8N workflow from JSON.")
@@ -607,17 +679,25 @@ if __name__ == "__main__":
 
                 # Test configure_and_deploy_chat_workflow
                 print("\nAttempting to configure and deploy chat workflow from JSON...")
-                # Dummy OllamaConfig for the test call signature
-                dummy_ollama_cfg_params = {
-                    "host": ollama_config.host,
-                    "embedding_model": ollama_config.embedding_model,
-                    "qa_model": ollama_config.qa_model,
+                # Prepare AI config params for the test call
+                ai_cfg_params = {
+                    "selected_provider": "ollama",  # Or "gemini"
+                    "ollama": {
+                        "host": ollama_config.host,
+                        "embedding_model": ollama_config.embedding_model,
+                        "qa_model": ollama_config.qa_model,
+                    },
+                    # Add gemini config if needed for testing
                 }
                 chat_webhook_url = n8n_client.configure_and_deploy_chat_workflow(
                     course_id=999,
                     course_name="Test Course",
                     qdrant_collection_name="entrenai_course_999_test",
-                    ollama_config_params=dummy_ollama_cfg_params,
+                    ai_config_params=ai_cfg_params,
+                    initial_messages="Hola desde el test!",
+                    system_message="Soy un asistente de prueba.",
+                    input_placeholder="Escribe aquí...",
+                    chat_title="Asistente de Prueba",
                 )
                 if chat_webhook_url:
                     print(
