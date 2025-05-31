@@ -2,11 +2,12 @@ import json  # For loading workflow JSON
 from pathlib import Path  # For workflow_json_path
 from typing import List, Optional, Dict, Any
 from urllib.parse import urljoin
+import uuid # Importar uuid para generar IDs aleatorios
 
 import requests
 
 from src.entrenai.api.models import N8NWorkflow
-from src.entrenai.config import N8NConfig  # OllamaConfig for type hint
+from src.entrenai.config import N8NConfig
 from src.entrenai.config.logger import get_logger
 
 logger = get_logger(__name__)
@@ -254,9 +255,9 @@ class N8NClient:
                     # This needs to be confirmed with N8N documentation or testing.
                     # Assuming self.config.webhook_url is the base for webhooks (e.g. http://localhost:5678)
                     if self.config.webhook_url:
-                        return urljoin(self.config.webhook_url, f"webhook/{webhook_id}")
+                        return urljoin(self.config.webhook_url, f"webhook/{webhook_id}/chat")
                     else:  # Fallback to base N8N URL if specific webhook_url is not set
-                        return urljoin(self.config.url, f"webhook/{webhook_id}")
+                        return urljoin(self.config.url, f"webhook/{webhook_id}/chat")
         return None
 
     def get_workflow_webhooks(
@@ -320,7 +321,7 @@ class N8NClient:
                     # Construir la URL del webhook
                     if self.config.webhook_url:
                         webhook_url = urljoin(
-                            self.config.webhook_url, f"webhook/{webhook_id}"
+                            self.config.webhook_url, f"webhook/{webhook_id}/chat"
                         )
                         logger.info(f"Found webhook URL using node ID: {webhook_url}")
                         return webhook_url
@@ -329,7 +330,7 @@ class N8NClient:
                         base_url = self.config.url
                         if "/api/v1" in base_url:
                             base_url = base_url.split("/api/v1")[0]
-                        webhook_url = urljoin(base_url, f"webhook/{webhook_id}")
+                        webhook_url = urljoin(base_url, f"webhook/{webhook_id}/chat")
                         logger.info(f"Found webhook URL using node ID: {webhook_url}")
                         return webhook_url
 
@@ -349,7 +350,7 @@ class N8NClient:
                             if webhook_id:
                                 if self.config.webhook_url:
                                     webhook_url = urljoin(
-                                        self.config.webhook_url, f"webhook/{webhook_id}"
+                                        self.config.webhook_url, f"webhook/{webhook_id}/chat"
                                     )
                                     logger.info(
                                         f"Generated webhook URL from template: {webhook_url}"
@@ -361,7 +362,7 @@ class N8NClient:
                                     if "/api/v1" in base_url:
                                         base_url = base_url.split("/api/v1")[0]
                                     webhook_url = urljoin(
-                                        base_url, f"webhook/{webhook_id}"
+                                        base_url, f"webhook/{webhook_id}/chat"
                                     )
                                     logger.info(
                                         f"Generated webhook URL from template: {webhook_url}"
@@ -541,7 +542,7 @@ class N8NClient:
         # Modificar el nombre del workflow
         workflow_json_content["name"] = f"Entrenai - {course_id} - {course_name}"
 
-        # Modificar los parámetros del nodo 'When chat message received' (índice 0)
+        # Modificar los parámetros del nodo 'When chat message received'
         chat_trigger_node = next(
             (
                 node
@@ -550,22 +551,28 @@ class N8NClient:
             ),
             None,
         )
-        if chat_trigger_node and "parameters" in chat_trigger_node:
-            if initial_messages is not None:
-                chat_trigger_node["parameters"]["initialMessages"] = initial_messages
-                logger.info(f"Updated initialMessages to: {initial_messages}")
-            if "options" in chat_trigger_node["parameters"]:
-                if input_placeholder is not None:
-                    chat_trigger_node["parameters"]["options"][
-                        "inputPlaceholder"
-                    ] = input_placeholder
-                    logger.info(f"Updated inputPlaceholder to: {input_placeholder}")
-                if chat_title is not None:
-                    chat_trigger_node["parameters"]["options"]["title"] = chat_title
-                    logger.info(f"Updated chat_title to: {chat_title}")
+        if chat_trigger_node:
+            # Generar un UUID aleatorio y asignarlo al webhookId
+            generated_webhook_id = str(uuid.uuid4())
+            chat_trigger_node["webhookId"] = generated_webhook_id
+            logger.info(f"Generated and set webhookId: {generated_webhook_id}")
+
+            if "parameters" in chat_trigger_node:
+                if initial_messages is not None:
+                    chat_trigger_node["parameters"]["initialMessages"] = initial_messages
+                    logger.info(f"Updated initialMessages to: {initial_messages}")
+                if "options" in chat_trigger_node["parameters"]:
+                    if input_placeholder is not None:
+                        chat_trigger_node["parameters"]["options"][
+                            "inputPlaceholder"
+                        ] = input_placeholder
+                        logger.info(f"Updated inputPlaceholder to: {input_placeholder}")
+                    if chat_title is not None:
+                        chat_trigger_node["parameters"]["options"]["title"] = chat_title
+                        logger.info(f"Updated chat_title to: {chat_title}")
         else:
             logger.warning(
-                "Chat trigger node or its parameters not found in workflow JSON. Cannot update initial messages/options."
+                "Chat trigger node not found in workflow JSON. Cannot update initial messages/options or set webhookId."
             )
 
         # Modificar los parámetros del nodo 'AI Agent' (índice 1)

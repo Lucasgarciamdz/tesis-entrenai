@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import List, Optional, Dict, Any
+import json # Añadido para manipulación de JSON
 
 from celery.result import AsyncResult  # Import AsyncResult
 from fastapi import APIRouter, HTTPException, Query, Depends, Request
@@ -427,6 +428,46 @@ async def setup_ia_for_course(
         logger.info(
             f"Configurando workflow de chat N8N para curso '{course_name_str}' (ID: {course_id})"
         )
+        logger.info(f"El tableName para el nodo PGVector en N8N se establecerá a: '{pgvector_table_name}'")
+
+        # --- INICIO DE MODIFICACIÓN DEL WORKFLOW JSON (en memoria) ---
+        # Cargar la plantilla del workflow para asegurar que tableName se actualice.
+        # CWD es /Users/lucas/facultad/tesis_entrenai
+        workflow_template_path = Path("src/entrenai/n8n_workflow.json")
+        
+        if not workflow_template_path.exists():
+            logger.warning(
+                f"No se encontró la plantilla del workflow de N8N en: {workflow_template_path}. "
+                "N8NClient deberá manejar la configuración del tableName usando qdrant_collection_name."
+            )
+        else:
+            try:
+                with open(workflow_template_path, 'r', encoding='utf-8') as f:
+                    workflow_data = json.load(f)
+
+                pg_vector_node_found_and_updated = False
+                for node in workflow_data.get("nodes", []):
+                    if node.get("type") == "@n8n/n8n-nodes-langchain.vectorStorePGVector" and \
+                       node.get("parameters", {}).get("mode") == "retrieve-as-tool":
+                        original_table_name = node["parameters"].get("tableName")
+                        node["parameters"]["tableName"] = pgvector_table_name # Usar el nombre de tabla del curso
+                        pg_vector_node_found_and_updated = True
+                        logger.info(
+                            f"Nodo PGVector ('retrieve-as-tool') encontrado en la plantilla n8n_workflow.json. "
+                            f"Actualizando 'tableName' de '{original_table_name}' a '{pgvector_table_name}' en la copia en memoria."
+                        )
+                        break 
+                
+                if not pg_vector_node_found_and_updated:
+                    logger.warning(
+                        "No se encontró el nodo Postgres PGVector Store ('retrieve-as-tool') en la plantilla "
+                        "n8n_workflow.json para actualizar 'tableName'. N8NClient deberá manejar esta configuración."
+                    )
+            except json.JSONDecodeError as e:
+                logger.error(f"Error al decodificar la plantilla JSON del workflow de N8N desde {workflow_template_path}: {e}")
+            except Exception as e:
+                logger.error(f"Error inesperado al procesar la plantilla del workflow de N8N desde {workflow_template_path}: {e}")
+        # --- FIN DE MODIFICACIÓN DEL WORKFLOW JSON ---
 
         # Preparar parámetros de IA según el proveedor seleccionado
         if base_config.ai_provider == "gemini":
@@ -498,7 +539,7 @@ async def setup_ia_for_course(
         )
 
         n8n_chat_url_for_moodle = (
-            str(response_details.n8n_chat_url) if response_details.n8n_chat_url else "#"
+            str(response_details.n8n_chat_url).rstrip('/') if response_details.n8n_chat_url else "#"
         )
 
         # Mensaje para el profesor sobre la edición
@@ -936,7 +977,7 @@ async def get_n8n_workflow_config(
             )
 
         workflow_details = n8n.get_workflow_details(target_workflow.id)
-        
+
         config_data: Dict[str, Optional[str]] = {
             "initialMessages": None,
             "inputPlaceholder": None,
@@ -944,22 +985,26 @@ async def get_n8n_workflow_config(
             "systemMessage": None,
         }
 
-        if workflow_details: # Añadir esta comprobación explícita
+        if workflow_details:
+            # Para satisfacer al linter, reasignamos a una variable que se sabe que no es None
+            # Esto es una técnica común para ayudar a los linters con el flujo de control de Optional
+            actual_workflow_details = workflow_details
+
             # Extraer los parámetros del nodo 'When chat message received'
             chat_trigger_node = next(
                 (
                     node
-                    for node in workflow_details.nodes
+                    for node in actual_workflow_details.nodes
                     if node.type == "@n8n/n8n-nodes-langchain.chatTrigger"
                 ),
                 None,
             )
-            
+
             # Extraer los parámetros del nodo 'AI Agent'
             ai_agent_node = next(
                 (
                     node
-                    for node in workflow_details.nodes
+                    for node in actual_workflow_details.nodes
                     if node.type == "@n8n/n8n-nodes-langchain.agent"
                 ),
                 None,
@@ -967,11 +1012,11 @@ async def get_n8n_workflow_config(
 
             if chat_trigger_node and chat_trigger_node.parameters:
                 config_data["initialMessages"] = chat_trigger_node.parameters.initialMessages
-                if chat_trigger_node.parameters.options: # Check if options dict exists
+                if chat_trigger_node.parameters.options:
                     config_data["inputPlaceholder"] = chat_trigger_node.parameters.options.get("inputPlaceholder")
                     config_data["chatTitle"] = chat_trigger_node.parameters.options.get("title")
 
-            if ai_agent_node and ai_agent_node.parameters and ai_agent_node.parameters.options: # Check if options dict exists
+            if ai_agent_node and ai_agent_node.parameters and ai_agent_node.parameters.options:
                 config_data["systemMessage"] = ai_agent_node.parameters.options.get("systemMessage")
         else:
             logger.error(f"No se pudieron obtener los detalles del workflow n8n ID: {target_workflow.id}")

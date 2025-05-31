@@ -20,12 +20,13 @@
         700
       ],
       "id": "42b439fa-6896-4eec-a5cc-e706d8df0590",
-      "name": "When chat message received"
+      "name": "When chat message received",
+      "webhookId": ""
     },
     {
       "parameters": {
         "options": {
-          "systemMessage": "Eres un asistente académico de la Universidad de Mendoza. Responde de manera clara, formal y amable en español. Tu objetivo es apoyar a estudiantes universitarios con información sobre cursos, materiales de estudio y procedimientos académicos. Si no sabes una respuesta, ofrece contactar al profesor o al departamento correspondiente."
+          "systemMessage": "ALWAYS MAKE A TOOL CALL TO THE POSTGRES VECTOR STORE. THIS WILL GIVE YOU MORE CONTEXT AND YOU SHOULD ALWAYS TRY TO RESPOND BASED ON THAT CONTEXT. IF NONE CONTEXT IS RETRIEVED OR IS NOT RELEVANT, TRY TO ANSWER ANYWAY WITH A GENERAL KNOWLEDGE. Eres un asistente académico de la Universidad de Mendoza. Responde de manera clara, formal y amable en español. Tu objetivo es apoyar a estudiantes universitarios con información sobre cursos, materiales de estudio y procedimientos académicos. Si no sabes una respuesta, ofrece contactar al profesor o al departamento correspondiente."
         }
       },
       "type": "@n8n/n8n-nodes-langchain.agent",
@@ -187,3 +188,4 @@
   "id": "Ou76aiFIgTf6yN4N",
   "tags": []
 }
+
