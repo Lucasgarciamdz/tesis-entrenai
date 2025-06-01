@@ -1,0 +1,19 @@
+# Dockerfile minimalista para Celery - Solo manejo de colas HTTP
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Solo instalar dependencias mínimas para Celery y requests HTTP
+COPY requirements.celery.txt .
+RUN pip install --no-cache-dir -r requirements.celery.txt
+
+# Copiar solo el código mínimo necesario para Celery
+COPY src/entrenai/__init__.py src/entrenai/
+COPY src/entrenai/celery_app_minimal.py src/entrenai/
+COPY src/entrenai/tasks_minimal.py src/entrenai/
+
+# Configurar variables de entorno
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+CMD ["celery", "-A", "src.entrenai.celery_app_minimal.app", "worker", "-l", "INFO", "-P", "eventlet"]

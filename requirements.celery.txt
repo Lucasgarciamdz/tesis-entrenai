@@ -1,0 +1,4 @@
+# Dependencias mínimas para Celery Worker HTTP
+celery[redis]==5.3.4
+eventlet==0.33.3
+requests==2.31.0

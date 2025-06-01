@@ -162,33 +162,52 @@ services:
       timeout: 5s
       retries: 5
 
+  # --- FastAPI Application ---
+  entrenai_api:
+    build: 
+      context: .
+      dockerfile: Dockerfile  # El Dockerfile original para la app completa
+    container_name: entrenai_api
+    restart: unless-stopped
+    ports:
+      - "${FASTAPI_HOST_PORT:-8000}:8000"
+    volumes:
+      - ./src:/app/src
+      - entrenai_data:/app/data
+    env_file:
+      - .env
+    environment:
+      APP_ENV: docker
+      DATA_DIR: /app/data
+      PYTHONUNBUFFERED: 1
+    depends_on:
+      pgvector_db:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    networks:
+      - entrenai_net
+    command: sh -c "uvicorn src.entrenai.api.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  # --- Celery Worker Minimalista ---
   celery_worker:
-    build: . # Assumes Dockerfile is in the root and copies src to /app/src
+    build: 
+      context: .
+      dockerfile: Dockerfile.celery  # El nuevo Dockerfile minimalista
     container_name: entrenai_celery_worker
     restart: unless-stopped
-    command: sh -c "celery -A src.entrenai.celery_app.app worker -l INFO -P eventlet"
-    volumes:
-      - ./src:/app/src # Mount local src to /app/src in container
-      - entrenai_data:/app/data # Use a named volume for data to avoid permission issues
     env_file:
-      - .env # Load environment variables from .env file
+      - .env
     environment:
-      # Override or set specific variables if needed, .env takes precedence for shared ones
-      APP_ENV: docker # Indica al config.py que use la configuración de Docker para Pgvector
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
-      DATA_DIR: /app/data # Explicitly set the data directory path
-
-      # Ensure PYTHONPATH is set if your Dockerfile doesn't handle it for 'src' imports
-      # PYTHONUNBUFFERED: 1 # Good for seeing logs immediately
+      FASTAPI_BASE_URL: http://entrenai_api:8000  # URL interna para contactar FastAPI
+      PYTHONUNBUFFERED: 1
     depends_on:
       redis:
         condition: service_healthy
-      pgvector_db: # If tasks might interact with pgvector
-        condition: service_healthy
-      # Add other dependencies if tasks directly require them at startup
-      # moodle_db:
-      #   condition: service_healthy
+      entrenai_api:
+        condition: service_started
     networks:
       - entrenai_net
 

@@ -1,6 +1,13 @@
 
 FROM python:3.10-slim-bookworm AS builder
 
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir uv
 
 WORKDIR /app
@@ -9,7 +16,9 @@ RUN uv venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 ENV UV_COMPILE_BYTECODE=1
-
+ENV MAKEFLAGS="-j$(nproc)"
+ENV CFLAGS="-O2"
+ENV CXXFLAGS="-O2"
 
 COPY requirements.txt .
 

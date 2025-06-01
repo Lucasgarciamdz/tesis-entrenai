@@ -36,7 +36,7 @@ from src.entrenai.core.ai.ollama_wrapper import (
 from src.entrenai.core.clients.moodle_client import MoodleClient, MoodleAPIError
 from src.entrenai.core.clients.n8n_client import N8NClient
 from src.entrenai.core.db import PgvectorWrapper, PgvectorWrapperError  # Updated import
-from src.entrenai.core.tasks import process_moodle_file_task  # Import Celery task
+from src.entrenai.tasks_minimal import process_moodle_file_http  # Import minimal Celery task
 
 logger = get_logger(__name__)
 
@@ -808,7 +808,7 @@ async def refresh_course_files(
 
                 # Dispatch Celery task
                 try:
-                    task_result = process_moodle_file_task.delay(
+                    task_result = process_moodle_file_http.delay(
                         course_id=course_id,
                         course_name_for_pgvector=course_name_for_pgvector,
                         moodle_file_info={
