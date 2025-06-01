@@ -220,6 +220,7 @@ async def delete_indexed_file(
     """
     Elimina un archivo específico y sus datos asociados del sistema de IA
     (chunks en Pgvector y registro en la tabla de seguimiento).
+    El document_id para los chunks se deriva de course_id y file_identifier.
     """
     logger.info(
         f"Solicitud para eliminar archivo '{file_identifier}' del curso ID: {course_id}"
@@ -237,19 +238,24 @@ async def delete_indexed_file(
 
         # 2. Eliminar chunks del archivo de Pgvector
         # PgvectorWrapper.delete_file_chunks returns True if successful or if document_id not found (idempotent)
+        # Construir el document_id para los chunks como se hace en tasks.py
+        document_id_for_chunks = f"{course_id}_{file_identifier}"
+        logger.info(
+            f"Intentando eliminar chunks con document_id derivado: '{document_id_for_chunks}'"
+        )
         chunks_deleted_success = pgvector_db.delete_file_chunks(
-            course_name=course_name_for_pgvector, document_id=file_identifier
+            course_name=course_name_for_pgvector, document_id=document_id_for_chunks
         )
         if not chunks_deleted_success:
             logger.error(
-                f"Falló la eliminación de chunks para el archivo '{file_identifier}' del curso '{course_name_for_pgvector}' (ID: {course_id})."
+                f"Falló la eliminación de chunks para el document_id derivado '{document_id_for_chunks}' (archivo '{file_identifier}') del curso '{course_name_for_pgvector}' (ID: {course_id})."
             )
             raise HTTPException(
                 status_code=500,
-                detail=f"Error al eliminar los datos del archivo '{file_identifier}' del almacén de vectores. La tabla de seguimiento no fue modificada.",
+                detail=f"Error al eliminar los datos del archivo '{file_identifier}' (document_id derivado: {document_id_for_chunks}) del almacén de vectores. La tabla de seguimiento no fue modificada.",
             )
         logger.info(
-            f"Chunks para el archivo '{file_identifier}' eliminados (o no encontrados) del curso '{course_name_for_pgvector}' (ID: {course_id})."
+            f"Chunks para el document_id derivado '{document_id_for_chunks}' (archivo '{file_identifier}') eliminados (o no encontrados) del curso '{course_name_for_pgvector}' (ID: {course_id})."
         )
 
         # 3. Eliminar el archivo de la tabla de seguimiento (file_tracker)
