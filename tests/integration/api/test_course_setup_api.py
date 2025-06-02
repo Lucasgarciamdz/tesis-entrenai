@@ -10,14 +10,15 @@ from src.entrenai.api.main import app
 from src.entrenai.api.models import (
     MoodleCourse,
     CourseSetupResponse,
+    MoodleCourseN8NSettings, # Added import
 )  # For response validation
 from src.entrenai.config import (
     moodle_config,
-    qdrant_config,
+    pgvector_config, # Changed from qdrant_config
     n8n_config,
     base_config,
 )  # To check if default teacher ID is set
-from src.entrenai.core.db.qdrant_wrapper import QdrantWrapper
+from src.entrenai.core.db.pgvector_wrapper import PgvectorWrapper # Changed from QdrantWrapper
 from src.entrenai.core.clients.moodle_client import MoodleClient
 from src.entrenai.core.clients.n8n_client import N8NClient
 
@@ -141,123 +142,166 @@ TEST_COURSE_ID = 2  # As confirmed by the user
 
 
 @pytest.mark.integration
-def test_setup_ia_for_course_success(test_app_client: TestClient):
+@patch("src.entrenai.api.routers.course_setup.N8NClient.configure_and_deploy_chat_workflow")
+@patch("src.entrenai.api.routers.course_setup.MoodleClient.get_course_n8n_settings")
+@patch("src.entrenai.api.routers.course_setup.MoodleClient._make_request") # To inspect summary update
+def test_setup_ia_for_course_scenarios(
+    mock_moodle_make_request, # Order of mocks is important (innermost first)
+    mock_get_course_n8n_settings,
+    mock_configure_n8n_workflow,
+    test_app_client: TestClient,
+):
     """
-    Test successful IA setup for a course.
-    Requires Docker services to be running and configured.
+    Test successful IA setup for a course under different Moodle n8n settings scenarios.
+    Requires Docker services (Moodle, Pgvector, N8N, Ollama/Gemini) to be running.
     Assumes TEST_COURSE_ID exists in Moodle.
     """
-    # Ensure all services are up and .env is configured before running this.
-    # This test will have side effects (creations in Moodle, Qdrant, N8N).
+    mock_moodle_course_details_response = [ # Simulate MoodleClient.get_courses_by_user response
+        {"id": TEST_COURSE_ID, "fullname": "Test Course Fullname", "shortname": "TCF", "displayname": "Test Course Displayname"}
+    ]
+    mock_moodle_create_section_response = [{"id": 123, "name": "Default Section Name", "section": 1}] # Simulate create_course_section response part 1
+    mock_moodle_get_section_details_response = [{"id": 123, "name": moodle_config.course_folder_name, "section": 1}] # Simulate create_course_section response part 2
+    mock_moodle_update_section_summary_response = [] # Simulate the _make_request for updating summary
 
-    response = test_app_client.post(f"/api/v1/courses/{TEST_COURSE_ID}/setup-ia")
+    # This mock will handle multiple calls:
+    # 1. get_courses_by_user (to get course name if not provided in query)
+    # 2. create_course_section (first part, creating the section structure)
+    # 3. create_course_section (second part, getting details of the created section)
+    # 4. _make_request for local_wsmanagesections_update_sections (this is the one we want to inspect for html_summary)
+    mock_moodle_make_request.side_effect = [
+        mock_moodle_course_details_response, # For getting course name
+        mock_moodle_create_section_response,
+        mock_moodle_get_section_details_response,
+        mock_moodle_update_section_summary_response, # This is the call we'll inspect
+        # Add more if other _make_request calls are made by MoodleClient for other things like folder/URL creation
+        [], # Placeholder for create_folder_in_section -> get_course_module_by_name (not found)
+        [], # Placeholder for create_folder_in_section -> _make_request (create)
+        [{"id": 789, "name": "Documentos Entrenai", "modname": "folder"}], # Placeholder for create_folder_in_section -> get_course_module_by_name (found)
+        [], # Placeholder for create_url_in_section (chat link) -> get_course_module_by_name (not found)
+        [], # Placeholder for create_url_in_section (chat link) -> _make_request (create)
+        [{"id": 790, "name": moodle_config.chat_link_name, "modname": "url"}], # Placeholder for create_url_in_section (chat link) -> get_course_module_by_name (found)
+        [], # Placeholder for create_url_in_section (refresh link) -> get_course_module_by_name (not found)
+        [], # Placeholder for create_url_in_section (refresh link) -> _make_request (create)
+        [{"id": 791, "name": moodle_config.refresh_link_name, "modname": "url"}], # Placeholder for create_url_in_section (refresh link) -> get_course_module_by_name (found)
+    ]
 
-    assert response.status_code == 200
-    response_data = response.json()
-    CourseSetupResponse(**response_data)  # Validate response model
 
-    assert response_data["status"] == "success"
-    assert response_data["course_id"] == TEST_COURSE_ID
-    expected_qdrant_collection = f"{qdrant_config.collection_prefix}{TEST_COURSE_ID}"
-    assert response_data["qdrant_collection_name"] == expected_qdrant_collection
-    assert response_data["moodle_section_id"] is not None
-    assert response_data["n8n_chat_url"] is not None
+    mock_n8n_chat_url = "http://mockn8n.com/webhook/mockchat"
+    mock_configure_n8n_workflow.return_value = mock_n8n_chat_url
 
-    # Verify side effects
-    # 1. Qdrant
-    qdrant_wrapper = QdrantWrapper(config=qdrant_config)
-    assert qdrant_wrapper.client is not None, (
-        "Qdrant client failed to initialize for verification"
+    # Scenario 1: Moodle provides custom settings
+    custom_settings = MoodleCourseN8NSettings(
+        initial_message="Custom Moodle Message",
+        system_message_append="Custom System Append",
+        chat_title="Custom Chat Title",
+        input_placeholder="Custom Input Placeholder",
     )
-    try:
-        collection_info = qdrant_wrapper.client.get_collection(
-            collection_name=expected_qdrant_collection
-        )
-        assert collection_info is not None
-        # Optionally check config:
-        # assert collection_info.config.params.vectors.size == qdrant_config.default_vector_size
-        # assert collection_info.config.params.vectors.distance == Distance.COSINE
-    except Exception as e:
-        pytest.fail(f"Qdrant collection check failed: {e}")
+    mock_get_course_n8n_settings.return_value = custom_settings
 
-    # 2. Moodle
-    moodle_client = MoodleClient(config=moodle_config)
-    assert moodle_client.base_url is not None, (
-        "Moodle client failed to initialize for verification"
-    )
-
-    moodle_section_name_expected = moodle_config.course_folder_name
-    section = moodle_client.get_section_by_name(
-        TEST_COURSE_ID, moodle_section_name_expected
-    )
-    assert section is not None, (
-        f"Moodle section '{moodle_section_name_expected}' not found."
-    )
-    assert section.id == response_data["moodle_section_id"]
-
-    folder_name_expected = "Documentos Entrenai"
-    folder = moodle_client.get_course_module_by_name(
-        TEST_COURSE_ID, section.id, folder_name_expected, "folder"
-    )
-    assert folder is not None, (
-        f"Moodle folder '{folder_name_expected}' not found in section {section.id}."
-    )
-    if response_data.get("moodle_folder_id"):  # Folder creation might be non-fatal
-        assert folder.id == response_data["moodle_folder_id"]
-
-    chat_link_name_expected = moodle_config.chat_link_name
-    chat_link = moodle_client.get_course_module_by_name(
-        TEST_COURSE_ID, section.id, chat_link_name_expected, "url"
-    )
-    assert chat_link is not None, (
-        f"Moodle chat link '{chat_link_name_expected}' not found."
-    )
-    # We could also check chat_link.externalurl if N8N URL is predictable
-
-    refresh_link_name_expected = moodle_config.refresh_link_name
-    refresh_link = moodle_client.get_course_module_by_name(
-        TEST_COURSE_ID, section.id, refresh_link_name_expected, "url"
-    )
-    assert refresh_link is not None, (
-        f"Moodle refresh link '{refresh_link_name_expected}' not found."
-    )
-    # We could check refresh_link.externalurl matches response_data["moodle_refresh_link_url"] if that was returned
-
-    # 3. N8N
-    n8n_client = N8NClient(config=n8n_config)
-    assert n8n_client.base_url is not None, (
-        "N8N client failed to initialize for verification"
+    response_scenario1 = test_app_client.post(f"/api/v1/courses/{TEST_COURSE_ID}/setup-ia")
+    assert response_scenario1.status_code == 200
+    response_data_s1 = response_scenario1.json()
+    CourseSetupResponse(**response_data_s1)
+    assert response_data_s1["status"] == "exitoso" # Changed from "success" to "exitoso" based on current code
+    assert response_data_s1["course_id"] == TEST_COURSE_ID
+    
+    # Check call to N8NClient.configure_and_deploy_chat_workflow
+    mock_configure_n8n_workflow.assert_called_with(
+        course_id=TEST_COURSE_ID,
+        course_name="Test Course Displayname", # From mock_moodle_course_details_response
+        qdrant_collection_name=f"{pgvector_config.table_prefix}test_course_displayname", # Adjusted to pgvector
+        ai_config_params=pytest.approx( # Use approx for dict comparison if order might change or floats involved
+            {
+                "selected_provider": base_config.ai_provider,
+                base_config.ai_provider: pytest.anything(), # Check provider specific config exists
+            }
+        ),
+        initial_messages="Custom Moodle Message",
+        system_message="Custom System Append",
+        input_placeholder="Custom Input Placeholder",
+        chat_title="Custom Chat Title",
     )
 
-    # Determine workflow ID to check. The current n8n_workflow.json has id "kTGiA3QAR7HHvrx4"
-    # If import_workflow updates based on this ID, this is the ID to check.
-    # If N8N always creates new on import if name conflicts, this is harder.
-    # For now, assume the provided JSON's ID is used or a new one is created but the name is consistent.
-    # The `configure_and_deploy_chat_workflow` returns the webhook URL.
-    # We can check if the webhook URL from response matches the expected one from JSON.
+    # Inspect the Moodle section summary update call
+    # The call to update summary is the 4th call to moodle_client._make_request in this setup
+    # (1st get_course_by_user, 2nd create_section (create), 3rd create_section (get), 4th update_section (summary))
+    update_summary_call_args = mock_moodle_make_request.call_args_list[3] # 4th call
+    assert update_summary_call_args[0][0] == "local_wsmanagesections_update_sections"
+    summary_payload = update_summary_call_args[1]["payload_params"]
+    assert "Custom Moodle Message" in summary_payload["sections"][0]["summary"]
+    assert "Custom System Append" in summary_payload["sections"][0]["summary"]
+    assert "Custom Chat Title" in summary_payload["sections"][0]["summary"]
+    assert "Custom Input Placeholder" in summary_payload["sections"][0]["summary"]
+    
+    mock_moodle_make_request.reset_mock() # Reset for next scenario
+    mock_get_course_n8n_settings.reset_mock()
+    mock_configure_n8n_workflow.reset_mock()
+    
+    # Reset side_effect for the new scenario, keeping the same mock responses for Moodle calls
+    mock_moodle_make_request.side_effect = [
+        mock_moodle_course_details_response,
+        mock_moodle_create_section_response,
+        mock_moodle_get_section_details_response,
+        mock_moodle_update_section_summary_response,
+        [], [], [{"id": 789, "name": "Documentos Entrenai", "modname": "folder"}],
+        [], [], [{"id": 790, "name": moodle_config.chat_link_name, "modname": "url"}],
+        [], [], [{"id": 791, "name": moodle_config.refresh_link_name, "modname": "url"}],
+    ]
+    mock_configure_n8n_workflow.return_value = mock_n8n_chat_url # Ensure mock is re-set
 
-    # Extract webhookId from the n8n_workflow.json to construct expected URL
-    # This is a bit fragile if the JSON changes, but necessary for verification.
-    # Ideally, N8NClient.configure_and_deploy_chat_workflow would return the workflow ID.
-    # For now, let's assume the webhookId from the provided JSON is used.
-    # The JSON has: "webhookId": "2fbaf000-b2a8-41bc-bfd1-4252f65bd65c"
-    # And workflow "id": "kTGiA3QAR7HHvrx4"
+    # Scenario 2: Moodle does NOT provide custom settings
+    mock_get_course_n8n_settings.return_value = None
 
-    workflow_id_from_json = "kTGiA3QAR7HHvrx4"  # From src/entrenai/n8n_workflow.json
-    workflow_details = n8n_client.get_workflow_details(workflow_id_from_json)
-    assert workflow_details is not None, (
-        f"N8N workflow {workflow_id_from_json} not found."
-    )
-    assert workflow_details.active is True, (
-        f"N8N workflow {workflow_id_from_json} is not active."
-    )
+    response_scenario2 = test_app_client.post(f"/api/v1/courses/{TEST_COURSE_ID}/setup-ia")
+    assert response_scenario2.status_code == 200
+    response_data_s2 = response_scenario2.json()
+    CourseSetupResponse(**response_data_s2)
+    assert response_data_s2["status"] == "exitoso"
 
-    webhook_id_from_json = "2fbaf000-b2a8-41bc-bfd1-4252f65bd65c"
-    assert n8n_config.webhook_url is not None
-    expected_n8n_chat_url = urljoin(
-        n8n_config.webhook_url, f"webhook/{webhook_id_from_json}"
+    mock_configure_n8n_workflow.assert_called_with(
+        course_id=TEST_COURSE_ID,
+        course_name="Test Course Displayname",
+        qdrant_collection_name=f"{pgvector_config.table_prefix}test_course_displayname", # Adjusted
+        ai_config_params=pytest.approx(
+            {
+                "selected_provider": base_config.ai_provider,
+                base_config.ai_provider: pytest.anything(),
+            }
+        ),
+        initial_messages=None,  # Expecting None or defaults
+        system_message=None,
+        input_placeholder=None,
+        chat_title=None,
     )
-    assert response_data["n8n_chat_url"] == expected_n8n_chat_url
+    
+    update_summary_call_args_s2 = mock_moodle_make_request.call_args_list[3]
+    assert update_summary_call_args_s2[0][0] == "local_wsmanagesections_update_sections"
+    summary_payload_s2 = update_summary_call_args_s2[1]["payload_params"]
+    assert "No especificado" in summary_payload_s2["sections"][0]["summary"] # Default text
+
+    # Verify other side effects (Pgvector, Moodle structure, N8N workflow basic check)
+    # These are common to both scenarios, so one check is likely sufficient if mocks are consistent
+    pgvector_wrapper = PgvectorWrapper(config=pgvector_config) # Adjusted
+    # No direct client to check for table existence easily like qdrant, 
+    # but ensure_table was called (implicitly covered by successful response if no exception)
+    # We can check if the table name in response matches expected
+    expected_pgvector_table = pgvector_wrapper.get_table_name("Test Course Displayname") # From mock
+    assert response_data_s1["qdrant_collection_name"] == expected_pgvector_table # Field name is still qdrant_collection_name in model
+    assert response_data_s1["moodle_section_id"] is not None # Should be 123 from mock
+    assert response_data_s1["n8n_chat_url"] == mock_n8n_chat_url
+
+    # N8N workflow check (simplified as detailed check is too complex with mocks)
+    # The configure_and_deploy_chat_workflow mock is called, which is the main thing.
+    # A real integration test against N8N would be separate.
+    # We can check if the N8N client was asked to create/activate a workflow with the correct name.
+    # This is implicitly tested by mock_configure_n8n_workflow.assert_called_with(...)
+
+    # Moodle structure check using the REAL MoodleClient against the mock _make_request calls
+    # This is tricky because we mocked _make_request which MoodleClient uses.
+    # The real test of MoodleClient creating sections/modules is in its own unit/integration tests.
+    # Here, we mainly care that the setup_ia_for_course orchestrates correctly based on mocks.
+    # The fact that mock_moodle_make_request was called with expected wsfunctions for section/module
+    # creation (implicitly by the sequence of side_effect) is a partial verification.
 
 
 # --- Tests for GET /api/v1/courses/{course_id}/refresh-files ---

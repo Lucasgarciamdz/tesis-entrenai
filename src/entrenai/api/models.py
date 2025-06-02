@@ -30,6 +30,13 @@ class MoodleModule(BaseModel):
     # Add other relevant fields
 
 
+class MoodleCourseN8NSettings(BaseModel):
+    initial_message: Optional[str] = None
+    system_message_append: Optional[str] = None
+    chat_title: Optional[str] = None
+    input_placeholder: Optional[str] = None
+
+
 class MoodleFile(BaseModel):
     filename: str
     filepath: str

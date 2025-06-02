@@ -6,6 +6,7 @@ import requests
 
 from src.entrenai.api.models import (
     MoodleCourse,
+    MoodleCourseN8NSettings,
     MoodleSection,
     MoodleModule,
     MoodleFile,
@@ -655,3 +656,84 @@ class MoodleClient:
         except Exception as e:
             logger.exception(f"Error inesperado en get_all_courses: {e}")
             raise MoodleAPIError(f"Error inesperado obteniendo todos los cursos: {e}")
+
+    def get_course_n8n_settings(
+        self, course_id: int
+    ) -> Optional[MoodleCourseN8NSettings]:
+        """
+        Recupera la configuración específica de N8N para un curso de Moodle.
+
+        Args:
+            course_id: El ID del curso de Moodle.
+
+        Returns:
+            Un objeto MoodleCourseN8NSettings si la configuración existe y es válida,
+            None en caso contrario.
+        """
+        logger.info(
+            f"Intentando obtener la configuración N8N para el curso ID: {course_id}"
+        )
+        if course_id <= 0:
+            logger.warning("ID de curso inválido proporcionado.")
+            return None
+
+        try:
+            settings_data = self._make_request(
+                wsfunction="local_entrenai_get_course_n8n_settings",
+                payload_params={"courseid": course_id},
+                http_method="GET",
+            )
+
+            if settings_data and isinstance(settings_data, dict):
+                # Asumimos que Moodle podría devolver una lista con un solo diccionario o directamente el diccionario.
+                # O que los datos están bajo una clave específica.
+                # Esto podría necesitar ajuste basado en la respuesta real de Moodle.
+                if isinstance(settings_data, list) and settings_data:
+                    data_to_parse = settings_data[0]
+                elif (
+                    "settings" in settings_data
+                    and isinstance(settings_data["settings"], dict)
+                ):
+                    data_to_parse = settings_data["settings"]
+                else:
+                    data_to_parse = settings_data
+
+                # Verificar si el diccionario está vacío, lo que indica que no hay configuraciones.
+                if not data_to_parse:
+                    logger.info(
+                        f"No se encontró configuración N8N para el curso {course_id} (respuesta vacía)."
+                    )
+                    return None
+
+                parsed_settings = MoodleCourseN8NSettings(**data_to_parse)
+                logger.info(
+                    f"Configuración N8N obtenida y parseada exitosamente para el curso {course_id}."
+                )
+                return parsed_settings
+            elif not settings_data:
+                logger.info(
+                    f"No se encontró configuración N8N para el curso {course_id} (respuesta vacía o nula)."
+                )
+                return None
+            else:
+                logger.warning(
+                    f"Respuesta inesperada al obtener la configuración N8N para el curso {course_id}: {settings_data}"
+                )
+                return None
+
+        except MoodleAPIError as e:
+            # Errores específicos de la API de Moodle (ej: wsfunction no existe, curso inválido)
+            logger.error(
+                f"Error de API de Moodle al obtener la configuración N8N para el curso {course_id}: {e}"
+            )
+            return None
+        except ValueError as ve:  # Errores de parsing de Pydantic (ej: datos no coinciden con el modelo)
+            logger.error(
+                f"Error de validación/parsing al procesar la configuración N8N para el curso {course_id}: {ve}. Datos recibidos: {settings_data}"
+            )
+            return None
+        except Exception as e:
+            logger.exception(
+                f"Error inesperado al obtener la configuración N8N para el curso {course_id}: {e}"
+            )
+            return None
