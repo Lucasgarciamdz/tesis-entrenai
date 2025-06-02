@@ -2,7 +2,7 @@
 FROM python:3.10-slim-bookworm AS builder
 
 # Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends     build-essential     libpq-dev     python3-dev     tesseract-ocr     tesseract-ocr-spa     tesseract-ocr-eng     poppler-utils     && rm -rf /var/lib/apt/lists/*
     build-essential \
     libpq-dev \
     python3-dev \

@@ -217,30 +217,25 @@ class PptxFileProcessor(BaseFileProcessor):
             full_text = []
             for slide in prs.slides:
                 for shape in slide.shapes:
-                    if hasattr(shape, "text_frame") and shape.text_frame:
-                        # Pylance might still complain here as hasattr doesn't change type
-                        text_frame_obj = getattr(
-                            shape, "text_frame", None
-                        )  # Use getattr for safer access
-                        if text_frame_obj:
-                            for paragraph in text_frame_obj.paragraphs:  # type: ignore[attr-defined]
-                                for run in paragraph.runs:
-                                    full_text.append(run.text)
-                    elif hasattr(shape, "text"):
-                        shape_text = getattr(shape, "text", None)  # Use getattr
-                        if shape_text:
-                            full_text.append(shape_text)  # type: ignore[arg-type]
-                if slide.has_notes_slide and slide.notes_slide.notes_text_frame:
-                    notes_text_frame_obj = getattr(
-                        slide.notes_slide, "notes_text_frame", None
-                    )
-                    if notes_text_frame_obj:
-                        full_text.append(notes_text_frame_obj.text)  # type: ignore[attr-defined]
+                    if shape.has_text_frame:
+                        text_frame = shape.text_frame
+                        for paragraph in text_frame.paragraphs:
+                            for run in paragraph.runs:
+                                full_text.append(run.text)
+                    # Some shapes (like simple text boxes) might have .text directly
+                    # and not a text_frame.
+                    elif hasattr(shape, "text") and shape.text is not None:
+                        full_text.append(shape.text)
+
+                if slide.has_notes_slide:
+                    notes_slide = slide.notes_slide
+                    if notes_slide.notes_text_frame and notes_slide.notes_text_frame.text:
+                        full_text.append(notes_slide.notes_text_frame.text)
 
             logger.info(
-                f"Texto extraído exitosamente de PPTX: {file_path} (longitud: {sum(len(t) for t in full_text)})"
+                f"Texto extraído exitosamente de PPTX: {file_path} (longitud: {sum(len(t) for t in full_text if t)})"
             )
-            return "\n\n".join(filter(None, full_text))
+            return "\n\n".join(filter(None, full_text)) # Ensure only non-empty strings are joined
         except Exception as e:
             logger.error(f"Error procesando archivo PPTX {file_path}: {e}")
             raise FileProcessingError(
