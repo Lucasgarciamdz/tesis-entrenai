@@ -8,6 +8,7 @@ from src.entrenai.core.clients.moodle_client import (
     MoodleClient,
     MoodleAPIError,
     MoodleCourse,
+    MoodleCourseN8NSettings, # Added import
 )
 from src.entrenai.config import MoodleConfig
 
@@ -279,3 +280,84 @@ def test_download_file_success(
     mock_requests_get.assert_called_once_with(
         file_url_str, params=expected_download_params, stream=True
     )
+
+
+# --- Tests for get_course_n8n_settings ---
+
+@patch.object(MoodleClient, "_make_request")
+def test_get_course_n8n_settings_success(
+    mock_make_request: MagicMock, mock_moodle_config: MoodleConfig
+):
+    client = MoodleClient(config=mock_moodle_config)
+    mock_response_data = {
+        "initial_message": "Hola de Moodle",
+        "system_message_append": "Instrucciones extras",
+        "chat_title": "Chat del Curso",
+        "input_placeholder": "Escribe aqui...",
+    }
+    mock_make_request.return_value = mock_response_data
+
+    settings = client.get_course_n8n_settings(course_id=1)
+
+    assert settings is not None
+    assert isinstance(settings, MoodleCourseN8NSettings)
+    assert settings.initial_message == "Hola de Moodle"
+    assert settings.system_message_append == "Instrucciones extras"
+    assert settings.chat_title == "Chat del Curso"
+    assert settings.input_placeholder == "Escribe aqui..."
+
+    mock_make_request.assert_called_once_with(
+        wsfunction="local_entrenai_get_course_n8n_settings",
+        payload_params={"courseid": 1},
+        http_method="GET",
+    )
+
+
+@pytest.mark.parametrize("mock_return_value", [None, {}, []])
+@patch.object(MoodleClient, "_make_request")
+def test_get_course_n8n_settings_not_found_or_empty(
+    mock_make_request: MagicMock,
+    mock_return_value: Any,
+    mock_moodle_config: MoodleConfig,
+):
+    client = MoodleClient(config=mock_moodle_config)
+    mock_make_request.return_value = mock_return_value
+
+    settings = client.get_course_n8n_settings(course_id=1)
+    assert settings is None
+    mock_make_request.assert_called_once_with(
+        wsfunction="local_entrenai_get_course_n8n_settings",
+        payload_params={"courseid": 1},
+        http_method="GET",
+    )
+
+
+@patch.object(MoodleClient, "_make_request", side_effect=MoodleAPIError("API error"))
+def test_get_course_n8n_settings_api_error(
+    mock_make_request_error: MagicMock, mock_moodle_config: MoodleConfig
+):
+    client = MoodleClient(config=mock_moodle_config)
+    settings = client.get_course_n8n_settings(course_id=1)
+    assert settings is None
+    mock_make_request_error.assert_called_once_with(
+        wsfunction="local_entrenai_get_course_n8n_settings",
+        payload_params={"courseid": 1},
+        http_method="GET",
+    )
+
+
+@patch.object(MoodleClient, "_make_request", side_effect=Exception("Generic error"))
+def test_get_course_n8n_settings_generic_exception(
+    mock_make_request_exception: MagicMock, mock_moodle_config: MoodleConfig
+):
+    client = MoodleClient(config=mock_moodle_config)
+    settings = client.get_course_n8n_settings(course_id=1)
+    assert settings is None
+    mock_make_request_exception.assert_called_once_with(
+        wsfunction="local_entrenai_get_course_n8n_settings",
+        payload_params={"courseid": 1},
+        http_method="GET",
+    )
+
+# Helper to avoid Pylance "Any" issue with parametrize
+from typing import Any

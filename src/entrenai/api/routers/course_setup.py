@@ -11,6 +11,7 @@ from src.entrenai.api.models import (
     HttpUrl,  # Importar MoodleModule si se va a usar para parsear respuesta de módulos
     IndexedFile,  # Added for the new endpoint
     DeleteFileResponse,  # Added for the new DELETE endpoint
+    MoodleCourseN8NSettings,  # Added for n8n settings
 )
 from src.entrenai.celery_app import app as celery_app  # Import Celery app instance
 
@@ -317,24 +318,6 @@ async def setup_ia_for_course(
         alias="courseName",
         description="Nombre del curso para la IA (opcional, se intentará obtener de Moodle).",
     ),
-    initial_messages: Optional[str] = Query(
-        None,
-        alias="initialMessages",
-        description="Mensajes iniciales para el chat de IA.",
-    ),
-    system_message: Optional[str] = Query(
-        None,
-        alias="systemMessage",
-        description="Mensaje del sistema para el agente de IA (se añadirá al mensaje por defecto).",
-    ),
-    input_placeholder: Optional[str] = Query(
-        None,
-        alias="inputPlaceholder",
-        description="Texto de marcador de posición para el campo de entrada del chat.",
-    ),
-    chat_title: Optional[str] = Query(
-        None, alias="chatTitle", description="Título del chat de IA."
-    ),
     moodle: MoodleClient = Depends(get_moodle_client),
     pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper),
     ai_client=Depends(get_ai_client),  # Updated dependency
@@ -344,6 +327,34 @@ async def setup_ia_for_course(
     logger.info(
         f"Iniciando configuración de IA para el curso de Moodle ID: {course_id}"
     )
+
+    # Fetch n8n settings from Moodle
+    moodle_n8n_settings: Optional[MoodleCourseN8NSettings] = moodle.get_course_n8n_settings(course_id=course_id)
+    if moodle_n8n_settings:
+        logger.info(f"Configuración N8N obtenida de Moodle para el curso {course_id}: {moodle_n8n_settings.model_dump_json(exclude_none=True)}")
+    else:
+        logger.info(f"No se encontró configuración N8N en Moodle para el curso {course_id}. Se usarán valores por defecto o de n8n_config.")
+
+    # Determine effective n8n parameters
+    effective_initial_messages: Optional[str] = None
+    effective_system_message_append: Optional[str] = None
+    effective_input_placeholder: Optional[str] = None
+    effective_chat_title: Optional[str] = None
+
+    if moodle_n8n_settings:
+        if moodle_n8n_settings.initial_message is not None:
+            effective_initial_messages = moodle_n8n_settings.initial_message
+        if moodle_n8n_settings.system_message_append is not None:
+            effective_system_message_append = moodle_n8n_settings.system_message_append
+        if moodle_n8n_settings.input_placeholder is not None:
+            effective_input_placeholder = moodle_n8n_settings.input_placeholder
+        if moodle_n8n_settings.chat_title is not None:
+            effective_chat_title = moodle_n8n_settings.chat_title
+    
+    logger.debug(f"Effective initial_messages: {effective_initial_messages}")
+    logger.debug(f"Effective system_message_append: {effective_system_message_append}")
+    logger.debug(f"Effective input_placeholder: {effective_input_placeholder}")
+    logger.debug(f"Effective chat_title: {effective_chat_title}")
 
     course_name_str: str = ""
     if course_name_query:
@@ -478,12 +489,14 @@ async def setup_ia_for_course(
         # Preparar parámetros de IA según el proveedor seleccionado
         if base_config.ai_provider == "gemini":
             ai_params = {
+                "selected_provider": "gemini", # Added to help n8n_client
                 "api_key": gemini_config.api_key,
                 "embedding_model": gemini_config.embedding_model,
-                "qa_model": gemini_config.text_model,
+                "qa_model": gemini_config.text_model, # This should be qa_model for consistency with Ollama
             }
         else:  # Ollama por defecto
             ai_params = {
+                "selected_provider": "ollama", # Added to help n8n_client
                 "host": ollama_config.host,
                 "embedding_model": ollama_config.embedding_model,
                 "qa_model": ollama_config.qa_model,
@@ -494,10 +507,10 @@ async def setup_ia_for_course(
             course_name=course_name_str,
             qdrant_collection_name=pgvector_table_name,
             ai_config_params=ai_params,
-            initial_messages=initial_messages,
-            system_message=system_message,
-            input_placeholder=input_placeholder,
-            chat_title=chat_title,
+            initial_messages=effective_initial_messages,
+            system_message=effective_system_message_append,
+            input_placeholder=effective_input_placeholder,
+            chat_title=effective_chat_title,
         )
 
         if not n8n_chat_url_str:
@@ -507,7 +520,7 @@ async def setup_ia_for_course(
             response_details.message += (
                 " URL del chat de N8N no configurada automáticamente."
             )
-            n8n_chat_url_str = n8n_config.webhook_url
+            n8n_chat_url_str = n8n_config.webhook_url # Fallback to general webhook URL
         response_details.n8n_chat_url = (
             HttpUrl(n8n_chat_url_str) if n8n_chat_url_str else None
         )
@@ -534,10 +547,6 @@ async def setup_ia_for_course(
         )
 
         # Construir URLs y HTML summary
-        # Old way:
-        # refresh_path = router.url_path_for("refresh_files", course_id=course_id)
-        # refresh_files_url = str(request.base_url.replace(path=str(refresh_path)))
-        # New way:
         refresh_files_url = (
             str(request.base_url).rstrip("/")
             + "/ui/manage_files.html?course_id="
@@ -566,10 +575,10 @@ async def setup_ia_for_course(
 {edit_instruction_message}
 <h5>Configuración del Chat de IA:</h5>
 <ul>
-    <li><strong>Mensajes Iniciales:</strong> {initial_messages if initial_messages else 'No especificado'}</li>
-    <li><strong>Mensaje del Sistema:</strong> {system_message if system_message else 'No especificado'}</li>
-    <li><strong>Marcador de Posición de Entrada:</strong> {input_placeholder if input_placeholder else 'No especificado'}</li>
-    <li><strong>Título del Chat:</strong> {chat_title if chat_title else 'No especificado'}</li>
+    <li><strong>Mensajes Iniciales:</strong> {effective_initial_messages if effective_initial_messages else 'No especificado'}</li>
+    <li><strong>Mensaje del Sistema (Añadido):</strong> {effective_system_message_append if effective_system_message_append else 'No especificado'}</li>
+    <li><strong>Marcador de Posición de Entrada:</strong> {effective_input_placeholder if effective_input_placeholder else 'No especificado'}</li>
+    <li><strong>Título del Chat:</strong> {effective_chat_title if effective_chat_title else 'No especificado'}</li>
 </ul>
 """
 
