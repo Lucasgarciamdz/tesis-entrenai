@@ -15,9 +15,6 @@ from src.entrenai.api.models import (
 )
 from src.entrenai.celery_app import app as celery_app  # Import Celery app instance
 
-# from src.entrenai.core.files.file_tracker import FileTracker # Removed
-# from src.entrenai.core.files.file_processor import FileProcessor, FileProcessingError # Removed if not used directly
-# from src.entrenai.core.ai.embedding_manager import EmbeddingManager # Removed if not used directly
 from src.entrenai.config import (
     moodle_config,
     pgvector_config,
@@ -155,19 +152,6 @@ def get_ai_client() -> OllamaWrapper | GeminiWrapper:
 
 def get_n8n_client() -> N8NClient:
     return N8NClient(config=n8n_config)
-
-
-# def get_file_tracker() -> FileTracker: # Removed
-#     return FileTracker(db_path=Path(base_config.file_tracker_db_path)) # Removed
-
-
-# def get_file_processor() -> FileProcessor: # Removed as file_processor dependency is removed
-#     return FileProcessor()
-
-# def get_embedding_manager( # Removed as embedding_manager dependency is removed
-#     ai_client=Depends(get_ai_client),
-# ) -> EmbeddingManager:
-#     return EmbeddingManager(ollama_wrapper=ai_client)
 
 
 @router.get("/courses", response_model=List[MoodleCourse])
@@ -422,8 +406,7 @@ async def setup_ia_for_course(
         course_id=course_id,
         status="pendiente",
         message=f"Configuración iniciada para el curso {course_id} ('{course_name_str}').",
-        qdrant_collection_name=pgvector_table_name,
-        # Renamed field for clarity, though model might not reflect this directly
+        pgvector_collection_name=pgvector_table_name
     )
 
     try:
@@ -644,9 +627,6 @@ async def refresh_course_files(
     course_id: int,
     moodle: MoodleClient = Depends(get_moodle_client),
     pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper),
-    # ai_client: OllamaWrapper | GeminiWrapper = Depends(get_ai_client), # Removed, task handles AI client
-    # embedding_manager: EmbeddingManager = Depends(get_embedding_manager), # Removed, task handles embeddings
-    # file_processor: FileProcessor = Depends(get_file_processor), # Removed, task handles file processing
 ):
     """
     Inicia el refresco y procesamiento asíncrono de archivos para un curso.

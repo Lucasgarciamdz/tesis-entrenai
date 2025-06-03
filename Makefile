@@ -24,8 +24,7 @@ help:
 	@echo "  services-down  : Stop Docker Compose services"
 	@echo "  services-logs  : View logs for Docker Compose services"
 	@echo "  services-restart: Restart Docker Compose services"
-	@echo "  run-celery-worker: Run a Celery worker locally (minimal version)"
-	@echo "  run-celery-worker-full: Run the full Celery worker locally (deprecated)
+	@echo "  run-celery-worker: Run a Celery worker locally"
 
 setup: $(VENV_DIR)/bin/activate
 $(VENV_DIR)/bin/activate: requirements.txt
@@ -42,10 +41,6 @@ run: $(VENV_DIR)/bin/activate .env
 run-celery-worker: $(VENV_DIR)/bin/activate .env
 	@echo "Starting Celery worker (minimal version)..."
 	$(VENV_ACTIVATE); celery -A src.entrenai.celery_app_minimal.app worker -l INFO -P eventlet
-
-run-celery-worker-full: $(VENV_DIR)/bin/activate .env
-	@echo "Starting Celery worker (full version - deprecated)..."
-	$(VENV_ACTIVATE); celery -A src.entrenai.celery_app.app worker -l INFO -P eventlet
 
 test: $(VENV_DIR)/bin/activate
 	@echo "Running tests..."

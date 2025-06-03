@@ -58,7 +58,7 @@ class MoodleUrl(BaseModel):
     externalurl: HttpUrl
 
 
-# --- Qdrant Specific Models ---
+# --- Vector DB Specific Models (Pgvector) ---
 
 
 class DocumentChunk(BaseModel):
@@ -120,7 +120,7 @@ class CourseSetupResponse(BaseModel):
     course_id: int
     status: str
     message: str
-    qdrant_collection_name: str
+    pgvector_collection_name: str
     moodle_section_id: Optional[int] = None
     moodle_folder_id: Optional[int] = None
     moodle_chat_link_id: Optional[int] = None

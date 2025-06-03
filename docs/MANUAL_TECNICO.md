@@ -155,19 +155,18 @@ graph TD
 ## 6. Clases y Módulos Principales
 
 *   **`src/entrenai/config.py`:** Define clases Pydantic para cargar y gestionar la configuración de la aplicación desde variables de entorno (ej. `MoodleConfig`, `PgvectorConfig`, `OllamaConfig`, `N8NConfig`, `BaseConfig`).
-*   **`src/entrenai/core/models.py`:** Contiene los modelos de datos Pydantic utilizados en toda la aplicación para representar entidades como cursos de Moodle, chunks de documentos, respuestas de API, etc.
-*   **`src/entrenai/utils/logger.py`:** Configura el sistema de logging de la aplicación.
+*   **`src/entrenai/api/models.py`:** Contiene los modelos de datos Pydantic utilizados en toda la aplicación para representar entidades como cursos de Moodle, chunks de documentos, respuestas de API, etc.
+*   **`src/entrenai/config/logger.py`:** Configura el sistema de logging de la aplicación.
 *   **`src/entrenai/core/moodle_client.py` (`MoodleClient`):** Encapsula la lógica para interactuar con la API de Web Services de Moodle.
 *   **`src/entrenai/core/n8n_client.py` (`N8NClient`):** Gestiona la interacción con la API de N8N.
 *   **`src/entrenai/core/pgvector_wrapper.py` (`PgvectorWrapper`):** Proporciona una interfaz para interactuar con Pgvector.
 *   **`src/entrenai/core/ollama_wrapper.py` (`OllamaWrapper`):** Envuelve la comunicación con el servicio Ollama.
 *   **`src/entrenai/core/file_processor.py` (`FileProcessor` y subclases):** Contiene la lógica para extraer texto de diferentes tipos de archivo.
 *   **`src/entrenai/core/embedding_manager.py` (`EmbeddingManager`):** Orquesta el proceso de preparación de texto para Pgvector.
-*   **`src/entrenai/core/file_tracker.py` (`FileTracker`):** Rastrea qué archivos de Moodle ya han sido procesados.
 *   **`src/entrenai/api/main.py`:** Punto de entrada de la aplicación FastAPI.
 *   **`src/entrenai/api/routers/course_setup.py`:** Define los endpoints de la API relacionados con la configuración de cursos y el refresco de archivos.
-*   **`src/entrenai/celery_app.py`:** Configuración de la aplicación Celery.
-*   **`src/entrenai/core/tasks.py`:** Define las tareas asíncronas de Celery (ej. procesamiento de archivos).
+*   **`src/entrenai/celery_app_minimal.py`:** Configuración de la aplicación Celery.
+*   **`src/entrenai/tasks_minimal.py`:** Define las tareas asíncronas de Celery (ej. procesamiento de archivos).
 
 ## 7. Decisiones de Diseño Clave
 
@@ -185,21 +184,18 @@ graph TD
 
 *   **Tablas y Extensión:**
     *   Se utiliza la extensión `vector` de Pgvector en una base de datos PostgreSQL.
-    *   Se crea una tabla principal (ej. `entrenai_embeddings`) para almacenar los embeddings, con una columna `course_id` para aislar datos por curso.
+    *   Se crean **tablas individuales por curso** (ej. `entrenai_course_nombrecurso`) para almacenar los embeddings y datos asociados.
 *   **Configuración de Vectores en la Tabla:**
     *   **Columna Vectorial:** Tipo `vector(DIMENSIONES)` (ej. `vector(384)` para `nomic-embed-text`).
     *   **Métrica de Distancia:** Coseno (`<=>` o `<->`).
     *   **Indexación:** IVFFlat o HNSW (ej. `CREATE INDEX ON entrenai_embeddings USING hnsw (embedding vector_cosine_ops);`).
 *   **Columnas de la Tabla de Embeddings (Ejemplo):**
-    *   `id` (UUID o SERIAL): Clave primaria.
-    *   `chunk_id` (UUID): Identificador único para cada chunk.
-    *   `embedding` (vector): El embedding del chunk de texto.
-    *   `course_id` (int): ID del curso de Moodle.
-    *   `document_id` (text): Identificador del documento original.
-    *   `source_filename` (text): Nombre del archivo original.
-    *   `document_title` (Optional[text]): Título del documento.
-    *   `original_text` (text): El texto original del chunk.
-    *   `page_number` (Optional[int]).
+    *   `id` (TEXT PRIMARY KEY): Identificador único para cada chunk.
+    *   `course_id` (TEXT): ID del curso de Moodle.
+    *   `document_id` (TEXT): Identificador del documento original (ej. nombre de archivo).
+    *   `text` (TEXT): El texto original del chunk.
+    *   `metadata` (JSONB): Metadatos adicionales (ej. nombre de archivo original, título del documento, etc.).
+    *   `embedding` (vector(DIMENSIONES)): El embedding del chunk de texto.
 
 ## 9. Configuración de N8N
 
@@ -241,12 +237,13 @@ entrenai/
 ├── docs/               # Documentación (MANUAL_TECNICO.md, INFORME_TESIS.md, etc.)
 ├── src/
 │   └── entrenai/
-│       ├── api/        # Aplicación FastAPI, endpoints (main.py, routers/)
-│       ├── core/       # Lógica principal: Clientes, Wrappers, Procesadores, Modelos Pydantic
-│       ├── utils/      # Utilidades (ej. logger)
-│       ├── config.py   # Clases de configuración
+│       ├── api/        # Aplicación FastAPI (main.py, models.py, routers/, static/)
+│       ├── core/       # Lógica principal (ai/, clients/, db/, files/)
+│       ├── config/     # Directorio para configuración específica (ej. logger.py)
+│       ├── celery_app_minimal.py # Configuración de Celery
+│       ├── tasks_minimal.py      # Tareas Celery
+│       ├── config.py   # Clases Pydantic para configuración global (variables de entorno)
 │       └── n8n_workflow.json # Plantilla del workflow de N8N
-├── static/             # Archivos para la UI de prueba simple (HTML, CSS, JS)
 ├── tests/              # Pruebas Pytest (unitarias y de integración)
 └── README.md           # Documentación general (no técnica)
 ```
@@ -257,7 +254,7 @@ Consulte el archivo `.env.example` para una lista completa. Las más importantes
 
 *   **Generales:** `LOG_LEVEL`, `FASTAPI_HOST`, `FASTAPI_PORT`, `DATA_DIR`.
 *   **Moodle:** `MOODLE_URL`, `MOODLE_TOKEN`, `MOODLE_DEFAULT_TEACHER_ID`, `MOODLE_COURSE_FOLDER_NAME`, etc.
-*   **Pgvector (PostgreSQL):** `PGVECTOR_HOST`, `PGVECTOR_PORT`, `PGVECTOR_USER`, `PGVECTOR_PASSWORD`, `PGVECTOR_DB_NAME`, `PGVECTOR_TABLE_NAME`, `DEFAULT_VECTOR_SIZE`.
+*   **Pgvector (PostgreSQL):** `PGVECTOR_HOST`, `PGVECTOR_PORT`, `PGVECTOR_USER`, `PGVECTOR_PASSWORD`, `PGVECTOR_DB_NAME`, `PGVECTOR_COLLECTION_PREFIX` (usado para prefijar nombres de tablas generados dinámicamente por curso), `DEFAULT_VECTOR_SIZE`.
 *   **Ollama:** `OLLAMA_HOST`, `OLLAMA_EMBEDDING_MODEL`, `OLLAMA_MARKDOWN_MODEL`, `OLLAMA_QA_MODEL`.
 *   **N8N:** `N8N_URL`, `N8N_WEBHOOK_URL`, `N8N_API_KEY`, `N8N_WORKFLOW_JSON_PATH`.
 *   **Celery/Redis:** `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`.
@@ -326,7 +323,7 @@ API disponible en `http://localhost:8000`. Swagger UI: `http://localhost:8000/do
 Si ejecuta FastAPI localmente y necesita procesar tareas:
 ```bash
 make run-celery-worker
-# Alternativamente: celery -A src.entrenai.celery_app.app worker -l INFO -P eventlet
+# Alternativamente: celery -A src.entrenai.celery_app_minimal.app worker -l INFO -P eventlet
 ```
 Asegúrese que `CELERY_BROKER_URL` en `.env` apunta a la instancia de Redis correcta.
 **Nota:** No es necesario si todos los servicios (API y worker) corren con `make services-up`.

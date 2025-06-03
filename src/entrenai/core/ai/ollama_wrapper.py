@@ -63,16 +63,11 @@ class OllamaWrapper:
         try:
             response = self.client.list()  # Get the ListResponse object
 
-            # Get models from the response object
-            available_models = []
-            if hasattr(response, "models"):
-                available_models = response.models
-
-            # Extract model names - models have a 'model' attribute (not 'name')
-            available_model_names = []
-            for model in available_models:
-                if hasattr(model, "model"):
-                    available_model_names.append(model.model)
+            # response.models is a Sequence[ListResponse.Model]
+            # Each item in response.models has a 'model: Optional[str]' attribute for its name
+            available_model_names = [
+                m.model for m in response.models if m.model is not None
+            ]
 
             required_models = {
                 "embedding": self.config.embedding_model,

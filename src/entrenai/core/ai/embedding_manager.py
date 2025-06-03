@@ -22,16 +22,16 @@ class EmbeddingManager:
 
     def __init__(
         self,
-        ollama_wrapper: Union[OllamaWrapper, GeminiWrapper],
+        ai_wrapper: Union[OllamaWrapper, GeminiWrapper], # Changed parameter name
         default_chunk_size: int = 1000,  # Caracteres
         default_chunk_overlap: int = 200,  # Caracteres
     ):
-        self.ollama_wrapper = ollama_wrapper
-        self.ai_wrapper = ollama_wrapper
+        self.ai_wrapper = ai_wrapper # Use the new parameter name
         self.default_chunk_size = default_chunk_size
         self.default_chunk_overlap = default_chunk_overlap
         logger.info(
-            f"EmbeddingManager inicializado con tamaño de chunk {default_chunk_size} "
+            f"EmbeddingManager inicializado con wrapper tipo: {type(ai_wrapper).__name__}, " # Added type logging
+            f"tamaño de chunk {default_chunk_size} "
             f"y solapamiento {default_chunk_overlap}."
         )
 

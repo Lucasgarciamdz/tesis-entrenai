@@ -81,7 +81,7 @@ async def process_file_endpoint(request: ProcessFileRequest):
             ai_client = OllamaWrapper(config=o_config)
 
         # 5. Instantiate EmbeddingManager
-        embedding_manager = EmbeddingManager(ollama_wrapper=ai_client)
+        embedding_manager = EmbeddingManager(ai_wrapper=ai_client)
 
         # 6. Create Path and ensure it exists
         if not os.path.isabs(request.download_dir_str):

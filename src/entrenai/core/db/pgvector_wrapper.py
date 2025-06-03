@@ -169,9 +169,6 @@ class PgvectorWrapper:
             # Create an index for approximate nearest neighbor search
             # For cosine distance, use vector_cosine_ops. For L2, vector_l2_ops. For inner product, vector_ip_ops.
             # HNSW index has a limitation of 2000 dimensions, so use halfvec for larger vectors
-            # Create an index for approximate nearest neighbor search
-            # For cosine distance, use vector_cosine_ops. For L2, vector_l2_ops. For inner product, vector_ip_ops.
-            # HNSW index has a limitation of 2000 dimensions, so use halfvec for larger vectors
             # The 'halfvec' type is used within the HNSW index for larger dimensions.
             if vector_size <= 2000:
                 create_index_sql = f"CREATE INDEX ON {table_name} USING hnsw (embedding vector_cosine_ops);"
@@ -478,12 +475,23 @@ class PgvectorWrapper:
             # For cosine similarity with pgvector: embedding <-> query_embedding gives cosine distance (0=identical, 2=opposite).
             # To make it behave like Qdrant's score (higher = better similarity), we can use (1 - cosine_distance).
             # When using halfvec, the casting is required for the comparison.
-            query_sql = f"""
-            SELECT id, course_id, document_id, text, metadata, (1 - (embedding <=> %s::vector({len(query_embedding)}))) AS score 
+            dimension = len(query_embedding)
+            order_by_clause = f"ORDER BY embedding <=> %s::vector({dimension})"
+            if dimension > 2000: # HNSW index limitation for full precision vectors
+                # Note: The index itself might be using halfvec.
+                # The query should align with how the index was created or how pgvector optimizes.
+                # If index is on `embedding::halfvec`, then query should use `embedding::halfvec`
+                # If index is on `embedding` (for dim <= 2000), then query should use `embedding`
+                # The HNSW index creation logic already uses `::halfvec` for dimensions > 2000.
+                # So, the ORDER BY should match this for optimal performance.
+                order_by_clause = f"ORDER BY embedding::halfvec({dimension}) <=> %s::halfvec({dimension})"
+
+            query_sql = f'''
+            SELECT id, course_id, document_id, text, metadata, (1 - (embedding <=> %s::vector({dimension}))) AS score
             FROM {table_name}
-            ORDER BY embedding::halfvec({len(query_embedding)}) <=> %s::halfvec({len(query_embedding)})
+            {order_by_clause}
             LIMIT %s;
-            """
+            '''
             # query_sql = f"SELECT id, course_id, document_id, text, metadata, embedding <=> %s AS distance FROM {table_name} ORDER BY distance LIMIT %s;"
 
             self.cursor.execute(query_sql, (query_embedding, query_embedding, limit))

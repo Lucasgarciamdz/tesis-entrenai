@@ -470,7 +470,6 @@ class MoodleClient:
             module_details = self._make_request(
                 "core_course_get_course_module", {"cmid": folder_cmid}
             )
-            print(module_details)
             if not module_details or "cm" not in module_details:
                 logger.error(
                     f"No se pudieron obtener detalles para el módulo con cmid {folder_cmid}"

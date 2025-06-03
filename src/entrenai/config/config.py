@@ -145,12 +145,11 @@ class PgvectorConfig(BaseConfig):
 
         # host y port ya están establecidos por default_factory
         # El logging ahora puede confirmar los valores establecidos
-        current_app_env = os.getenv(
-            "APP_ENV", "local"
-        ).lower()  # Re-evaluar aquí para el log
+        # current_app_env = os.getenv( # This local re-evaluation is no longer needed for the log message
+        #     "APP_ENV", "local"
+        # ).lower()
         log_message_details = (
-            f"PgvectorConfig init: APP_ENV (current getenv)='{current_app_env}', "
-            f"APP_ENV_VALUE (module level)='{APP_ENV_VALUE}', "  # Usar la variable global del módulo
+            f"PgvectorConfig init: APP_ENV='{APP_ENV_VALUE}', "  # Use the module-level APP_ENV_VALUE
             f"Host='{self.host}', Port='{self.port}', "
             f"User='{self.user}', DB_Name='{self.db_name}', "
             f"Password_is_set={'True' if self.password else 'False'}"

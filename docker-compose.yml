@@ -234,14 +234,3 @@ volumes:
 networks:
   entrenai_net:
     driver: bridge
-
-# --- API Service (Example - assuming you have one) ---
-# Ensure your API service (if it uses Celery) has these settings:
-#   depends_on:
-#     - redis # Add other dependencies like databases as needed
-#   environment:
-#     CELERY_BROKER_URL: redis://redis:6379/0
-#     CELERY_RESULT_BACKEND: redis://redis:6379/0
-#     # ... other environment variables
-#   networks:
-#     - entrenai_net

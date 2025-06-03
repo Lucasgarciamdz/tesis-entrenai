@@ -27,7 +27,6 @@ class ContextSearchRequest(BaseModel):
     query: str
     course_name: str
     limit: Optional[int] = 5
-    threshold: Optional[float] = 0.7  # This will be removed from search_chunks call
 
 
 # --- Dependencias ---
@@ -79,7 +78,6 @@ async def search_context(
             course_name=search_request.course_name,
             query_embedding=query_embedding,
             limit=search_request.limit or 5,  # Ensure limit has a default if None
-            # score_threshold is not a direct parameter for the current pgvector_wrapper.search_chunks
         )
 
         # Formatear resultados para la respuesta
