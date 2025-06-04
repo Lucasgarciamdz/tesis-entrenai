@@ -1,13 +1,14 @@
 import logging
 import sys
 
-from src.entrenai.config import base_config
-
 
 def get_logger(name: str) -> logging.Logger:
     """
     Configures and returns a logger instance.
     """
+    # Import here to avoid circular import
+    from src.entrenai.config import base_config
+
     logger = logging.getLogger(name)
     logger.setLevel(base_config.log_level)
 

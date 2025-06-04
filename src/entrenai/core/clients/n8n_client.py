@@ -2,7 +2,7 @@ import json  # For loading workflow JSON
 from pathlib import Path  # For workflow_json_path
 from typing import List, Optional, Dict, Any
 from urllib.parse import urljoin
-import uuid # Importar uuid para generar IDs aleatorios
+import uuid  # Importar uuid para generar IDs aleatorios
 
 import requests
 
@@ -208,19 +208,19 @@ class N8NClient:
             return None
 
     def update_workflow_settings(
-        self, 
-        workflow_id: str, 
+        self,
+        workflow_id: str,
         settings_update: Dict[str, Any],
-        course_n8n_settings: Optional[Dict[str, Any]] = None
+        course_n8n_settings: Optional[Dict[str, Any]] = None,
     ) -> Optional[N8NWorkflow]:
         """
         Actualiza configuraciones específicas de un workflow N8N.
-        
+
         Args:
             workflow_id: ID del workflow a actualizar
             settings_update: Configuraciones a actualizar
             course_n8n_settings: Configuraciones específicas del curso desde Moodle
-            
+
         Returns:
             N8NWorkflow actualizado o None si no se encontró
         """
@@ -230,101 +230,107 @@ class N8NClient:
             if not current_workflow:
                 logger.error(f"Workflow {workflow_id} no encontrado")
                 return None
-                
+
             # Crear una copia del workflow para modificar
             workflow_data = current_workflow.model_dump()
-            
+
             # Aplicar configuraciones del curso si están disponibles
             if course_n8n_settings:
-                self._apply_course_settings_to_workflow(workflow_data, course_n8n_settings)
-            
+                self._apply_course_settings_to_workflow(
+                    workflow_data, course_n8n_settings
+                )
+
             # Aplicar actualizaciones adicionales
             if settings_update:
                 workflow_data.update(settings_update)
-            
+
             # Actualizar el workflow en N8N
             updated_data = self._make_request(
-                "PUT", 
-                f"workflows/{workflow_id}", 
-                json_data=workflow_data
+                "PUT", f"workflows/{workflow_id}", json_data=workflow_data
             )
-            
+
             if updated_data:
                 if isinstance(updated_data, dict) and "data" in updated_data:
                     return N8NWorkflow(**updated_data["data"])
                 elif isinstance(updated_data, dict) and "id" in updated_data:
                     return N8NWorkflow(**updated_data)
-                    
+
             return None
-            
+
         except N8NClientError as n8n_error:
             logger.error(f"Error actualizando workflow {workflow_id}: {n8n_error}")
             raise
         except Exception as e:
-            logger.exception(f"Error inesperado actualizando workflow {workflow_id}: {e}")
+            logger.exception(
+                f"Error inesperado actualizando workflow {workflow_id}: {e}"
+            )
             raise N8NClientError(f"Error inesperado actualizando workflow: {e}")
 
     def _apply_course_settings_to_workflow(
-        self, 
-        workflow_data: Dict[str, Any], 
-        course_settings: Dict[str, Any]
+        self, workflow_data: Dict[str, Any], course_settings: Dict[str, Any]
     ) -> None:
         """
         Aplica configuraciones específicas del curso a los nodos del workflow.
-        
+
         Args:
             workflow_data: Datos del workflow a modificar
             course_settings: Configuraciones del curso desde Moodle
         """
         if not workflow_data.get("nodes"):
             return
-            
+
         for node in workflow_data["nodes"]:
             node_type = node.get("type", "")
-            
+
             # Actualizar nodo de Chat Trigger si existe
             if "chatTrigger" in node_type.lower() or "webhook" in node_type.lower():
                 if not node.get("parameters"):
                     node["parameters"] = {}
-                    
+
                 # Aplicar configuraciones del chat
                 if course_settings.get("initial_message"):
-                    node["parameters"]["initialMessages"] = course_settings["initial_message"]
-                    
+                    node["parameters"]["initialMessages"] = course_settings[
+                        "initial_message"
+                    ]
+
                 if course_settings.get("chat_title"):
                     node["parameters"]["chatTitle"] = course_settings["chat_title"]
-                    
+
                 if course_settings.get("input_placeholder"):
-                    node["parameters"]["inputPlaceholder"] = course_settings["input_placeholder"]
-            
+                    node["parameters"]["inputPlaceholder"] = course_settings[
+                        "input_placeholder"
+                    ]
+
             # Actualizar nodo de Agent/OpenAI si existe
             elif "agent" in node_type.lower() or "openai" in node_type.lower():
                 if not node.get("parameters"):
                     node["parameters"] = {}
-                    
+
                 # Agregar texto al system message si está configurado
                 if course_settings.get("system_message_append"):
                     current_system = node["parameters"].get("systemMessage", "")
                     if current_system:
-                        node["parameters"]["systemMessage"] = f"{current_system}\n\n{course_settings['system_message_append']}"
+                        node["parameters"]["systemMessage"] = (
+                            f"{current_system}\n\n{course_settings['system_message_append']}"
+                        )
                     else:
-                        node["parameters"]["systemMessage"] = course_settings["system_message_append"]
+                        node["parameters"]["systemMessage"] = course_settings[
+                            "system_message_append"
+                        ]
 
     def activate_workflow(self, workflow_id: str) -> bool:
         """
         Activa un workflow específico.
-        
+
         Args:
             workflow_id: ID del workflow a activar
-            
+
         Returns:
             True si se activó correctamente, False en caso contrario
         """
         try:
             result = self._make_request(
-                "PATCH", 
-                f"workflows/{workflow_id}",
-                json_data={"active": True}
+                "PATCH", f"workflows/{workflow_id}", json_data={"active": True}
             )
             return result is not None
         except N8NClientError as e:
@@ -334,18 +340,16 @@ class N8NClient:
     def deactivate_workflow(self, workflow_id: str) -> bool:
         """
         Desactiva un workflow específico.
-        
+
         Args:
             workflow_id: ID del workflow a desactivar
-            
+
         Returns:
             True si se desactivó correctamente, False en caso contrario
         """
         try:
             result = self._make_request(
-                "PATCH", 
-                f"workflows/{workflow_id}",
-                json_data={"active": False}
+                "PATCH", f"workflows/{workflow_id}", json_data={"active": False}
             )
             return result is not None
         except N8NClientError as e:
@@ -370,18 +374,20 @@ class N8NClient:
                     # This needs to be confirmed with N8N documentation or testing.
                     # Assuming self.config.webhook_url is the base for webhooks (e.g. http://localhost:5678)
                     if self.config.webhook_url:
-                        return urljoin(self.config.webhook_url, f"webhook/{webhook_id}/chat")
+                        return urljoin(
+                            self.config.webhook_url, f"webhook/{webhook_id}/chat"
+                        )
                     else:  # Fallback to base N8N URL if specific webhook_url is not set
                         return urljoin(self.config.url, f"webhook/{webhook_id}/chat")
         return None
 
-    def get_workflow_webhooks(
-        self, workflow_id: str
-    ) -> Optional[List[Dict[str, Any]]]:
+    def get_workflow_webhooks(self, workflow_id: str) -> Optional[List[Dict[str, Any]]]:
         """Get all webhook URLs for a workflow directly from the N8N API."""
         try:
             # Get the full workflow JSON content
-            workflow_json_content = self._make_request("GET", f"workflows/{workflow_id}")
+            workflow_json_content = self._make_request(
+                "GET", f"workflows/{workflow_id}"
+            )
 
             if not workflow_json_content:
                 logger.warning(f"No workflow JSON content found for ID: {workflow_id}")
@@ -465,7 +471,8 @@ class N8NClient:
                             if webhook_id:
                                 if self.config.webhook_url:
                                     webhook_url = urljoin(
-                                        self.config.webhook_url, f"webhook/{webhook_id}/chat"
+                                        self.config.webhook_url,
+                                        f"webhook/{webhook_id}/chat",
                                     )
                                     logger.info(
                                         f"Generated webhook URL from template: {webhook_url}"
@@ -674,7 +681,9 @@ class N8NClient:
 
             if "parameters" in chat_trigger_node:
                 if initial_messages is not None:
-                    chat_trigger_node["parameters"]["initialMessages"] = initial_messages
+                    chat_trigger_node["parameters"]["initialMessages"] = (
+                        initial_messages
+                    )
                     logger.info(f"Updated initialMessages to: {initial_messages}")
                 if "options" in chat_trigger_node["parameters"]:
                     if input_placeholder is not None:

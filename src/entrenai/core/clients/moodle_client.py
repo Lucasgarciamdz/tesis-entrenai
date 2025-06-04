@@ -668,14 +668,19 @@ class MoodleClient:
         """
         try:
             payload_params = {"courseid": course_id}
-            
+
             response_data = self._make_request(
-                "local_entrenai_get_course_n8n_settings",
-                payload_params
+                "local_entrenai_get_course_n8n_settings", payload_params
             )
 
-            if response_data and not isinstance(response_data, dict) or "exception" in response_data:
-                logger.warning(f"Configuraciones N8N no disponibles para curso {course_id}")
+            if (
+                response_data
+                and not isinstance(response_data, dict)
+                or "exception" in response_data
+            ):
+                logger.warning(
+                    f"Configuraciones N8N no disponibles para curso {course_id}"
+                )
                 return None
 
             # Procesar las configuraciones recibidas
@@ -683,7 +688,9 @@ class MoodleClient:
             if response_data.get("initial_message"):
                 settings["initial_message"] = response_data["initial_message"]
             if response_data.get("system_message_append"):
-                settings["system_message_append"] = response_data["system_message_append"]
+                settings["system_message_append"] = response_data[
+                    "system_message_append"
+                ]
             if response_data.get("chat_title"):
                 settings["chat_title"] = response_data["chat_title"]
             if response_data.get("input_placeholder"):
@@ -692,8 +699,12 @@ class MoodleClient:
             return settings if settings else None
 
         except MoodleAPIError as e:
-            logger.warning(f"Error obteniendo configuraciones N8N para curso {course_id}: {e}")
+            logger.warning(
+                f"Error obteniendo configuraciones N8N para curso {course_id}: {e}"
+            )
             return None
         except Exception as e:
-            logger.exception(f"Error inesperado obteniendo configuraciones N8N para curso {course_id}: {e}")
+            logger.exception(
+                f"Error inesperado obteniendo configuraciones N8N para curso {course_id}: {e}"
+            )
             return None

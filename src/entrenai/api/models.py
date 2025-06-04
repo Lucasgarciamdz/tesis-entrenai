@@ -56,6 +56,7 @@ class MoodleUrl(BaseModel):
 
 class MoodleCourseN8NSettings(BaseModel):
     """Modelo para configuraciones de chat N8N específicas del curso desde Moodle."""
+
     initial_message: Optional[str] = None
     system_message_append: Optional[str] = None
     chat_title: Optional[str] = None
@@ -93,6 +94,7 @@ class N8NNodeParameters(BaseModel):
     # For now, we only care about initialMessages and options for chatTrigger
     # and systemMessage for agent node.
 
+
 class N8NNode(BaseModel):
     id: str
     name: str
@@ -100,8 +102,11 @@ class N8NNode(BaseModel):
     typeVersion: float
     position: List[float]
     parameters: Optional[N8NNodeParameters] = None
-    credentials: Optional[Dict[str, Any]] = None # Credentials can be complex, keep as dict for now
+    credentials: Optional[Dict[str, Any]] = (
+        None  # Credentials can be complex, keep as dict for now
+    )
     # Add other fields that might be present in a node definition
+
 
 class N8NWorkflow(BaseModel):
     id: str
@@ -111,7 +116,9 @@ class N8NWorkflow(BaseModel):
     connections: Optional[Dict[str, Any]] = Field(default_factory=dict)
     settings: Optional[Dict[str, Any]] = Field(default_factory=dict)
     staticData: Optional[Dict[str, Any]] = None
-    webhook_url: Optional[HttpUrl] = None # This might be derived, not directly from N8N API response
+    webhook_url: Optional[HttpUrl] = (
+        None  # This might be derived, not directly from N8N API response
+    )
     meta: Optional[Dict[str, Any]] = Field(default_factory=dict)
     tags: Optional[List[str]] = Field(default_factory=list)
 

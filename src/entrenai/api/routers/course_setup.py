@@ -1,6 +1,6 @@
 from pathlib import Path
 from typing import List, Optional, Dict, Any
-import json # Añadido para manipulación de JSON
+import json  # Añadido para manipulación de JSON
 
 from celery.result import AsyncResult  # Import AsyncResult
 from fastapi import APIRouter, HTTPException, Query, Depends, Request
@@ -33,7 +33,9 @@ from src.entrenai.core.ai.ollama_wrapper import (
 from src.entrenai.core.clients.moodle_client import MoodleClient, MoodleAPIError
 from src.entrenai.core.clients.n8n_client import N8NClient
 from src.entrenai.core.db import PgvectorWrapper, PgvectorWrapperError  # Updated import
-from src.entrenai.tasks_minimal import process_moodle_file_http  # Import minimal Celery task
+from src.entrenai.tasks_minimal import (
+    process_moodle_file_http,
+)  # Import minimal Celery task
 
 logger = get_logger(__name__)
 
@@ -416,14 +418,20 @@ async def setup_ia_for_course(
         logger.info(f"Tabla Pgvector '{pgvector_table_name}' asegurada.")
 
         # Obtener configuraciones de N8N específicas del curso desde Moodle
-        logger.info(f"Obteniendo configuraciones de N8N para el curso {course_id} desde Moodle...")
+        logger.info(
+            f"Obteniendo configuraciones de N8N para el curso {course_id} desde Moodle..."
+        )
         course_n8n_settings = None
         try:
             course_n8n_settings = moodle.get_course_n8n_settings(course_id)
             if course_n8n_settings:
-                logger.info(f"Configuraciones de N8N obtenidas desde Moodle: {course_n8n_settings}")
+                logger.info(
+                    f"Configuraciones de N8N obtenidas desde Moodle: {course_n8n_settings}"
+                )
             else:
-                logger.info("No se encontraron configuraciones personalizadas de N8N en Moodle")
+                logger.info(
+                    "No se encontraron configuraciones personalizadas de N8N en Moodle"
+                )
         except Exception as e:
             logger.warning(f"Error al obtener configuraciones de N8N desde Moodle: {e}")
 
@@ -432,7 +440,7 @@ async def setup_ia_for_course(
         final_chat_settings = {}
         if course_n8n_settings:
             final_chat_settings.update(course_n8n_settings)
-        
+
         # Sobrescribir con parámetros de query si están presentes
         if initial_messages:
             final_chat_settings["initial_message"] = initial_messages
@@ -446,7 +454,9 @@ async def setup_ia_for_course(
         logger.info(
             f"Configurando workflow de chat N8N para curso '{course_name_str}' (ID: {course_id})"
         )
-        logger.info(f"El tableName para el nodo PGVector en N8N se establecerá a: '{pgvector_table_name}'")
+        logger.info(
+            f"El tableName para el nodo PGVector en N8N se establecerá a: '{pgvector_table_name}'"
+        )
         if final_chat_settings:
             logger.info(f"Aplicando configuraciones de chat: {final_chat_settings}")
 
@@ -454,7 +464,7 @@ async def setup_ia_for_course(
         # Cargar la plantilla del workflow para asegurar que tableName se actualice.
         # CWD es /Users/lucas/facultad/tesis_entrenai
         workflow_template_path = Path("src/entrenai/n8n_workflow.json")
-        
+
         if not workflow_template_path.exists():
             logger.warning(
                 f"No se encontró la plantilla del workflow de N8N en: {workflow_template_path}. "
@@ -462,31 +472,40 @@ async def setup_ia_for_course(
             )
         else:
             try:
-                with open(workflow_template_path, 'r', encoding='utf-8') as f:
+                with open(workflow_template_path, "r", encoding="utf-8") as f:
                     workflow_data = json.load(f)
 
                 pg_vector_node_found_and_updated = False
                 for node in workflow_data.get("nodes", []):
-                    if node.get("type") == "@n8n/n8n-nodes-langchain.vectorStorePGVector" and \
-                       node.get("parameters", {}).get("mode") == "retrieve-as-tool":
+                    if (
+                        node.get("type")
+                        == "@n8n/n8n-nodes-langchain.vectorStorePGVector"
+                        and node.get("parameters", {}).get("mode") == "retrieve-as-tool"
+                    ):
                         original_table_name = node["parameters"].get("tableName")
-                        node["parameters"]["tableName"] = pgvector_table_name # Usar el nombre de tabla del curso
+                        node["parameters"]["tableName"] = (
+                            pgvector_table_name  # Usar el nombre de tabla del curso
+                        )
                         pg_vector_node_found_and_updated = True
                         logger.info(
                             f"Nodo PGVector ('retrieve-as-tool') encontrado en la plantilla n8n_workflow.json. "
                             f"Actualizando 'tableName' de '{original_table_name}' a '{pgvector_table_name}' en la copia en memoria."
                         )
-                        break 
-                
+                        break
+
                 if not pg_vector_node_found_and_updated:
                     logger.warning(
                         "No se encontró el nodo Postgres PGVector Store ('retrieve-as-tool') en la plantilla "
                         "n8n_workflow.json para actualizar 'tableName'. N8NClient deberá manejar esta configuración."
                     )
             except json.JSONDecodeError as e:
-                logger.error(f"Error al decodificar la plantilla JSON del workflow de N8N desde {workflow_template_path}: {e}")
+                logger.error(
+                    f"Error al decodificar la plantilla JSON del workflow de N8N desde {workflow_template_path}: {e}"
+                )
             except Exception as e:
-                logger.error(f"Error inesperado al procesar la plantilla del workflow de N8N desde {workflow_template_path}: {e}")
+                logger.error(
+                    f"Error inesperado al procesar la plantilla del workflow de N8N desde {workflow_template_path}: {e}"
+                )
         # --- FIN DE MODIFICACIÓN DEL WORKFLOW JSON ---
 
         # Preparar parámetros de IA según el proveedor seleccionado
@@ -559,7 +578,9 @@ async def setup_ia_for_course(
         )
 
         n8n_chat_url_for_moodle = (
-            str(response_details.n8n_chat_url).rstrip('/') if response_details.n8n_chat_url else "#"
+            str(response_details.n8n_chat_url).rstrip("/")
+            if response_details.n8n_chat_url
+            else "#"
         )
 
         # Mensaje para el profesor sobre la edición
@@ -575,15 +596,15 @@ async def setup_ia_for_course(
     <li><a href="{n8n_chat_url_for_moodle}" target="_blank">{moodle_chat_link_name}</a>: Acceda aquí para chatear con la IA.</li>
     <li>Carpeta "<strong>{moodle_folder_name}</strong>": Suba aquí los documentos PDF, DOCX, PPTX que la IA utilizará como base de conocimiento.</li>
     <li><a href="{refresh_files_url}" target="_blank">{moodle_refresh_link_name}</a>: Haga clic aquí después de subir nuevos archivos o modificar existentes en la carpeta "{moodle_folder_name}" para que la IA los procese.</li>
-    <li><a href="{str(request.base_url).rstrip('/')}/ui/workflow_editor.html?course_id={course_id}" target="_blank">Editar Configuración del Chat de IA</a>: Modifique los textos de bienvenida, el mensaje del sistema, el marcador de posición y el título del chat.</li>
+    <li><a href="{str(request.base_url).rstrip("/")}/ui/workflow_editor.html?course_id={course_id}" target="_blank">Editar Configuración del Chat de IA</a>: Modifique los textos de bienvenida, el mensaje del sistema, el marcador de posición y el título del chat.</li>
 </ul>
 {edit_instruction_message}
 <h5>Configuración del Chat de IA:</h5>
 <ul>
-    <li><strong>Mensajes Iniciales:</strong> {initial_messages if initial_messages else 'No especificado'}</li>
-    <li><strong>Mensaje del Sistema:</strong> {system_message if system_message else 'No especificado'}</li>
-    <li><strong>Marcador de Posición de Entrada:</strong> {input_placeholder if input_placeholder else 'No especificado'}</li>
-    <li><strong>Título del Chat:</strong> {chat_title if chat_title else 'No especificado'}</li>
+    <li><strong>Mensajes Iniciales:</strong> {initial_messages if initial_messages else "No especificado"}</li>
+    <li><strong>Mensaje del Sistema:</strong> {system_message if system_message else "No especificado"}</li>
+    <li><strong>Marcador de Posición de Entrada:</strong> {input_placeholder if input_placeholder else "No especificado"}</li>
+    <li><strong>Título del Chat:</strong> {chat_title if chat_title else "No especificado"}</li>
 </ul>
 """
 
@@ -968,7 +989,9 @@ async def get_n8n_workflow_config(
     Obtiene la configuración actual de los parámetros del workflow de n8n
     (initialMessages, inputPlaceholder, title, systemMessage) para un curso.
     """
-    logger.info(f"Solicitud para obtener configuración de workflow n8n para curso ID: {course_id}")
+    logger.info(
+        f"Solicitud para obtener configuración de workflow n8n para curso ID: {course_id}"
+    )
 
     try:
         course_name_for_n8n = await _get_course_name_for_operations(course_id, moodle)
@@ -983,11 +1006,18 @@ async def get_n8n_workflow_config(
                 target_workflow = wf
                 break
             # Fallback: si no hay coincidencia exacta, buscar por prefijo y tomar el primero activo
-            if not target_workflow and wf.name and wf.name.startswith(workflow_name_prefix) and wf.active:
+            if (
+                not target_workflow
+                and wf.name
+                and wf.name.startswith(workflow_name_prefix)
+                and wf.active
+            ):
                 target_workflow = wf
 
         if not target_workflow or not target_workflow.id:
-            logger.warning(f"No se encontró workflow de n8n para el curso ID: {course_id} con nombre '{exact_workflow_name}'.")
+            logger.warning(
+                f"No se encontró workflow de n8n para el curso ID: {course_id} con nombre '{exact_workflow_name}'."
+            )
             raise HTTPException(
                 status_code=404,
                 detail=f"No se encontró un workflow de n8n activo para el curso ID {course_id}.",
@@ -1028,30 +1058,49 @@ async def get_n8n_workflow_config(
             )
 
             if chat_trigger_node and chat_trigger_node.parameters:
-                config_data["initialMessages"] = chat_trigger_node.parameters.initialMessages
+                config_data["initialMessages"] = (
+                    chat_trigger_node.parameters.initialMessages
+                )
                 if chat_trigger_node.parameters.options:
-                    config_data["inputPlaceholder"] = chat_trigger_node.parameters.options.get("inputPlaceholder")
-                    config_data["chatTitle"] = chat_trigger_node.parameters.options.get("title")
+                    config_data["inputPlaceholder"] = (
+                        chat_trigger_node.parameters.options.get("inputPlaceholder")
+                    )
+                    config_data["chatTitle"] = chat_trigger_node.parameters.options.get(
+                        "title"
+                    )
 
-            if ai_agent_node and ai_agent_node.parameters and ai_agent_node.parameters.options:
-                config_data["systemMessage"] = ai_agent_node.parameters.options.get("systemMessage")
+            if (
+                ai_agent_node
+                and ai_agent_node.parameters
+                and ai_agent_node.parameters.options
+            ):
+                config_data["systemMessage"] = ai_agent_node.parameters.options.get(
+                    "systemMessage"
+                )
         else:
-            logger.error(f"No se pudieron obtener los detalles del workflow n8n ID: {target_workflow.id}")
+            logger.error(
+                f"No se pudieron obtener los detalles del workflow n8n ID: {target_workflow.id}"
+            )
             raise HTTPException(
                 status_code=500,
                 detail=f"No se pudieron obtener los detalles del workflow n8n para el curso ID {course_id}.",
             )
 
-        logger.info(f"Configuración de workflow n8n obtenida para curso ID {course_id}: {config_data}")
+        logger.info(
+            f"Configuración de workflow n8n obtenida para curso ID {course_id}: {config_data}"
+        )
         return config_data
 
     except HTTPException as http_exc:
         raise http_exc
     except Exception as e:
-        logger.exception(f"Error inesperado al obtener la configuración del workflow n8n para el curso {course_id}: {e}")
+        logger.exception(
+            f"Error inesperado al obtener la configuración del workflow n8n para el curso {course_id}: {e}"
+        )
         raise HTTPException(
             status_code=500, detail=f"Error interno del servidor: {str(e)}"
         )
+
 
 @router.get("/courses/{course_id}/indexed-files", response_model=List[IndexedFile])
 async def get_indexed_files_for_course(

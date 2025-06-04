@@ -1,37 +1,17 @@
-import os
-from logging import getLogger
-
-from celery import Celery
-
-logger = getLogger(__name__)
-
-# Default Redis URL
-REDIS_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
-
+# Apply eventlet monkey patch before any imports
 try:
-    app = Celery(
-        "entrenai_minimal",
-        broker=REDIS_URL,
-        backend=REDIS_URL,
-        include=["src.entrenai.tasks_minimal"],
-    )
+    import eventlet
 
-    # Configuration
-    app.conf.update(
-        task_serializer="json",
-        result_serializer="json",
-        accept_content=["json"],
-        task_track_started=True,
-        broker_connection_retry_on_startup=True,
-    )
+    eventlet.monkey_patch()
+except ImportError:
+    # eventlet not available, continue without patching
+    pass
 
-    logger.info("Celery minimal app initialized.")
-    logger.info(f"Broker: {app.conf.broker_url}")
-    logger.info(f"Backend: {app.conf.result_backend}")
+# Import the configured app from tasks_minimal
+from src.entrenai.tasks_minimal import app
 
-except Exception as e:
-    logger.error(f"Error initializing Celery minimal app: {e}", exc_info=True)
-    raise
+# Export the app for compatibility
+__all__ = ["app"]
 
 if __name__ == "__main__":
     app.start()
