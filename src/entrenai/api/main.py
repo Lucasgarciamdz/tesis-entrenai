@@ -21,7 +21,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"Nivel de log configurado en: {base_config.log_level}")
     logger.info(f"Host de FastAPI: {base_config.fastapi_host}")
     logger.info(f"Puerto de FastAPI: {base_config.fastapi_port}")
-    # Aquí se podrían añadir verificaciones iniciales, como intentar conectar a Qdrant, Ollama, etc.
+    # Aquí se podrían añadir verificaciones iniciales, como intentar conectar a PgVector, Ollama, etc.
     # Por ahora, solo se registra.
 
     yield
@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
 # Initialize FastAPI app
 app = FastAPI(
     title="Entrenai API",
-    description="API para el sistema Entrenai, integrando Moodle, Qdrant, Ollama y N8N.",
+    description="API para el sistema Entrenai, integrando Moodle, PgVector, Ollama y N8N.",
     version="0.1.0",
     lifespan=lifespan,
 )

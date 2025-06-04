@@ -12,11 +12,8 @@ from src.entrenai.api.models import (
     IndexedFile,  # Added for the new endpoint
     DeleteFileResponse,  # Added for the new DELETE endpoint
 )
-from src.entrenai.celery_app import app as celery_app  # Import Celery app instance
+from src.entrenai.celery_app import app as celery_app
 
-# from src.entrenai.core.files.file_tracker import FileTracker # Removed
-# from src.entrenai.core.files.file_processor import FileProcessor, FileProcessingError # Removed if not used directly
-# from src.entrenai.core.ai.embedding_manager import EmbeddingManager # Removed if not used directly
 from src.entrenai.config import (
     moodle_config,
     pgvector_config,
@@ -154,19 +151,6 @@ def get_ai_client() -> OllamaWrapper | GeminiWrapper:
 
 def get_n8n_client() -> N8NClient:
     return N8NClient(config=n8n_config)
-
-
-# def get_file_tracker() -> FileTracker: # Removed
-#     return FileTracker(db_path=Path(base_config.file_tracker_db_path)) # Removed
-
-
-# def get_file_processor() -> FileProcessor: # Removed as file_processor dependency is removed
-#     return FileProcessor()
-
-# def get_embedding_manager( # Removed as embedding_manager dependency is removed
-#     ai_client=Depends(get_ai_client),
-# ) -> EmbeddingManager:
-#     return EmbeddingManager(ollama_wrapper=ai_client)
 
 
 @router.get("/courses", response_model=List[MoodleCourse])
@@ -383,7 +367,7 @@ async def setup_ia_for_course(
         if not course_name_str:
             course_name_str = f"Curso_{course_id}"
             logger.warning(
-                f"Usando nombre de curso por defecto para Qdrant: '{course_name_str}'"
+                f"Usando nombre de curso por defecto para PgVector: '{course_name_str}'"
             )
 
     if not course_name_str:
@@ -419,7 +403,7 @@ async def setup_ia_for_course(
         logger.info(
             f"Asegurando tabla Pgvector '{pgvector_table_name}' para curso '{course_name_str}' con tamaño de vector {vector_size}"
         )
-        # Removed qdrant.client check as PgvectorWrapper handles connection internally
+        # PgvectorWrapper handles connection internally
         if not pgvector_db.ensure_table(
             course_name_str, vector_size
         ):  # Updated method call
@@ -431,10 +415,40 @@ async def setup_ia_for_course(
             raise HTTPException(status_code=500, detail=response_details.message)
         logger.info(f"Tabla Pgvector '{pgvector_table_name}' asegurada.")
 
+        # Obtener configuraciones de N8N específicas del curso desde Moodle
+        logger.info(f"Obteniendo configuraciones de N8N para el curso {course_id} desde Moodle...")
+        course_n8n_settings = None
+        try:
+            course_n8n_settings = moodle.get_course_n8n_settings(course_id)
+            if course_n8n_settings:
+                logger.info(f"Configuraciones de N8N obtenidas desde Moodle: {course_n8n_settings}")
+            else:
+                logger.info("No se encontraron configuraciones personalizadas de N8N en Moodle")
+        except Exception as e:
+            logger.warning(f"Error al obtener configuraciones de N8N desde Moodle: {e}")
+
+        # Combinar configuraciones de query parameters con configuraciones de Moodle
+        # Las configuraciones de query parameters tienen prioridad sobre las de Moodle
+        final_chat_settings = {}
+        if course_n8n_settings:
+            final_chat_settings.update(course_n8n_settings)
+        
+        # Sobrescribir con parámetros de query si están presentes
+        if initial_messages:
+            final_chat_settings["initial_message"] = initial_messages
+        if system_message:
+            final_chat_settings["system_message_append"] = system_message
+        if chat_title:
+            final_chat_settings["chat_title"] = chat_title
+        if input_placeholder:
+            final_chat_settings["input_placeholder"] = input_placeholder
+
         logger.info(
             f"Configurando workflow de chat N8N para curso '{course_name_str}' (ID: {course_id})"
         )
         logger.info(f"El tableName para el nodo PGVector en N8N se establecerá a: '{pgvector_table_name}'")
+        if final_chat_settings:
+            logger.info(f"Aplicando configuraciones de chat: {final_chat_settings}")
 
         # --- INICIO DE MODIFICACIÓN DEL WORKFLOW JSON (en memoria) ---
         # Cargar la plantilla del workflow para asegurar que tableName se actualice.
@@ -494,10 +508,10 @@ async def setup_ia_for_course(
             course_name=course_name_str,
             qdrant_collection_name=pgvector_table_name,
             ai_config_params=ai_params,
-            initial_messages=initial_messages,
-            system_message=system_message,
-            input_placeholder=input_placeholder,
-            chat_title=chat_title,
+            initial_messages=final_chat_settings.get("initial_message"),
+            system_message=final_chat_settings.get("system_message_append"),
+            input_placeholder=final_chat_settings.get("input_placeholder"),
+            chat_title=final_chat_settings.get("chat_title"),
         )
 
         if not n8n_chat_url_str:
@@ -635,9 +649,6 @@ async def refresh_course_files(
     course_id: int,
     moodle: MoodleClient = Depends(get_moodle_client),
     pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper),
-    # ai_client: OllamaWrapper | GeminiWrapper = Depends(get_ai_client), # Removed, task handles AI client
-    # embedding_manager: EmbeddingManager = Depends(get_embedding_manager), # Removed, task handles embeddings
-    # file_processor: FileProcessor = Depends(get_file_processor), # Removed, task handles file processing
 ):
     """
     Inicia el refresco y procesamiento asíncrono de archivos para un curso.

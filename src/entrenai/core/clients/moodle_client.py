@@ -655,3 +655,45 @@ class MoodleClient:
         except Exception as e:
             logger.exception(f"Error inesperado en get_all_courses: {e}")
             raise MoodleAPIError(f"Error inesperado obteniendo todos los cursos: {e}")
+
+    def get_course_n8n_settings(self, course_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Obtiene las configuraciones de N8N específicas de un curso desde Moodle.
+
+        Args:
+            course_id: ID del curso
+
+        Returns:
+            Diccionario con las configuraciones o None si no se encuentran
+        """
+        try:
+            payload_params = {"courseid": course_id}
+            
+            response_data = self._make_request(
+                "local_entrenai_get_course_n8n_settings",
+                payload_params
+            )
+
+            if response_data and not isinstance(response_data, dict) or "exception" in response_data:
+                logger.warning(f"Configuraciones N8N no disponibles para curso {course_id}")
+                return None
+
+            # Procesar las configuraciones recibidas
+            settings = {}
+            if response_data.get("initial_message"):
+                settings["initial_message"] = response_data["initial_message"]
+            if response_data.get("system_message_append"):
+                settings["system_message_append"] = response_data["system_message_append"]
+            if response_data.get("chat_title"):
+                settings["chat_title"] = response_data["chat_title"]
+            if response_data.get("input_placeholder"):
+                settings["input_placeholder"] = response_data["input_placeholder"]
+
+            return settings if settings else None
+
+        except MoodleAPIError as e:
+            logger.warning(f"Error obteniendo configuraciones N8N para curso {course_id}: {e}")
+            return None
+        except Exception as e:
+            logger.exception(f"Error inesperado obteniendo configuraciones N8N para curso {course_id}: {e}")
+            return None

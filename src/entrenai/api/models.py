@@ -51,7 +51,22 @@ class MoodleUrl(BaseModel):
     externalurl: HttpUrl
 
 
-# --- Qdrant Specific Models ---
+# --- Moodle N8N Settings Models ---
+
+
+class MoodleCourseN8NSettings(BaseModel):
+    """Modelo para configuraciones de chat N8N específicas del curso desde Moodle."""
+    initial_message: Optional[str] = None
+    system_message_append: Optional[str] = None
+    chat_title: Optional[str] = None
+    input_placeholder: Optional[str] = None
+
+    class Config:
+        # Permitir campos adicionales para futuras extensiones
+        extra = "ignore"
+
+
+# --- PgVector Specific Models ---
 
 
 class DocumentChunk(BaseModel):

@@ -30,6 +30,14 @@ COPY ./src ./src
 
 FROM python:3.10-slim-bookworm AS final
 
+# Install runtime dependencies for file processing
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    poppler-utils \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    tesseract-ocr-spa \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 ENV APP_USER=appuser

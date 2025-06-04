@@ -26,7 +26,6 @@ pytesseract
 python-pptx
 python-docx
 beautifulsoup4
-pandas
 lxml # Often a faster parser for BeautifulSoup
 chardet
 
@@ -38,7 +37,7 @@ chardet
 pgvector
 
 # Celery and Redis
-celery
+celery==5.3.6
 eventlet # Required for Celery's eventlet pool
 redis==5.0.1
 

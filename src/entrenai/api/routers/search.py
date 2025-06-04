@@ -62,8 +62,6 @@ async def search_context(
         f"en el curso '{search_request.course_name}'"
     )
 
-    # Removed qdrant.client check, PgvectorWrapper handles connection internally
-
     try:
         # Generar embedding para la consulta
         query_embedding = ai_client.generate_embedding(text=search_request.query)
