@@ -1,3 +1,49 @@
+# FastAPI and related
 fastapi
-uvicorn
-celery 
+uvicorn[standard]
+
+# Environment variables
+python-dotenv
+
+# HTTP requests
+requests
+aiohttp # For async requests, if needed later
+
+# Ollama client
+ollama
+
+# Google Gemini
+google-genai
+google
+
+# Testing
+pytest
+pytest-asyncio # For testing async code with pytest
+
+# File processing
+pdf2image
+pytesseract
+python-pptx
+python-docx
+beautifulsoup4
+lxml # Often a faster parser for BeautifulSoup
+chardet
+
+# Moodle (No client library specified, will use requests. Add if a specific client is found/needed)
+
+# N8N (No client library specified, will use requests. Add if a specific client is found/needed)
+
+# pgvector
+pgvector
+
+# Celery and Redis
+celery==5.3.6
+# eventlet # Removed - not needed for FastAPI, causes RLock issues
+redis==5.0.1
+
+# Generic
+uv
+ruff
+psycopg2-binary
+pydantic
+protobuf

@@ -1,23 +1,240 @@
-version: '3.8'
-
 services:
-  app:
-    build: .
-    command: uvicorn entrenai_refactor.api.principal:app --host 0.0.0.0 --port 8000
+  # --- PostgreSQL Database for Moodle ---
+  moodle_db:
+    image: postgres:17.5
+    container_name: entrenai_moodle_db
+    restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${MOODLE_DB_HOST_PORT:-5433}:5432" # PostgreSQL port
     volumes:
-      - .:/app
-    depends_on:
-      - redis
-  celery:
-    build: .
-    command: celery -A entrenai_refactor.celery.aplicacion_celery.app worker --loglevel=info
-    depends_on:
-      - redis
+      - moodle_db_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${MOODLE_DB_USER:-moodle_user}
+      POSTGRES_PASSWORD: ${MOODLE_DB_PASSWORD:-moodle_password}
+      POSTGRES_DB: ${MOODLE_DB_NAME:-moodle_db}
+      POSTGRES_INITDB_ARGS: ${POSTGRES_INITDB_ARGS}
+      POSTGRES_HOST_AUTH_METHOD: ${POSTGRES_HOST_AUTH_METHOD}
+    networks:
+      - entrenai_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-moodle_user} -d $${POSTGRES_DB:-moodle_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- Moodle Application ---
+  moodle:
+    image: bitnami/moodle:4.5.4
+    container_name: entrenai_moodle_app
+    restart: unless-stopped
+    ports:
+      - "${MOODLE_HOST_PORT:-8080}:8080" # Moodle app port
+      - "${MOODLE_HOST_SSL_PORT:-8443}:8443" # Moodle SSL port
     volumes:
-      - .:/app
+      - moodle_app_data:/bitnami/moodle
+      - moodle_data_dir:/bitnami/moodledata # Moodle data directory
+    environment:
+      MOODLE_DATABASE_TYPE: pgsql
+      MOODLE_DATABASE_HOST: moodle_db
+      MOODLE_DATABASE_PORT_NUMBER: 5432
+      MOODLE_DATABASE_USER: ${MOODLE_DB_USER:-moodle_user}
+      MOODLE_DATABASE_PASSWORD: ${MOODLE_DB_PASSWORD:-moodle_password}
+      MOODLE_DATABASE_NAME: ${MOODLE_DB_NAME:-moodle_db}
+      MOODLE_USERNAME: ${MOODLE_USERNAME:-admin}
+      MOODLE_PASSWORD: ${MOODLE_PASSWORD:-admin_password}
+      MOODLE_EMAIL: ${MOODLE_EMAIL:-admin@example.com}
+      MOODLE_SITE_NAME: ${MOODLE_SITENAME:-Entrenai Moodle}
+      MOODLE_REVERSEPROXY: ${MOODLE_REVERSEPROXY:-no}
+      ALLOW_EMPTY_PASSWORD: 'no'
+    depends_on:
+      moodle_db:
+        condition: service_healthy
+    networks:
+      - entrenai_net
+
+  # --- PGVector Database ---
+  pgvector_db:
+    image: pgvector/pgvector:0.8.0-pg17 # Includes pgvector extension
+    container_name: entrenai_pgvector_db
+    restart: unless-stopped
+    ports:
+      - "${PGVECTOR_HOST_PORT:-5432}:5432" # Expose on a different host port if 5432 is taken
+    volumes:
+      - pgvector_data:/var/lib/postgresql/data
+      - ./entrenai2/nucleo/bd/init.sql:/docker-entrypoint-initdb.d/init.sql
+    environment:
+      POSTGRES_USER: ${PGVECTOR_USER:-pgvector_user}
+      POSTGRES_PASSWORD: ${PGVECTOR_PASSWORD:-pgvector_password}
+      POSTGRES_DB: ${PGVECTOR_DB_NAME:-pgvector_db}
+    networks:
+      - entrenai_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-pgvector_user} -d $${POSTGRES_DB:-pgvector_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- Ollama LLM Server ---
+  ollama:
+    image: ollama/ollama:0.6.8
+    container_name: entrenai_ollama
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_HOST_PORT:-11434}:11434"
+    volumes:
+      - ollama_models:/root/.ollama # Persist models
+    environment:
+      OLLAMA_CONTEXT_LENGTH: 25000
+    networks:
+      - entrenai_net
+
+  # --- PostgreSQL Database for N8N ---
+  n8n_db:
+    image: postgres:17.5
+    container_name: entrenai_n8n_db
+    restart: unless-stopped
+    volumes:
+      - n8n_db_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${N8N_DB_USER:-n8n_user}
+      POSTGRES_PASSWORD: ${N8N_DB_PASSWORD:-n8n_password}
+      POSTGRES_DB: ${N8N_DB_NAME:-n8n_db}
+      POSTGRES_INITDB_ARGS: ${POSTGRES_INITDB_ARGS}
+      POSTGRES_HOST_AUTH_METHOD: ${POSTGRES_HOST_AUTH_METHOD}
+    networks:
+      - entrenai_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-n8n_user} -d $${POSTGRES_DB:-n8n_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- N8N Workflow Automation ---
+  n8n:
+    image: n8nio/n8n:1.91.3
+    container_name: entrenai_n8n_app
+    restart: unless-stopped
+    ports:
+      - "${N8N_HOST_PORT:-5678}:5678"
+    volumes:
+      - n8n_app_data:/home/node/.n8n
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: n8n_db
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${N8N_DB_NAME:-n8n_db}
+      DB_POSTGRESDB_USER: ${N8N_DB_USER:-n8n_user}
+      DB_POSTGRESDB_PASSWORD: ${N8N_DB_PASSWORD:-n8n_password}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-a_very_secure_random_string_for_n8n} # CHANGE THIS IN .env!
+      N8N_EMAIL_MODE: smtp
+      N8N_HOST: ${N8N_HOST_DOMAIN:-localhost}
+      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678}
+    depends_on:
+      n8n_db:
+        condition: service_healthy
+    networks:
+      - entrenai_net
+
+  # --- Redis for Celery ---
   redis:
-    image: redis:7
+    image: "redis:alpine"
+    container_name: entrenai_redis
+    restart: unless-stopped
     ports:
-      - "6379:6379" 
+      - "${REDIS_HOST_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - entrenai_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- FastAPI Application ---
+  aplicacion_api: # Service renamed
+    build:
+      context: . # Context is . because docker-compose.yml is in entrenai_refactor
+      dockerfile: Dockerfile # Dockerfile is in the same directory
+    container_name: entrenai_api # Keeping container name for now, can be changed
+    restart: unless-stopped
+    ports:
+      - "${FASTAPI_HOST_PORT:-8000}:8000"
+    volumes:
+      - ./data:/app/data # Maps the new data directory in entrenai_refactor
+      - ./api:/app/api
+      - ./nucleo:/app/nucleo
+      - ./config:/app/config
+      # - ./entrenai_refactor:/app # Simpler, maps entire project
+      - entrenai_data:/app/persistent_data # For truly persistent data not code
+    env_file:
+      - ../.env # Assuming .env is in the root project directory
+    environment:
+      APP_ENV: docker
+      DATA_DIR: /app/data # Internal data directory
+      PYTHONUNBUFFERED: 1
+      PYTHONPATH: /app
+    depends_on:
+      pgvector_db:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    networks:
+      - entrenai_net
+    command: sh -c "uvicorn api.principal:aplicacion --host 0.0.0.0 --port 8000 --reload"
+
+  # --- Minimalist Celery Worker ---
+  trabajador_celery: # Service renamed
+    build:
+      context: . # Context is .
+      dockerfile: Dockerfile.celery # Dockerfile is in the same directory
+    container_name: entrenai_celery_worker # Keeping container name
+    restart: unless-stopped
+    env_file:
+      - ../.env # Assuming .env is in the root project directory
+    volumes: # Adding volumes for celery worker to access necessary code
+      - ./celery:/app/celery
+      - ./nucleo:/app/nucleo
+      - ./config:/app/config
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      FASTAPI_BASE_URL: http://aplicacion_api:8000 # Updated to new API service name
+      PYTHONUNBUFFERED: 1
+      PYTHONPATH: /app
+    depends_on:
+      redis:
+        condition: service_healthy
+      aplicacion_api: # Updated to new API service name
+        condition: service_started
+      pgvector_db:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    networks:
+      - entrenai_net
+
+volumes:
+  moodle_db_data:
+    driver: local
+  moodle_app_data:
+    driver: local
+  moodle_data_dir:
+    driver: local
+  pgvector_data:
+    driver: local
+  ollama_models:
+    driver: local
+  n8n_db_data:
+    driver: local
+  n8n_app_data:
+    driver: local
+  redis_data:
+    driver: local
+  entrenai_data:
+    driver: local
+
+networks:
+  entrenai_net:
+    driver: bridge
