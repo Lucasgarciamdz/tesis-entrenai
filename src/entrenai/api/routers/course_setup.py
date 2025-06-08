@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 import json  # Añadido para manipulación de JSON
+from datetime import datetime
 
 from celery.result import AsyncResult  # Import AsyncResult
 from fastapi import APIRouter, HTTPException, Query, Depends, Request
@@ -12,7 +13,7 @@ from src.entrenai.api.models import (
     IndexedFile,  # Added for the new endpoint
     DeleteFileResponse,  # Added for the new DELETE endpoint
 )
-from src.entrenai.celery_app import app as celery_app
+from src.entrenai.celery.celery_app_minimal import app as celery_app
 
 from src.entrenai.config import (
     moodle_config,
@@ -33,9 +34,9 @@ from src.entrenai.core.ai.ollama_wrapper import (
 from src.entrenai.core.clients.moodle_client import MoodleClient, MoodleAPIError
 from src.entrenai.core.clients.n8n_client import N8NClient
 from src.entrenai.core.db import PgvectorWrapper, PgvectorWrapperError  # Updated import
-from src.entrenai.tasks_minimal import (
-    process_moodle_file_http,
-)  # Import minimal Celery task
+from src.entrenai.celery.tasks_minimal import (
+    process_moodle_course_content_minimal,
+)  # Importa la tarea Celery minimalista
 
 logger = get_logger(__name__)
 
@@ -110,13 +111,21 @@ async def _get_course_name_for_operations(course_id: int, moodle: MoodleClient) 
 
 # --- Inyección de Dependencias para Clientes ---
 def get_moodle_client() -> MoodleClient:
-    return MoodleClient(config=moodle_config)
+    try:
+        return MoodleClient(config=moodle_config)
+    except Exception as e:
+        logger.error(f"Error al crear MoodleClient: {e}")
+        raise HTTPException(status_code=503, detail="No se pudo conectar con Moodle")
 
 
 def get_pgvector_wrapper() -> (
     PgvectorWrapper
 ):  # Renamed function and updated return type
-    return PgvectorWrapper(config=pgvector_config)  # Updated instantiation
+    try:
+        return PgvectorWrapper(config=pgvector_config)  # Updated instantiation
+    except Exception as e:
+        logger.error(f"Error al crear PgvectorWrapper: {e}")
+        raise HTTPException(status_code=503, detail="No se pudo conectar con la base de datos vectorial")
 
 
 def get_ai_client() -> OllamaWrapper | GeminiWrapper:
@@ -668,266 +677,64 @@ async def setup_ia_for_course(
 @router.get("/courses/{course_id}/refresh-files", name="refresh_files")
 async def refresh_course_files(
     course_id: int,
-    moodle: MoodleClient = Depends(get_moodle_client),
-    pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper),
 ):
     """
     Inicia el refresco y procesamiento asíncrono de archivos para un curso.
 
-    Esta operación identifica archivos nuevos o modificados en la carpeta designada
-    del curso en Moodle y despacha tareas Celery individuales para procesar cada archivo.
-    El procesamiento incluye la descarga, extracción de texto, formateo a Markdown,
-    generación de embeddings y almacenamiento en la base de datos vectorial (Pgvector).
+    Esta operación despacha una única tarea Celery que le indica a la aplicación principal
+    que procese todo el contenido del curso. La lógica de identificar archivos nuevos
+    o modificados ahora reside en el endpoint que esta tarea invoca.
 
-    La API responde inmediatamente con una lista de IDs de las tareas despachadas,
+    La API responde inmediatamente con el ID de la tarea despachada,
     permitiendo al cliente rastrear el progreso de forma asíncrona usando el endpoint
     `/api/v1/task/{task_id}/status`.
-
-    Respuesta:
-    - `message`: Mensaje indicando el inicio del proceso y el número de tareas despachadas.
-    - `course_id`: ID del curso.
-    - `files_identified_for_processing`: Número de archivos que se determinó necesitan procesamiento.
-    - `tasks_dispatched`: Número de tareas Celery efectivamente despachadas.
-    - `task_ids`: Lista de strings, donde cada string es el ID de una tarea Celery despachada.
     """
     logger.info(
-        f"Iniciando proceso de refresco de archivos para el curso ID: {course_id}"
+        f"Iniciando proceso de refresco de archivos para el curso ID: {course_id} a través de una tarea minimalista."
     )
 
-    # Obtener nombre del curso para Pgvector usando función helper
-    try:
-        course_name_for_pgvector = await _get_course_name_for_operations(
-            course_id, moodle
+    # La nueva tarea requiere un user_id, usaremos el profesor por defecto configurado.
+    teacher_id_to_use = moodle_config.default_teacher_id
+    if teacher_id_to_use is None:
+        logger.error(
+            "No se puede iniciar el refresco porque MOODLE_DEFAULT_TEACHER_ID no está configurado."
         )
-    except HTTPException as e:
-        if e.status_code == 404:
-            # Usar fallback si el curso no se encuentra
-            course_name_for_pgvector = f"Curso_{course_id}"
-            logger.warning(
-                f"No se pudo obtener el nombre para el curso ID {course_id}, usando fallback: '{course_name_for_pgvector}' para Pgvector."
-            )
-        else:
-            raise
-
-    target_section_name = moodle_config.course_folder_name
-    target_folder_name = "Documentos Entrenai"  # As defined in setup_ia_for_course
-
-    files_to_process_count = 0
-    tasks_dispatched_count = 0
-    dispatched_task_ids: List[str] = []  # To store IDs of dispatched tasks
-    # Ruta que el API podría usar para crear el directorio en el host/API-environment
-    course_download_dir_on_api_host = (
-        Path(base_config.download_dir) / str(course_id)
-    ).resolve()
-
-    # Ruta que se pasará a la tarea Celery (relativa al WORKDIR del contenedor Celery, o absoluta dentro del contenedor)
-    # base_config.download_dir es 'data/downloads'
-    # Esto resultará en 'data/downloads/<course_id>'
-    download_dir_for_task_str = str(Path(base_config.download_dir) / str(course_id))
+        raise HTTPException(
+            status_code=400,
+            detail="MOODLE_DEFAULT_TEACHER_ID debe estar configurado en el servidor para esta operación.",
+        )
 
     try:
-        # 1. Asegurar que existe la tabla de Pgvector antes de procesar archivos
-        vector_size = pgvector_config.default_vector_size  # Updated config usage
+        # Despachar la tarea Celery minimalista
+        task_result = process_moodle_course_content_minimal.delay(  # type: ignore
+            course_id=course_id, user_id=teacher_id_to_use
+        )
+        task_id = task_result.id
         logger.info(
-            f"Asegurando tabla Pgvector para curso {course_id} ('{course_name_for_pgvector}') con tamaño de vector {vector_size}"
-        )
-        if not pgvector_db.ensure_table(
-            course_name_for_pgvector, vector_size
-        ):  # Updated method call
-            logger.error(
-                f"Falló al asegurar la tabla Pgvector para el curso {course_id} ('{course_name_for_pgvector}')"
-            )
-            raise HTTPException(
-                status_code=500,
-                detail=f"Falló al asegurar la tabla Pgvector para el curso {course_id} ('{course_name_for_pgvector}')",
-            )
-        logger.info(
-            f"Tabla Pgvector '{pgvector_db.get_table_name(course_name_for_pgvector)}' asegurada."
+            f"Tarea Celery minimalista {task_id} despachada para procesar el curso ID: {course_id}"
         )
 
-        # 2. Obtener todos los contenidos del curso para encontrar la sección y módulos
-        all_course_contents = moodle._make_request(
-            "core_course_get_contents", payload_params={"courseid": course_id}
-        )
-        if not isinstance(all_course_contents, list):
-            raise HTTPException(
-                status_code=500,
-                detail="No se pudieron obtener los contenidos del curso.",
-            )
-
-        # 3. Buscar la sección objetivo por nombre
-        found_section_id: Optional[int] = None
-        for section_data in all_course_contents:
-            if section_data.get("name") == target_section_name:
-                found_section_id = section_data.get("id")
-                break
-
-        if not found_section_id:
-            logger.error(
-                f"Sección objetivo '{target_section_name}' no encontrada en curso {course_id}."
-            )
-            raise HTTPException(
-                status_code=404,
-                detail=f"Sección de configuración '{target_section_name}' no encontrada.",
-            )
-        logger.info(
-            f"Sección '{target_section_name}' encontrada con ID: {found_section_id}."
-        )
-
-        # 4. Encontrar el módulo de carpeta en la sección
-        folder_module = moodle.get_course_module_by_name(
-            course_id, found_section_id, target_folder_name, "folder"
-        )
-        if not folder_module or not folder_module.id:
-            logger.error(
-                f"Carpeta '{target_folder_name}' no encontrada en curso {course_id}, sección {found_section_id}."
-            )
-            raise HTTPException(
-                status_code=404,
-                detail=f"Carpeta designada de Moodle '{target_folder_name}' no encontrada.",
-            )
-
-        folder_cmid = folder_module.id
-        logger.info(
-            f"Carpeta '{target_folder_name}' encontrada con cmid: {folder_cmid}."
-        )
-
-        # 5. Obtener los archivos de la carpeta
-        moodle_files = moodle.get_folder_files(folder_cmid=folder_cmid)
-        if not moodle_files:
-            logger.info(
-                f"No se encontraron archivos en la carpeta '{target_folder_name}' (cmid: {folder_cmid})."
-            )
-            return {
-                "message": "No se encontraron archivos en la carpeta designada de Moodle para procesar.",
-                "course_id": course_id,
-                "files_identified_for_processing": 0,
-                "tasks_dispatched": 0,
-            }
-
-        logger.info(
-            f"Se encontraron {len(moodle_files)} archivos en la carpeta de Moodle. Verificando archivos nuevos/modificados..."
-        )
-        # Asegurar que el directorio de descarga del curso exista (creado por el API en su entorno)
-        course_download_dir_on_api_host.mkdir(
-            parents=True, exist_ok=True
-        )  # Ensure download dir for the course exists
-
-        # 6. Loop through Moodle files and dispatch tasks
-        for mf in moodle_files:
-            if not mf.filename or not mf.fileurl or mf.timemodified is None:
-                logger.warning(
-                    f"Omitiendo archivo de Moodle con datos incompletos: {mf.model_dump_json(exclude_none=True)}"
-                )
-                continue
-
-            if pgvector_db.is_file_new_or_modified(
-                course_id, mf.filename, mf.timemodified
-            ):
-                files_to_process_count += 1
-                logger.info(
-                    f"Archivo '{mf.filename}' es nuevo o modificado. Despachando tarea Celery..."
-                )
-
-                # Prepare AI provider configuration
-                ai_provider_config_payload: Dict[str, Any] = {
-                    "selected_provider": base_config.ai_provider
-                }
-                if base_config.ai_provider == "gemini":
-                    ai_provider_config_payload["gemini"] = vars(gemini_config)
-                else:  # Default to ollama
-                    ai_provider_config_payload["ollama"] = vars(ollama_config)
-
-                # Dispatch Celery task
-                try:
-                    task_result = process_moodle_file_http.delay(
-                        course_id=course_id,
-                        course_name_for_pgvector=course_name_for_pgvector,
-                        moodle_file_info={
-                            "filename": mf.filename,
-                            "filepath": mf.filepath,
-                            "filesize": mf.filesize,
-                            "fileurl": str(
-                                mf.fileurl
-                            ),  # Explicitly convert HttpUrl to string
-                            "timemodified": mf.timemodified,
-                            "mimetype": mf.mimetype,
-                        },
-                        download_dir_str=download_dir_for_task_str,  # <--- CAMBIO CLAVE AQUÍ
-                        ai_provider_config=ai_provider_config_payload,
-                        pgvector_config_dict=vars(pgvector_config),
-                        moodle_config_dict=vars(moodle_config),
-                        base_config_dict=vars(base_config),
-                    )
-                    tasks_dispatched_count += 1
-                    dispatched_task_ids.append(task_result.id)
-                    logger.info(
-                        f"Tarea Celery {task_result.id} despachada para archivo: {mf.filename}"
-                    )
-                except Exception as e_task:
-                    logger.error(
-                        f"Error al despachar tarea Celery para {mf.filename}: {e_task}"
-                    )
-                    # Potentially add to a list of failed dispatches if needed for response
-
-            else:
-                logger.info(
-                    f"Archivo '{mf.filename}' no ha sido modificado. Omitiendo."
-                )
-
-        # 7. Cleanup (optional, as tasks handle individual file cleanup)
-        # The main course_download_dir might still be useful for tasks if they are slow to pick up
-        # Or if multiple tasks share it. Consider if this cleanup is still needed.
-        # For now, individual tasks clean up their own downloaded files.
-        # If the directory is meant to be cleaned only if empty:
-        try:
-            if course_download_dir_on_api_host.exists() and not any(
-                course_download_dir_on_api_host.iterdir()
-            ):
-                # This check might be problematic if tasks haven't run yet.
-                # Consider if this cleanup is still appropriate here.
-                # shutil.rmtree(course_download_dir_on_api_host)
-                # logger.info(
-                #     f"Directorio de descargas del curso vacío (aparentemente) eliminado: {course_download_dir_on_api_host}"
-                # )
-                logger.info(
-                    f"Revisión de directorio de descargas {course_download_dir_on_api_host} completada. Las tareas gestionarán los archivos individuales."
-                )
-        except Exception as e_rm:
-            logger.warning(
-                f"No se pudo realizar la limpieza del directorio de descargas del curso {course_download_dir_on_api_host}: {e_rm}"
-            )
-
-        # 8. Prepare and return response
         response_message = (
-            f"Refresco de archivos iniciado para el curso {course_id}. "
-            f"{tasks_dispatched_count} tareas despachadas para {files_to_process_count} archivos identificados para procesamiento."
+            f"Refresco de archivos para el curso {course_id} iniciado a través de la tarea {task_id}. "
+            "La aplicación principal ahora manejará el procesamiento completo."
         )
-        logger.info(response_message)
+
+        # Mantener una estructura de respuesta similar a la anterior
         return {
             "message": response_message,
             "course_id": course_id,
-            "files_identified_for_processing": files_to_process_count,
-            "tasks_dispatched": tasks_dispatched_count,
-            "task_ids": dispatched_task_ids,
+            "files_identified_for_processing": "N/A (gestionado por la app principal)",
+            "tasks_dispatched": 1,
+            "task_ids": [task_id],
         }
 
-    except HTTPException as http_exc:
-        logger.error(
-            f"HTTPException durante el inicio del refresco de archivos para curso {course_id}: {http_exc.detail}"
-        )
-        raise http_exc
-    except MoodleAPIError as e:
-        logger.error(
-            f"Error de API de Moodle durante el inicio del refresco de archivos para curso {course_id}: {e}"
-        )
-        raise HTTPException(status_code=502, detail=f"Error de API de Moodle: {str(e)}")
     except Exception as e:
         logger.exception(
-            f"Error inesperado durante el inicio del refresco de archivos para curso {course_id}: {e}"
+            f"Error al despachar la tarea Celery minimalista para el curso {course_id}: {e}"
         )
         raise HTTPException(
-            status_code=500, detail=f"Error interno del servidor: {str(e)}"
+            status_code=500,
+            detail="Error al despachar la tarea de procesamiento en segundo plano.",
         )
 
 
@@ -1154,3 +961,13 @@ async def get_indexed_files_for_course(
         raise HTTPException(
             status_code=500, detail=f"Error interno del servidor: {str(e)}"
         )
+
+
+@router.get("/health-check")
+async def api_health_check():
+    """Simple health check endpoint to test API connectivity."""
+    return {
+        "status": "ok", 
+        "timestamp": str(datetime.now()),
+        "api_version": "0.1.0"
+    }

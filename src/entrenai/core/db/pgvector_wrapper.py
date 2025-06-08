@@ -33,43 +33,50 @@ class PgvectorWrapper:
         self.config = config
         self.conn = None
         self.cursor = None
+        # La conexión se establecerá de forma perezosa en _connect()
+
+    def _connect(self):
+        """Establishes a connection to the database if one doesn't exist."""
+        if self.conn and not self.conn.closed:
+            return  # Ya hay una conexión activa
+
         try:
             if not all(
-                [config.host, config.port, config.user, config.password, config.db_name]
+                [self.config.host, self.config.port, self.config.user, self.config.password, self.config.db_name]
             ):
                 logger.error("Pgvector connection details missing in configuration.")
                 raise PgvectorWrapperError("Pgvector connection details missing.")
 
             self.conn = psycopg2.connect(
-                host=config.host,
-                port=config.port,
-                user=config.user,
-                password=config.password,
-                dbname=config.db_name,
+                host=self.config.host,
+                port=self.config.port,
+                user=self.config.user,
+                password=self.config.password,
+                dbname=self.config.db_name,
             )
             self.cursor = self.conn.cursor(cursor_factory=RealDictCursor)
-            register_vector(self.conn)  # Register the vector type
+            register_vector(self.conn)
             self.cursor.execute("CREATE EXTENSION IF NOT EXISTS vector;")
             self.conn.commit()
             logger.info(
-                f"PgvectorWrapper initialized and connected to {config.host}:{config.port}/{config.db_name}"
+                f"PgvectorWrapper connected to {self.config.host}:{self.config.port}/{self.config.db_name}"
             )
-
-            self.ensure_file_tracker_table()  # Ensure the file tracker table exists
+            self.ensure_file_tracker_table()
 
         except psycopg2.Error as e:
             logger.error(
-                f"Failed to connect to PostgreSQL/pgvector at {config.host}:{config.port}: {e}"
-            )
-            self.conn = None  # Ensure conn is None if connection failed
-            self.cursor = None
-            # Do not raise here, allow for attempts to reconnect or handle gracefully
-        except Exception as e:  # Catch other potential errors during init
-            logger.error(
-                f"An unexpected error occurred during PgvectorWrapper initialization: {e}"
+                f"Failed to connect to PostgreSQL/pgvector at {self.config.host}:{self.config.port}: {e}"
             )
             self.conn = None
             self.cursor = None
+            raise PgvectorWrapperError(f"Failed to connect to database: {e}")
+        except Exception as e:
+            logger.error(
+                f"An unexpected error occurred during PgvectorWrapper connection: {e}"
+            )
+            self.conn = None
+            self.cursor = None
+            raise PgvectorWrapperError(f"An unexpected error occurred: {e}")
 
     @staticmethod
     def _normalize_name_for_table(name: str) -> str:
@@ -107,6 +114,7 @@ class PgvectorWrapper:
         The table will have columns: id (TEXT PRIMARY KEY), document_id (TEXT), text (TEXT), metadata (JSONB), embedding (vector(vector_size)).
         Returns True if the table exists or was created successfully, False otherwise.
         """
+        self._connect()
         if not self.conn or not self.cursor:
             logger.error("No database connection. Cannot ensure table.")
             return False
@@ -118,7 +126,8 @@ class PgvectorWrapper:
                 "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s);",
                 (table_name,),
             )
-            if self.cursor.fetchone()["exists"]:
+            result = self.cursor.fetchone()
+            if result and result["exists"]:
                 # Check the dimension of the existing 'embedding' column
                 dimension_check_sql = """
                 SELECT atttypmod FROM pg_attribute
@@ -209,6 +218,7 @@ class PgvectorWrapper:
         Deletes all chunks associated with a specific document_id from the course's table.
         Returns True on success or if no matching rows were found, False on error.
         """
+        self._connect()
         if not self.conn or not self.cursor:
             logger.error("No database connection. Cannot delete file chunks.")
             return False
@@ -220,7 +230,8 @@ class PgvectorWrapper:
                 "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s);",
                 (table_name,),
             )
-            if not self.cursor.fetchone()["exists"]:
+            result = self.cursor.fetchone()
+            if not result or not result["exists"]:
                 logger.warning(
                     f"Table '{table_name}' does not exist. Cannot delete chunks for document_id '{document_id}'."
                 )
@@ -260,6 +271,7 @@ class PgvectorWrapper:
         Deletes a file's record from the file_tracker table.
         Returns True on success or if no matching row was found, False on error.
         """
+        self._connect()
         if not self.conn or not self.cursor:
             logger.error("No database connection. Cannot delete file from tracker.")
             return False
@@ -302,6 +314,7 @@ class PgvectorWrapper:
         Retrieves a dictionary of processed file identifiers and their moodle_timemodified timestamps for a given course.
         Returns an empty dictionary on error or if no files are found.
         """
+        self._connect()
         if not self.conn or not self.cursor:
             logger.error(
                 "No database connection. Cannot get processed files timestamps."
@@ -350,6 +363,7 @@ class PgvectorWrapper:
         Inserts or updates (upserts) document chunks into the specified course's table.
         Assumes DocumentChunk has 'id', 'course_id', 'document_id', 'text', 'embedding', 'metadata'.
         """
+        self._connect()
         if not self.conn or not self.cursor:
             logger.error("No database connection. Cannot upsert chunks.")
             return False
@@ -448,6 +462,7 @@ class PgvectorWrapper:
         For cosine similarity with pgvector: embedding <-> query_embedding gives cosine distance (0=identical, 2=opposite).
         Smaller distance is better.
         """
+        self._connect()
         if not self.conn or not self.cursor:
             logger.error("No database connection. Cannot search chunks.")
             return []
@@ -496,6 +511,16 @@ class PgvectorWrapper:
 
             formatted_results = []
             for row in results:
+                metadata = row.get("metadata")
+                if isinstance(metadata, str):
+                    import json
+                    try:
+                        metadata = json.loads(metadata)
+                    except json.JSONDecodeError:
+                        metadata = {}
+                elif not isinstance(metadata, dict):
+                    metadata = {}
+                
                 formatted_results.append(
                     {
                         "id": row["id"],
@@ -504,11 +529,7 @@ class PgvectorWrapper:
                             "course_id": row.get("course_id"),
                             "document_id": row.get("document_id"),
                             "text": row.get("text"),
-                            **(
-                                row.get("metadata")
-                                if isinstance(row.get("metadata"), dict)
-                                else {}
-                            ),  # Spread metadata if it's a dict
+                            **metadata,
                         },
                     }
                 )
@@ -548,6 +569,7 @@ class PgvectorWrapper:
         Schema: course_id (INTEGER), file_identifier (TEXT), moodle_timemodified (BIGINT), processed_at (BIGINT)
         Primary Key: (course_id, file_identifier)
         """
+        # This method is called by _connect, so we don't call _connect here to avoid recursion
         if not self.conn or not self.cursor:
             logger.error("No database connection. Cannot ensure file_tracker table.")
             # Potentially raise an error or handle differently if this is critical at this stage
@@ -557,7 +579,8 @@ class PgvectorWrapper:
             self.cursor.execute(
                 f"SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = '{self.FILE_TRACKER_TABLE_NAME}');"
             )
-            if self.cursor.fetchone()["exists"]:
+            result = self.cursor.fetchone()
+            if result and result["exists"]:
                 logger.info(f"Table '{self.FILE_TRACKER_TABLE_NAME}' already exists.")
                 return
 
@@ -592,6 +615,7 @@ class PgvectorWrapper:
         Checks if the file is new or modified compared to the entry in file_tracker.
         Returns True if the file is new, modified, or if an error occurs (conservative).
         """
+        self._connect()
         if not self.conn or not self.cursor:
             logger.error("No database connection. Cannot check file status.")
             return True  # Conservative: assume new/modified if DB is not available
@@ -643,6 +667,7 @@ class PgvectorWrapper:
         """
         Marks the file as processed by inserting or updating its record in file_tracker.
         """
+        self._connect()
         if not self.conn or not self.cursor:
             logger.error("No database connection. Cannot mark file as processed.")
             # Consider raising an error if this operation is critical and cannot be deferred

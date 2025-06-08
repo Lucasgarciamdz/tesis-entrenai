@@ -1,5 +1,4 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // const courseSearchInput = document.getElementById('course-search'); // Removed
     const courseSelect = document.getElementById('course-select');
     const setupAiButton = document.getElementById('setup-ai-button');
     // El contenedor de mensajes de estado ahora es #status-messages-container
@@ -12,7 +11,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // URL base de tu API FastAPI (ajusta si es necesario)
     // Si FastAPI sirve este HTML, una ruta relativa podría funcionar: '/api/v1'
     // Si se abre como file:// o desde otro servidor, se necesita la URL completa y CORS.
-    const API_BASE_URL = 'http://localhost:8000/api/v1';
+    const API_BASE_URL = 'http://localhost:8000';
+
+    // Get additional DOM elements for manual input
+    const manualCourseInput = document.getElementById('manual-course-input');
+    const manualCourseId = document.getElementById('manual-course-id');
+    const toggleManualButton = document.getElementById('toggle-manual-input');
 
     // Ensure essential DOM elements are present before proceeding.
     if (!courseSelect || !setupAiButton || !statusMessagesContainer || !manageFilesButton) {
@@ -21,6 +25,22 @@ document.addEventListener('DOMContentLoaded', () => {
             updateStatus('Error de inicialización: Faltan componentes de la página.', 'error');
         }
         return;
+    }
+
+    /**
+     * Tests API connectivity before attempting to load courses
+     */
+    async function testApiConnectivity() {
+        try {
+            const response = await fetch(`${API_BASE_URL}/health`, {
+                method: 'GET',
+                timeout: 5000
+            });
+            return response.ok;
+        } catch (error) {
+            console.warn('API connectivity test failed:', error);
+            return false;
+        }
     }
 
     /**
@@ -35,11 +55,18 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('stat-archivos-en-proceso').textContent = '...';
         document.getElementById('stat-estado-moodle').textContent = 'Verificando...';
 
+        // Create an AbortController to handle timeouts
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
         try {
             // This endpoint typically uses a default Moodle teacher ID if `moodle_user_id` is not provided.
-            const response = await fetch(`${API_BASE_URL}/courses`);
+            const response = await fetch(`${API_BASE_URL}/api/v1/courses`, {
+                signal: controller.signal
+            });
             
+            clearTimeout(timeoutId); // Clear timeout if request succeeds
+
             if (!response.ok) {
                 let errorDetail = `Error ${response.status}: No se pudieron cargar los cursos.`;
                 try {
@@ -77,10 +104,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('stat-estado-moodle').textContent = 'Sin cursos';
             }
         } catch (networkError) {
+            clearTimeout(timeoutId); // Clear timeout if request fails
             console.error('Error de red al cargar cursos:', networkError);
-            updateStatus('Error de red al cargar cursos. Verifica tu conexión e inténtalo de nuevo.', 'error');
-            courseSelect.innerHTML = '<option value="">Error de red al cargar</option>';
-            document.getElementById('stat-estado-moodle').textContent = 'Error de Red';
+            
+            let errorMessage = 'Error de red al cargar cursos. Verifica tu conexión e inténtalo de nuevo.';
+            let statusText = 'Error de Red';
+            
+            if (networkError.name === 'AbortError') {
+                errorMessage = 'Timeout al cargar cursos. El servidor de Moodle puede estar inaccesible. Puedes usar el modo manual para continuar.';
+                statusText = 'Timeout';
+            }
+            
+            updateStatus(errorMessage, 'error');
+            courseSelect.innerHTML = '<option value="">Error al cargar cursos</option>';
+            document.getElementById('stat-estado-moodle').textContent = statusText;
+            
+            // Show a suggestion to use manual mode
+            setTimeout(() => {
+                updateStatus('💡 Sugerencia: Usa el botón "Usar ID de curso manual" si conoces el ID del curso.', 'info');
+            }, 3000);
         }
     }
 
@@ -121,10 +163,21 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+    
+    // Also listen for manual input changes
+    if (manualCourseId && manageFilesButton) {
+        manualCourseId.addEventListener('input', () => {
+            if (manualCourseId.value && manageFilesButton) {
+                manageFilesButton.style.display = 'block'; // Show the button
+            } else if (manageFilesButton) {
+                manageFilesButton.style.display = 'none'; // Hide the button
+            }
+        });
+    }
 
     if (manageFilesButton) {
       manageFilesButton.addEventListener('click', () => {
-        const selectedCourseId = courseSelect.value;
+        const selectedCourseId = getSelectedCourseId();
         if (selectedCourseId) {
           // Navigate to the manage_files.html page with the course_id as a query parameter
           window.location.href = `/ui/manage_files.html?course_id=${selectedCourseId}`;
@@ -135,17 +188,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     setupAiButton.addEventListener('click', async () => {
-        const selectedCourseId = courseSelect.value;
+        const selectedCourseId = getSelectedCourseId();
         if (!selectedCourseId) {
             updateStatus('Por favor, selecciona un curso primero.', 'warning');
             return;
         }
 
-        // Use type coercion (==) for selectedCourseId as it comes from element value (string)
-        // and course.id might be a number.
-        const selectedCourse = allCourses.find(c => c.id == selectedCourseId); 
+        const selectedCourse = getSelectedCourse();
         if (!selectedCourse) {
-             updateStatus('El curso seleccionado no es válido o no se encontró en la lista.', 'error');
+            updateStatus('El curso seleccionado no es válido o no se encontró en la lista.', 'error');
             return;
         }
         
@@ -160,13 +211,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
         try {
+            // Add timeout to setup-ia request as it can take a long time
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout
+
             // The backend endpoint expects 'courseName' as a query parameter, used as an alias for 'course_name_query'.
-            const response = await fetch(`${API_BASE_URL}/courses/${selectedCourseId}/setup-ia?courseName=${encodeURIComponent(courseDisplayName)}`, {
+            const response = await fetch(`${API_BASE_URL}/api/v1/courses/${selectedCourseId}/setup-ia?courseName=${encodeURIComponent(courseDisplayName)}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json' // Though body is not sent, this header is good practice for POST.
-                }
+                },
+                signal: controller.signal
             });
+            
+            clearTimeout(timeoutId);
             
             let result;
             try {
@@ -186,8 +244,15 @@ document.addEventListener('DOMContentLoaded', () => {
             
             updateStatus(`Configuración de IA para "${courseDisplayName}" completada exitosamente: ${result.message}`, 'success');
         } catch (networkError) {
+            clearTimeout(timeoutId); // Clear timeout if request fails
             console.error('Error de red durante la configuración de IA:', networkError);
-            updateStatus(`Error de red al configurar IA para "${courseDisplayName}". Verifica tu conexión e inténtalo de nuevo.`, 'error');
+            
+            let errorMessage = `Error de red al configurar IA para "${courseDisplayName}". Verifica tu conexión e inténtalo de nuevo.`;
+            if (networkError.name === 'AbortError') {
+                errorMessage = `Timeout al configurar IA para "${courseDisplayName}". La operación está tomando demasiado tiempo.`;
+            }
+            
+            updateStatus(errorMessage, 'error');
         } finally {
             // Re-enable controls and hide spinner
             setupAiButton.disabled = false;
@@ -196,6 +261,44 @@ document.addEventListener('DOMContentLoaded', () => {
             if(manageFilesButton) manageFilesButton.disabled = false;
         }
     });
+
+    // Toggle manual input mode
+    if (toggleManualButton && manualCourseInput) {
+        toggleManualButton.addEventListener('click', () => {
+            const isHidden = manualCourseInput.style.display === 'none';
+            manualCourseInput.style.display = isHidden ? 'block' : 'none';
+            toggleManualButton.textContent = isHidden ? 'Usar lista de cursos' : 'Usar ID de curso manual';
+            
+            if (isHidden) {
+                // Hide the course select when using manual input
+                courseSelect.parentElement.style.display = 'none';
+            } else {
+                // Show the course select when not using manual input
+                courseSelect.parentElement.style.display = 'block';
+            }
+        });
+    }
+
+    // Helper function to get selected course ID (from dropdown or manual input)
+    function getSelectedCourseId() {
+        if (manualCourseInput && manualCourseInput.style.display !== 'none') {
+            return manualCourseId ? manualCourseId.value : null;
+        }
+        return courseSelect.value;
+    }
+
+    // Helper function to get selected course info
+    function getSelectedCourse() {
+        const selectedId = getSelectedCourseId();
+        if (!selectedId) return null;
+        
+        if (manualCourseInput && manualCourseInput.style.display !== 'none') {
+            // Return a fake course object for manual input
+            return { id: parseInt(selectedId), fullname: `Curso ${selectedId}` };
+        }
+        
+        return allCourses.find(c => c.id == selectedId);
+    }
 
     /**
      * Displays a status message to the user using the new alert-style messages.
@@ -249,8 +352,29 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    /**
+     * Initialize the application
+     */
+    async function initializeApp() {
+        // First test if the API is reachable
+        updateStatus('Verificando conectividad con el servidor...', 'info');
+        
+        const apiReachable = await testApiConnectivity();
+        if (!apiReachable) {
+            updateStatus('⚠️ No se puede conectar con el servidor. Puedes usar el modo manual para continuar.', 'warning');
+            document.getElementById('stat-estado-moodle').textContent = 'Sin conexión';
+            setTimeout(() => {
+                updateStatus('💡 Haz clic en "Usar ID de curso manual" si conoces el ID del curso.', 'info');
+            }, 2000);
+            return;
+        }
+        
+        // If API is reachable, try to load courses
+        await fetchCourses();
+    }
+
     // Initial action: fetch courses when the page loads.
-    fetchCourses().catch(error => {
+    initializeApp().catch(error => {
         // This catch is for unhandled promise rejections from fetchCourses itself,
         // though fetchCourses has its own internal error handling.
         console.error('Error crítico durante la carga inicial de cursos:', error);

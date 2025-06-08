@@ -141,10 +141,11 @@ class MoodleClient:
                     self.base_url,
                     params=query_params_for_url,
                     data=formatted_api_payload,
+                    timeout=30,  # Add 30 second timeout
                 )
             elif http_method.upper() == "GET":
                 all_get_params = {**query_params_for_url, **formatted_api_payload}
-                response = self.session.get(self.base_url, params=all_get_params)
+                response = self.session.get(self.base_url, params=all_get_params, timeout=30)  # Add 30 second timeout
             else:
                 raise MoodleAPIError(f"Método HTTP no soportado: {http_method}")
             response.raise_for_status()
@@ -171,6 +172,9 @@ class MoodleClient:
             raise MoodleAPIError(
                 f"Error HTTP: {status}", status_code=status, response_data=resp_text
             ) from http_err
+        except requests.exceptions.Timeout as timeout_err:
+            logger.error(f"Timeout para '{wsfunction}': {timeout_err}")
+            raise MoodleAPIError(f"Timeout al conectar con Moodle: {timeout_err}") from timeout_err
         except requests.exceptions.RequestException as req_err:
             logger.error(f"Excepción de petición para '{wsfunction}': {req_err}")
             raise MoodleAPIError(str(req_err)) from req_err

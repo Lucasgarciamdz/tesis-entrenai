@@ -166,7 +166,7 @@ services:
   entrenai_api:
     build: 
       context: .
-      dockerfile: Dockerfile  # El Dockerfile original para la app completa
+      dockerfile: Dockerfile  # The main Dockerfile for the full app
     container_name: entrenai_api
     restart: unless-stopped
     ports:
@@ -189,11 +189,11 @@ services:
       - entrenai_net
     command: sh -c "uvicorn src.entrenai.api.main:app --host 0.0.0.0 --port 8000 --reload"
 
-  # --- Celery Worker Minimalista ---
+  # --- Minimalist Celery Worker ---
   celery_worker:
     build: 
       context: .
-      dockerfile: Dockerfile.celery  # El nuevo Dockerfile minimalista
+      dockerfile: Dockerfile.celery  # The new minimalist Dockerfile
     container_name: entrenai_celery_worker
     restart: unless-stopped
     env_file:
@@ -201,12 +201,16 @@ services:
     environment:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
-      FASTAPI_BASE_URL: http://entrenai_api:8000  # URL interna para contactar FastAPI
+      FASTAPI_BASE_URL: http://entrenai_api:8000  # Internal URL to contact FastAPI
       PYTHONUNBUFFERED: 1
     depends_on:
       redis:
         condition: service_healthy
       entrenai_api:
+        condition: service_started
+      pgvector_db:
+        condition: service_healthy
+      ollama:
         condition: service_started
     networks:
       - entrenai_net

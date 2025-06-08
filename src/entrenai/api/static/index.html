@@ -5,13 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Entrenai - Panel de Control</title>
     <link rel="stylesheet" href="style.css">
-    <!-- Podríamos añadir un icono para el logo si lo tuviéramos -->
-    <!-- <link rel="icon" href="favicon.ico" type="image/x-icon"> -->
 </head>
 <body>
     <header class="site-header">
         <div class="logo-container">
-            <!-- <img src="path/to/logo.png" alt="Entrenai Logo"> -->
             <a href="index.html" class="site-title">Entrenai</a>
         </div>
         <nav class="main-nav">
@@ -65,6 +62,18 @@
                         <select id="course-select" name="course-select" class="form-select">
                             <option value="">Cargando cursos...</option>
                         </select>
+                        <small class="form-text text-muted">
+                            Si no ves cursos después de unos segundos, verifica que Moodle esté configurado correctamente.
+                        </small>
+                    </div>
+                    
+                    <!-- Fallback option if Moodle is not accessible -->
+                    <div class="form-group" id="manual-course-input" style="display: none;">
+                        <label for="manual-course-id" class="form-label">ID del Curso (Manual):</label>
+                        <input type="number" id="manual-course-id" class="form-control" placeholder="Ingresa el ID del curso">
+                        <small class="form-text text-muted">
+                            Usa esta opción si Moodle no está disponible. Ingresa el ID numérico del curso.
+                        </small>
                     </div>
                     
                     <div class="d-flex" style="gap: 1rem;">
@@ -74,6 +83,12 @@
                         </button>
                         <button id="manage-files-button" class="btn btn-secondary" style="display:none; flex-grow: 1;">
                             Gestionar Archivos del Curso
+                        </button>
+                    </div>
+
+                    <div class="form-group">
+                        <button type="button" id="toggle-manual-input" class="btn btn-sm btn-outline-secondary">
+                            Usar ID de curso manual
                         </button>
                     </div>
                 </div>
@@ -144,6 +159,33 @@
                 showAlert('Por favor, selecciona un curso primero desde el Panel de Control para gestionar sus archivos.');
                 // Opcional: hacer scroll hasta el selector de curso
                 // courseSelect.focus(); 
+            }
+        });
+
+        // Script para manejar la entrada manual del ID del curso
+        document.getElementById('toggle-manual-input').addEventListener('click', function() {
+            const manualInputDiv = document.getElementById('manual-course-input');
+            const courseSelectDiv = document.getElementById('course-select').closest('.form-group');
+            const isManualInputVisible = manualInputDiv.style.display === 'block';
+
+            if (isManualInputVisible) {
+                // Ocultar entrada manual, mostrar selección de curso
+                manualInputDiv.style.display = 'none';
+                courseSelectDiv.style.display = 'block';
+                this.textContent = 'Usar ID de curso manual';
+            } else {
+                // Validar que no haya selección en el dropdown
+                const selectedValue = document.getElementById('course-select').value;
+                if (selectedValue) {
+                    if (!confirm('Tienes una selección activa en el menú desplegable. ¿Estás seguro de que deseas cambiar a entrada manual?')) {
+                        return; // Salir si el usuario cancela
+                    }
+                }
+
+                // Mostrar entrada manual, ocultar selección de curso
+                manualInputDiv.style.display = 'block';
+                courseSelectDiv.style.display = 'none';
+                this.textContent = 'Volver a seleccionar curso';
             }
         });
     </script>

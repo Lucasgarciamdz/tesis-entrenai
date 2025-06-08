@@ -38,7 +38,7 @@ pgvector
 
 # Celery and Redis
 celery==5.3.6
-eventlet # Required for Celery's eventlet pool
+# eventlet # Removed - not needed for FastAPI, causes RLock issues
 redis==5.0.1
 
 # Generic

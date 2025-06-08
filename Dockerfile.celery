@@ -1,20 +1,30 @@
-# Dockerfile minimalista para Celery - Solo manejo de colas HTTP
+# Minimalist Dockerfile for Celery - HTTP Queue Handling Only
 FROM python:3.11-slim
+
+# Create a non-root user for security
+RUN groupadd -r celery && useradd -r -g celery celery
 
 WORKDIR /app
 
-# Solo instalar dependencias mínimas para Celery y requests HTTP
+# Install only minimal dependencies for Celery and HTTP requests
 COPY requirements.celery.txt .
 RUN pip install --no-cache-dir -r requirements.celery.txt
 
-# Copiar estructura de módulos necesaria
+# Copy the necessary module structure
 COPY src/__init__.py src/
 COPY src/entrenai/__init__.py src/entrenai/
-COPY src/entrenai/celery_app_minimal.py src/entrenai/
-COPY src/entrenai/tasks_minimal.py src/entrenai/
+COPY src/entrenai/celery/celery_app_minimal.py src/entrenai/
+COPY src/entrenai/celery/tasks_minimal.py src/entrenai/
 
-# Configurar variables de entorno
+# Change ownership of the app directory to the celery user
+RUN chown -R celery:celery /app
+
+# Switch to non-root user
+USER celery
+
+# Set environment variables
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
-CMD ["celery", "-A", "src.entrenai.tasks_minimal.app", "worker", "-l", "INFO", "-P", "eventlet"]
+# Set the command to run the Celery worker with threads instead of eventlet
+CMD ["celery", "-A", "src.entrenai.tasks_minimal.app", "worker", "-l", "INFO", "-P", "threads"]

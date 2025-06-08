@@ -1,7 +1,9 @@
+from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 # Direct imports to avoid potential circular imports
 import src.entrenai.api.routers.course_setup as course_setup
@@ -21,13 +23,19 @@ async def lifespan(app: FastAPI):
     logger.info(f"Nivel de log configurado en: {base_config.log_level}")
     logger.info(f"Host de FastAPI: {base_config.fastapi_host}")
     logger.info(f"Puerto de FastAPI: {base_config.fastapi_port}")
-    # Aquí se podrían añadir verificaciones iniciales, como intentar conectar a PgVector, Ollama, etc.
-    # Por ahora, solo se registra.
-
+    
+    # Verificar que el directorio static existe
+    static_dir = Path(__file__).parent / "static"
+    if not static_dir.exists():
+        logger.warning(f"Directorio static no encontrado en: {static_dir}")
+    else:
+        logger.info(f"Directorio static encontrado en: {static_dir}")
+    
     yield
 
     # Shutdown
     logger.info("Cerrando API de Entrenai...")
+    # Aquí podrías cerrar conexiones de base de datos, etc.
 
 
 # Initialize FastAPI app
@@ -61,16 +69,24 @@ async def health_check():
     return {"status": "healthy"}  # "healthy" es un término técnico común, se mantiene.
 
 
-# Placeholder for future routers
-# from .routers import some_router
-# app.include_router(some_router.router, prefix="/items", tags=["items"])
+@app.get("/favicon.ico")
+async def favicon():
+    # Retorna una respuesta vacía para evitar 404s en los logs
+    return FileResponse("src/entrenai/api/static/favicon.ico") if Path("src/entrenai/api/static/favicon.ico").exists() else {"detail": "No favicon"}
+
 
 # Include routers
 app.include_router(course_setup.router)
 app.include_router(search.router)
 app.include_router(internal_processing.router)
 
-app.mount("/ui", StaticFiles(directory="src/entrenai/api/static", html=True), name="ui")
+# Mount static files with absolute path
+static_directory = Path(__file__).parent / "static"
+if static_directory.exists():
+    app.mount("/ui", StaticFiles(directory=str(static_directory), html=True), name="static")
+    logger.info(f"Static files mounted from: {static_directory}")
+else:
+    logger.warning(f"Static directory not found: {static_directory}")
 
 if __name__ == "__main__":
     import uvicorn
