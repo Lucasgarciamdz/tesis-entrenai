@@ -1,116 +1,121 @@
-# Refactor de EntrenAI
+# EntrenAI - Refactorización del Proyecto
 
-Este proyecto es una reescritura completa y simplificada de la aplicación original Entrenai, orientada a la gestión de inteligencia artificial personalizada para cátedras de Moodle. Todo el código, documentación y estructura están en español.
+Este proyecto es una reescritura y mejora de la aplicación original Entrenai, enfocada en la gestión de inteligencia artificial personalizada para cursos en la plataforma Moodle. Todo el código, la documentación interna y la estructura del proyecto están en español.
 
-## Entrenai - Asistente Inteligente para Cursos en Moodle (Descripción Original)
+## Entrenai: Asistente Inteligente para Cursos en Moodle (Descripción General)
 
-Entrenai es una herramienta innovadora diseñada para ayudar a estudiantes y profesores en la plataforma Moodle. Imagina que tienes un asistente personal para cada uno de tus cursos: Entrenai analiza los materiales que subes (como documentos PDF, Word, PowerPoint) y luego responde las preguntas de los estudiantes basándose únicamente en esa información.
+Entrenai es una herramienta innovadora diseñada para asistir a estudiantes y docentes en Moodle. Funciona como un asistente personal para cada curso: Entrenai analiza los materiales de estudio proporcionados por el docente (documentos PDF, Word, PowerPoint, etc.) y luego responde las preguntas de los estudiantes basándose exclusivamente en dicha información.
 
-**¿Cuál es el objetivo de Entrenai?** Facilitar que los estudiantes encuentren la información que necesitan de manera rápida y sencilla, directamente en Moodle, a través de un chat amigable. Esto les ayuda a comprender mejor los temas del curso y a ti, como profesor, te permite ofrecer un apoyo constante.
+**Objetivo Principal de Entrenai:** Facilitar a los estudiantes el acceso rápido y sencillo a la información que necesitan, directamente desde Moodle, a través de una interfaz de chat intuitiva. Esto promueve una mejor comprensión de los temas del curso y permite a los docentes ofrecer un apoyo continuo y eficiente.
 
-## Objetivo de esta Refactorización
+## Objetivos de esta Refactorización
 
-El objetivo principal de esta refactorización es:
-*   Simplificar la base de código original.
-*   Mejorar la organización general del proyecto.
-*   Mantener toda la funcionalidad clave de Entrenai.
-*   Traducir completamente el código, los comentarios y la documentación al español.
-*   Adherirse a las buenas prácticas de desarrollo en Python.
-*   Facilitar la mantenibilidad y futuras expansiones.
+La refactorización de Entrenai busca:
+*   Simplificar y modernizar la base de código original.
+*   Mejorar la organización y modularidad del proyecto.
+*   Mantener y optimizar la funcionalidad clave de Entrenai.
+*   Estandarizar el idioma del código, comentarios y documentación interna al español.
+*   Adherirse a las mejores prácticas de desarrollo en Python y FastAPI.
+*   Facilitar el mantenimiento futuro y la escalabilidad del proyecto.
 
-## Estructura Principal del Proyecto Refactorizado (`entrenai_refactor`)
+## Estructura del Proyecto (`entrenai_refactor/`)
 
-El proyecto se organiza de la siguiente manera dentro del directorio `entrenai_refactor/`:
+El proyecto refactorizado se organiza de la siguiente manera dentro del directorio `entrenai_refactor/`:
 
--   `api/`: Contiene todos los endpoints y la lógica de la API desarrollada con FastAPI. Es el punto de entrada para las interacciones con el sistema.
--   `nucleo/`: Es el corazón de la aplicación. Aquí reside la lógica de negocio principal, incluyendo:
-    *   Interacción con modelos de Inteligencia Artificial.
-    *   Clientes para servicios externos (como Moodle, N8N).
-    *   Gestión y acceso a la base de datos (PGVector).
-    *   Procesamiento y análisis de archivos.
--   `config/`: Módulos para la carga de configuración de la aplicación y la gestión de logs.
--   `celery/`: Implementación de tareas asíncronas utilizando Celery, permitiendo que procesos largos (como el procesamiento de documentos) se ejecuten en segundo plano sin bloquear la API.
--   `docs/`: Documentación técnica y funcional del proyecto refactorizado.
--   `Dockerfile`, `Dockerfile.celery`: Archivos para construir las imágenes de Docker para la aplicación API y el worker de Celery, respectivamente.
--   `docker-compose.yml`: Define los servicios, redes y volúmenes para orquestar la aplicación completa con Docker Compose (API, worker, bases de datos, etc.).
--   `Makefile`: Proporciona comandos útiles para automatizar tareas comunes como instalación, ejecución local, gestión de servicios Docker, etc.
--   `requirements.txt`, `requirements.celery.txt`: Listados de dependencias Python para la aplicación principal y el worker de Celery.
+-   `api/`: Contiene todos los endpoints HTTP y la lógica de la API REST, desarrollada con FastAPI. Es el punto de entrada principal para las interacciones con el sistema.
+    -   `rutas/`: Módulos que definen los diferentes grupos de rutas (endpoints).
+    -   `modelos.py`: Define los modelos de datos Pydantic para la validación de solicitudes y respuestas.
+    -   `principal.py`: Archivo principal de la aplicación FastAPI, donde se inicializa y configura la API.
+    -   `estaticos/`: Archivos para una interfaz de usuario web simple (HTML, JS, CSS).
+-   `nucleo/`: Es el corazón de la aplicación ("core"). Aquí reside la lógica de negocio y las funcionalidades principales:
+    *   `ia/`: Componentes para la interacción con modelos de Inteligencia Artificial (Ollama, Gemini), gestión de embeddings, etc.
+    *   `clientes/`: Clientes para comunicarse con servicios externos como Moodle y N8N.
+    *   `bd/`: Lógica para la interacción con la base de datos vectorial (PGVector).
+    *   `archivos/`: Utilidades para el procesamiento y extracción de texto de diversos tipos de archivos.
+-   `config/`: Módulos para la carga de la configuración de la aplicación (desde variables de entorno y archivos `.env`) y para la configuración del sistema de logging.
+-   `celery/`: Implementación de tareas asíncronas utilizando Celery y Redis. Permite que procesos largos (como el procesamiento de documentos de un curso) se ejecuten en segundo plano sin bloquear la API.
+    *   `aplicacion_celery.py`: Configuración de la instancia de Celery.
+    *   `tareas.py`: Definición de las tareas asíncronas.
+-   `docs/`: Contiene documentación técnica adicional, como este `README.md` y el `documentacion.md` (changelog/resumen de refactorización).
+-   `Dockerfile`, `Dockerfile.celery`: Archivos para construir las imágenes Docker para la aplicación API y el worker de Celery.
+-   `docker-compose.yml`: Define y orquesta los servicios, redes y volúmenes para desplegar la aplicación completa (API, worker, bases de datos, N8N, etc.) utilizando Docker Compose.
+-   `Makefile`: Proporciona comandos de utilidad para desarrolladores (ej. `make instalar`, `make levantar-servicios`).
+-   `requirements.txt`, `requirements.celery.txt`: Listas de dependencias Python.
+-   `.env.example`, `.env.docker`: Archivos de ejemplo para las variables de entorno.
 
-## ¿Qué puede hacer Entrenai por ti y tus estudiantes? (Características Principales)
+## Funcionalidades Clave de Entrenai
 
-*   **Se integra fácilmente con tus cursos de Moodle:** Puedes activar Entrenai para los cursos que elijas. El sistema preparará automáticamente un espacio en tu curso Moodle para los materiales y el chat.
-*   **Entiende los documentos de tu curso:** Sube tus archivos (PDF, DOCX, PPTX, TXT, etc.) y Entrenai leerá y procesará el texto.
-*   **Organiza la información de forma inteligente:** Entrenai utiliza una técnica especial para catalogar y encontrar la información relevante dentro de los documentos cuando un estudiante hace una pregunta.
-*   **Un Chatbot siempre disponible para los estudiantes:** Los alumnos pueden hacer preguntas en un chat y Entrenai usará la información de los documentos del curso para generar respuestas claras y contextualizadas. ¡Es como tener un tutor disponible 24/7 para resolver dudas sobre el material!
-*   **Fácil de usar para el profesor:** Incluye una interfaz sencilla para que puedas seleccionar tus cursos y activar la inteligencia artificial para ellos.
+*   **Integración con Moodle:** Activación selectiva de Entrenai para cursos específicos, preparando automáticamente el entorno en Moodle.
+*   **Procesamiento de Documentos:** Extracción de texto de diversos formatos de archivo (PDF, DOCX, PPTX, TXT, MD).
+*   **Base de Conocimiento Vectorial:** Almacenamiento inteligente de la información extraída para búsquedas semánticas eficientes.
+*   **Chatbot Interactivo:** Interfaz de chat para que los estudiantes realicen preguntas y reciban respuestas contextualizadas basadas en el material del curso.
+*   **Interfaz de Gestión:** Panel para que los docentes configuren la IA para sus cursos y supervisen los archivos procesados.
 
-## ¿Cómo funciona? (Flujo Simplificado)
+## Flujo de Funcionamiento Simplificado
 
-**Para el Profesor:**
-
-1.  **Configuración Sencilla:** Desde una pantalla simple, seleccionas el curso de Moodle para el que quieres activar Entrenai. Con un clic, el sistema prepara todo lo necesario en tu curso Moodle: una nueva sección, una carpeta para que subas los documentos que la IA analizará, y un enlace al chat para los estudiantes.
-2.  **Subida de Materiales:** Simplemente sube los archivos del curso (PDFs, presentaciones, apuntes) a la carpeta creada por Entrenai en Moodle.
-3.  **¡Listo!** Entrenai procesará estos archivos. Si actualizas o añades nuevos documentos, puedes pedirle a Entrenai que los "refresque" para que siempre tenga la información más reciente.
+**Para el Docente:**
+1.  **Configuración Inicial:** Desde el panel de Entrenai, selecciona un curso de Moodle. Con un clic, el sistema configura la sección de IA en Moodle, incluyendo una carpeta para documentos y enlaces al chat y herramientas de refresco.
+2.  **Carga de Materiales:** Sube los archivos del curso a la carpeta designada en Moodle.
+3.  **Procesamiento:** Solicita a Entrenai que procese los archivos. Esto puede ser una acción manual (ej. "refrescar") o automática.
 
 **Para el Estudiante:**
+1.  **Acceso al Chat:** Encuentra un enlace en Moodle para acceder al chat de IA del curso.
+2.  **Consulta:** Realiza preguntas sobre el material del curso.
+3.  **Respuesta Contextualizada:** Entrenai responde utilizando la información extraída de los documentos.
 
-1.  **Acceso al Chat:** El estudiante encontrará un enlace en el curso de Moodle para acceder al chat de Entrenai.
-2.  **Realizar Preguntas:** Escribe sus dudas o preguntas sobre el material del curso en el chat.
-3.  **Respuestas Basadas en el Contenido:** Entrenai buscará en los documentos proporcionados por el profesor y generará una respuesta lo más precisa posible, ayudando al estudiante a entender mejor el tema.
+## Instrucciones de Configuración y Ejecución (Directorio `entrenai_refactor/`)
 
-## Beneficios Clave
+Asegúrate de estar en el directorio `entrenai_refactor/` para ejecutar los siguientes comandos.
 
-*   **Para Estudiantes:**
-    *   Acceso rápido a información específica del curso.
-    *   Resolución de dudas al instante, incluso fuera del horario de clase.
-    *   Mejora la comprensión del material de estudio.
-*   **Para Profesores:**
-    *   Reduce la carga de trabajo respondiendo preguntas frecuentes.
-    *   Proporciona una herramienta de apoyo adicional para los estudiantes.
-    *   Fomenta un aprendizaje más autónomo.
+### Archivos de Entorno
 
-## Cómo ejecutar este proyecto refactorizado
+1.  Copia `entrenai_refactor/.env.example` a `entrenai_refactor/.env`.
+2.  Modifica `entrenai_refactor/.env` con tu configuración local (tokens, URLs, etc.). Este archivo será usado para la ejecución local de la API y el worker de Celery.
+3.  Para Docker Compose, copia `entrenai_refactor/.env.example` a `entrenai_refactor/.env.docker` y ajústalo. `docker-compose.yml` está configurado para usar este archivo.
 
-Para trabajar con este proyecto refactorizado, asegúrate de estar en el directorio `entrenai_refactor/`.
+### Usando Makefile (Recomendado para Desarrollo)
 
-### Usando Makefile (Recomendado para desarrollo local)
+El `Makefile` en este directorio (`entrenai_refactor/Makefile`) facilita las operaciones comunes:
 
-El `Makefile` dentro de `entrenai_refactor/` proporciona varios comandos útiles:
-
-1.  **Instalar dependencias en un entorno virtual:**
+1.  **Crear entorno virtual e instalar dependencias:**
     ```bash
     make instalar
     ```
-    Esto creará un entorno virtual `.venv` dentro de `entrenai_refactor/` e instalará las dependencias de `requirements.txt`.
+    (Crea `.venv` e instala de `requirements.txt` y `requirements.celery.txt`)
 
-2.  **Ejecutar la aplicación API localmente:**
+2.  **Ejecutar API de FastAPI localmente (para desarrollo):**
     ```bash
-    make correr
+    make correr-api
     ```
-    Esto iniciará el servidor FastAPI (usando Uvicorn) con recarga automática. Necesitarás tener un archivo `.env` configurado en la raíz del proyecto (un nivel arriba de `entrenai_refactor/`).
+    (Usa Uvicorn con recarga automática. Requiere `entrenai_refactor/.env`)
 
-3.  **Ejecutar el worker de Celery localmente:**
+3.  **Ejecutar Worker de Celery localmente (para desarrollo):**
     ```bash
     make correr-worker-celery
     ```
-    Esto iniciará un worker de Celery. También requiere el `.env` configurado.
+    (Requiere `entrenai_refactor/.env` y un broker Redis accesible)
 
 4.  **Levantar todos los servicios con Docker Compose:**
     ```bash
-    make servicios-levantar
+    make levantar-servicios
     ```
-    Esto utilizará `entrenai_refactor/docker-compose.yml` para construir y levantar todos los servicios (API, worker, bases de datos, etc.).
+    (Usa `docker-compose.yml` y `entrenai_refactor/.env.docker`)
 
 5.  **Bajar los servicios de Docker Compose:**
     ```bash
-    make servicios-bajar
+    make bajar-servicios
     ```
 
-### Usando Docker Compose directamente
+6.  **Ver logs de los servicios Docker:**
+    ```bash
+    make logs-servicios
+    ```
 
-Si prefieres no usar `make`, puedes ejecutar los comandos de Docker Compose directamente desde el directorio `entrenai_refactor/`:
+### Usando Docker Compose Directamente
 
-1.  **Levantar servicios:**
+Desde el directorio `entrenai_refactor/`:
+
+1.  **Levantar servicios en segundo plano (detached) y construir imágenes si es necesario:**
     ```bash
     docker compose up --build -d
     ```
@@ -118,16 +123,16 @@ Si prefieres no usar `make`, puedes ejecutar los comandos de Docker Compose dire
     ```bash
     docker compose down
     ```
-3.  **Ver logs:**
+3.  **Ver logs de todos los servicios (en tiempo real):**
     ```bash
     docker compose logs -f
     ```
 
-Asegúrate de tener un archivo `.env` configurado en la raíz del proyecto, ya que `entrenai_refactor/docker-compose.yml` está configurado para usar `../.env`.
-
 ## Documentación Adicional
 
-Entrenai busca ser un aliado tanto para profesores como para estudiantes, haciendo el proceso de enseñanza y aprendizaje en Moodle más eficiente y interactivo.
+Para un registro de los cambios y decisiones tomadas durante esta refactorización, consulta `entrenai_refactor/docs/documentacion.md`.
+La documentación original del proyecto (informe de tesis, manuales de usuario/técnico previos a esta refactorización) se encuentra en el directorio `docs/` en la raíz del repositorio principal.
 
-Para más detalles técnicos sobre la refactorización y el registro de cambios específico de esta versión, consulte `docs/documentacion.md`.
-La documentación original del proyecto (informe de tesis, manuales) se encuentra en el directorio `docs/` del repositorio raíz.
+---
+
+Este `README.md` proporciona una guía actualizada para el proyecto refactorizado `entrenai_refactor`.

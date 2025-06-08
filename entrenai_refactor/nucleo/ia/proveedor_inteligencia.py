@@ -1,115 +1,192 @@
 from typing import Optional, Union, List, cast
+from pathlib import Path # Asegurar que Path esté importado
 
 from entrenai_refactor.config.configuracion import configuracion_global, ConfiguracionPrincipal
 from entrenai_refactor.config.registrador import obtener_registrador
-from entrenai_refactor.nucleo.ia.envoltorio_gemini import EnvoltorioGemini, ErrorEnvoltorioGemini
-from entrenai_refactor.nucleo.ia.envoltorio_ollama import EnvoltorioOllama, ErrorEnvoltorioOllama
+# Usar los nombres refactorizados cuando estén disponibles, por ahora los originales con alias si es necesario
+from entrenai_refactor.nucleo.ia.envoltorio_gemini_refactorizado import EnvoltorioGemini, ErrorEnvoltorioGemini
+from entrenai_refactor.nucleo.ia.envoltorio_ollama_refactorizado import EnvoltorioOllama, ErrorEnvoltorioOllama
 
 registrador = obtener_registrador(__name__)
 
 class ErrorProveedorInteligencia(Exception):
     """Excepción personalizada para errores relacionados con el ProveedorInteligencia."""
-    pass
+    def __init__(self, mensaje: str, error_original: Optional[Exception] = None):
+        super().__init__(mensaje)
+        self.error_original = error_original
+        registrador.debug(f"Excepción ErrorProveedorInteligencia creada: {mensaje}, Original: {error_original}")
+
+    def __str__(self):
+        if self.error_original:
+            return f"{super().__str__()} (Error original: {type(self.error_original).__name__}: {str(self.error_original)})"
+        return super().__str__()
 
 class ProveedorInteligencia:
     """
-    Fábrica y punto de acceso para instancias de envoltorios de IA (Ollama, Gemini)
-    basándose en la configuración global de la aplicación.
+    Actúa como una fábrica y un punto de acceso centralizado para los diferentes
+    servicios de Inteligencia Artificial (IA), como Ollama o Gemini.
+    Se basa en la configuración global de la aplicación para determinar qué
+    proveedor de IA utilizar y cómo configurarlo.
     """
 
-    def __init__(self, config: Optional[ConfiguracionPrincipal] = None):
-        # Si no se pasa una config, usa la global. Útil para tests o contextos específicos.
-        self.config_app = config or configuracion_global
-        self.proveedor_ia_activo_nombre = self.config_app.proveedor_ia
+    def __init__(self, configuracion_app: Optional[ConfiguracionPrincipal] = None):
+        """
+        Inicializa el ProveedorInteligencia.
 
-        self._envoltorio_activo: Union[EnvoltorioOllama, EnvoltorioGemini, None] = None
-        self._inicializar_envoltorio()
+        Args:
+            configuracion_app: Opcional. Una instancia de ConfiguracionPrincipal.
+                               Si no se proporciona, se utiliza la configuración global.
+                               Esto es útil para pruebas o contextos específicos.
+        """
+        self.config_aplicacion = configuracion_app or configuracion_global
+        self.nombre_proveedor_ia_configurado = self.config_aplicacion.proveedor_ia_seleccionado # CAMBIADO
 
-    def _inicializar_envoltorio(self):
-        """Inicializa el envoltorio de IA apropiado según la configuración."""
-        registrador.info(f"Inicializando envoltorio para el proveedor de IA: '{self.proveedor_ia_activo_nombre}'")
-        if self.proveedor_ia_activo_nombre == "ollama":
+        self._envoltorio_ia_activo: Union[EnvoltorioOllama, EnvoltorioGemini, None] = None
+        self._inicializar_envoltorio_ia_seleccionado()
+
+    def _inicializar_envoltorio_ia_seleccionado(self):
+        """
+        Inicializa el envoltorio de IA (Ollama o Gemini) que esté configurado
+        como activo en la aplicación.
+        """
+        registrador.info(f"Inicializando envoltorio para el proveedor de IA configurado: '{self.nombre_proveedor_ia_configurado}'")
+
+        if self.nombre_proveedor_ia_configurado == "ollama":
             try:
-                # EnvoltorioOllama ya usa configuracion_global.ollama en su __init__
-                self._envoltorio_activo = EnvoltorioOllama()
-                registrador.info("EnvoltorioOllama inicializado correctamente.")
-            except ErrorEnvoltorioOllama as e:
-                registrador.error(f"Error inicializando EnvoltorioOllama: {e}")
-                # Decidir si relanzar o permitir que la app continúe sin IA funcional
-                # Por ahora, se relanza para que el error sea evidente.
-                raise ErrorProveedorInteligencia(f"Error inicializando EnvoltorioOllama: {e}") from e
-        elif self.proveedor_ia_activo_nombre == "gemini":
+                # El EnvoltorioOllama utiliza internamente configuracion_global.ollama para sus detalles.
+                self._envoltorio_ia_activo = EnvoltorioOllama()
+                registrador.info("EnvoltorioOllama (refactorizado) inicializado y configurado como proveedor de IA activo.")
+            except ErrorEnvoltorioOllama as e_ollama:
+                registrador.error(f"Error al inicializar EnvoltorioOllama: {e_ollama}")
+                # Se decide relanzar para que el error de configuración/disponibilidad de IA sea evidente.
+                raise ErrorProveedorInteligencia(f"Error al inicializar el proveedor Ollama: {e_ollama}", e_ollama)
+
+        elif self.nombre_proveedor_ia_configurado == "gemini":
             try:
-                # EnvoltorioGemini ya usa configuracion_global.gemini en su __init__
-                self._envoltorio_activo = EnvoltorioGemini()
-                registrador.info("EnvoltorioGemini inicializado correctamente.")
-            except ErrorEnvoltorioGemini as e:
-                registrador.error(f"Error inicializando EnvoltorioGemini: {e}")
-                raise ErrorProveedorInteligencia(f"Error inicializando EnvoltorioGemini: {e}") from e
+                # El EnvoltorioGemini utiliza internamente configuracion_global.gemini.
+                self._envoltorio_ia_activo = EnvoltorioGemini()
+                registrador.info("EnvoltorioGemini (refactorizado) inicializado y configurado como proveedor de IA activo.")
+            except ErrorEnvoltorioGemini as e_gemini:
+                registrador.error(f"Error al inicializar EnvoltorioGemini: {e_gemini}")
+                raise ErrorProveedorInteligencia(f"Error al inicializar el proveedor Gemini: {e_gemini}", e_gemini)
+
         else:
-            mensaje_error = (
-                f"Proveedor de IA no válido: '{self.proveedor_ia_activo_nombre}'. "
-                f"Opciones válidas: 'ollama', 'gemini'."
+            mensaje_error_proveedor = (
+                f"Proveedor de IA no válido o no soportado: '{self.nombre_proveedor_ia_configurado}'. "
+                f"Las opciones válidas configuradas son 'ollama' o 'gemini'."
             )
-            registrador.error(mensaje_error)
-            raise ErrorProveedorInteligencia(mensaje_error)
+            registrador.error(mensaje_error_proveedor)
+            raise ErrorProveedorInteligencia(mensaje_error_proveedor)
 
-    def obtener_envoltorio_activo(self) -> Union[EnvoltorioOllama, EnvoltorioGemini]:
-        """Retorna el envoltorio de IA activo. Asegura que esté inicializado."""
-        if not self._envoltorio_activo:
-            registrador.warning("El envoltorio de IA no estaba inicializado. Intentando inicializar ahora.")
-            self._inicializar_envoltorio() # Intenta inicializar si no lo está
-            if not self._envoltorio_activo: # Si sigue sin estar inicializado después del intento
-                 raise ErrorProveedorInteligencia("No se pudo inicializar un envoltorio de IA activo.")
+    def obtener_envoltorio_ia_activo(self) -> Union[EnvoltorioOllama, EnvoltorioGemini]:
+        """
+        Devuelve la instancia del envoltorio de IA activo (Ollama o Gemini).
+        Asegura que el envoltorio esté inicializado. Si no lo está, intenta inicializarlo.
+        Lanza una excepción si no se puede obtener un envoltorio activo.
+        """
+        if not self._envoltorio_ia_activo:
+            registrador.warning("El envoltorio de IA no estaba previamente inicializado. Intentando inicialización forzada ahora.")
+            self._inicializar_envoltorio_ia_seleccionado() # Intenta inicializar si por alguna razón no lo estaba.
 
-        # Usamos cast para ayudar al type checker, ya que _inicializar_envoltorio debería haberlo establecido.
-        return cast(Union[EnvoltorioOllama, EnvoltorioGemini], self._envoltorio_activo)
+            if not self._envoltorio_ia_activo: # Si después del reintento sigue sin estar inicializado
+                 registrador.critical("Fallo crítico: No se pudo inicializar un envoltorio de IA activo después de reintentos.")
+                 raise ErrorProveedorInteligencia("Fallo crítico al obtener un envoltorio de IA activo.")
 
-    # --- Métodos delegados al envoltorio activo ---
+        # Se usa 'cast' para ayudar al sistema de tipado de Python, ya que la lógica anterior
+        # debería garantizar que _envoltorio_ia_activo no sea None en este punto.
+        return cast(Union[EnvoltorioOllama, EnvoltorioGemini], self._envoltorio_ia_activo)
 
-    def generar_embedding(self, texto: str, modelo: Optional[str] = None) -> List[float]:
-        """Genera un embedding vectorial para un texto usando el envoltorio activo."""
-        envoltorio = self.obtener_envoltorio_activo()
+    # --- Métodos delegados al envoltorio de IA activo ---
+    # Estos métodos proporcionan una interfaz unificada para interactuar con el proveedor de IA,
+    # independientemente de si es Ollama o Gemini.
+
+    def generar_embedding(self, texto_entrada: str, nombre_modelo_especifico: Optional[str] = None) -> List[float]:
+        """
+        Genera un embedding (vector numérico) para un texto dado utilizando el envoltorio de IA activo.
+        """
+        envoltorio_seleccionado = self.obtener_envoltorio_ia_activo()
+        registrador.debug(f"Delegando generación de embedding al proveedor: {type(envoltorio_seleccionado).__name__}")
         try:
-            return envoltorio.generar_embedding(texto=texto, modelo=modelo)
-        except (ErrorEnvoltorioOllama, ErrorEnvoltorioGemini) as e:
-            registrador.error(f"Error generando embedding a través del proveedor: {e}")
-            raise ErrorProveedorInteligencia(f"Error del proveedor al generar embedding: {e}") from e
+            # Los métodos de los envoltorios deben tener la misma firma (o compatible)
+            if isinstance(envoltorio_seleccionado, EnvoltorioOllama):
+                return envoltorio_seleccionado.generar_embedding_de_texto(texto_entrada, nombre_modelo_especifico)
+            elif isinstance(envoltorio_seleccionado, EnvoltorioGemini):
+                 return envoltorio_seleccionado.generar_embedding_de_texto(texto_entrada, nombre_modelo_especifico)
+            else: # No debería ocurrir si la inicialización es correcta
+                raise ErrorProveedorInteligencia(f"Tipo de envoltorio activo no reconocido: {type(envoltorio_seleccionado)}")
 
-    def generar_completacion_chat(
-        self, prompt: str, modelo: Optional[str] = None,
-        mensaje_sistema: Optional[str] = None,
-        fragmentos_contexto: Optional[List[str]] = None,
-        stream: bool = False,
+        except (ErrorEnvoltorioOllama, ErrorEnvoltorioGemini) as e_envoltorio:
+            registrador.error(f"Error específico del envoltorio al generar embedding: {e_envoltorio}")
+            raise ErrorProveedorInteligencia(f"Error del proveedor de IA al generar embedding: {e_envoltorio}", e_envoltorio)
+        except Exception as e_general:
+            registrador.exception(f"Error inesperado al generar embedding a través del proveedor: {e_general}")
+            raise ErrorProveedorInteligencia(f"Error inesperado del proveedor al generar embedding: {e_general}", e_general)
+
+
+    def generar_respuesta_de_chat(
+        self,
+        prompt_usuario: str,
+        nombre_modelo_especifico: Optional[str] = None,
+        mensaje_de_sistema: Optional[str] = None,
+        historial_chat_previo: Optional[List[Dict[str, str]]] = None,
+        fragmentos_de_contexto: Optional[List[str]] = None,
+        # stream: bool = False, # El streaming se maneja a nivel de envoltorio si se implementa allí
     ) -> str:
-        """Genera una completación de chat (respuesta) usando el envoltorio activo."""
-        envoltorio = self.obtener_envoltorio_activo()
+        """
+        Genera una respuesta de chat (completación) para un prompt dado,
+        utilizando el envoltorio de IA activo.
+        """
+        envoltorio_seleccionado = self.obtener_envoltorio_ia_activo()
+        registrador.debug(f"Delegando generación de respuesta de chat al proveedor: {type(envoltorio_seleccionado).__name__}")
         try:
-            return envoltorio.generar_completacion_chat(
-                prompt=prompt, modelo=modelo,
-                mensaje_sistema=mensaje_sistema,
-                fragmentos_contexto=fragmentos_contexto,
-                stream=stream
+            # Asumimos que ambos envoltorios tienen un método 'generar_respuesta_de_chat' con firma compatible.
+            return envoltorio_seleccionado.generar_respuesta_de_chat(
+                prompt_usuario=prompt_usuario,
+                nombre_modelo_chat=nombre_modelo_especifico, # Pasar como 'nombre_modelo_chat' al envoltorio
+                mensaje_de_sistema=mensaje_de_sistema,
+                historial_chat_previo=historial_chat_previo,
+                fragmentos_de_contexto=fragmentos_de_contexto,
+                # stream=stream # El parámetro stream se pasaría aquí si la firma lo incluye
             )
-        except (ErrorEnvoltorioOllama, ErrorEnvoltorioGemini) as e:
-            mensaje_error = f"Error generando completación de chat a través del proveedor: {e}"
-            registrador.error(mensaje_error)
-            raise ErrorProveedorInteligencia(mensaje_error) from e
+        except (ErrorEnvoltorioOllama, ErrorEnvoltorioGemini) as e_envoltorio:
+            mensaje_error_chat = f"Error específico del envoltorio al generar respuesta de chat: {e_envoltorio}"
+            registrador.error(mensaje_error_chat)
+            raise ErrorProveedorInteligencia(f"Error del proveedor de IA al generar respuesta de chat: {e_envoltorio}", e_envoltorio)
+        except Exception as e_general:
+            registrador.exception(f"Error inesperado al generar respuesta de chat a través del proveedor: {e_general}")
+            raise ErrorProveedorInteligencia(f"Error inesperado del proveedor al generar respuesta de chat: {e_general}", e_general)
 
-    def formatear_a_markdown(
-        self, contenido_texto: str, modelo: Optional[str] = None, ruta_guardado: Optional[str] = None
+
+    def formatear_texto_a_markdown(
+        self,
+        texto_original: str,
+        nombre_modelo_especifico: Optional[str] = None,
+        ruta_archivo_para_guardar: Optional[Path] = None # Aceptar Path directamente
     ) -> str:
-        """Formatea el texto a Markdown usando el envoltorio activo."""
-        envoltorio = self.obtener_envoltorio_activo()
+        """
+        Formatea un texto crudo a formato Markdown utilizando el envoltorio de IA activo.
+        """
+        envoltorio_seleccionado = self.obtener_envoltorio_ia_activo()
+        registrador.debug(f"Delegando formateo a Markdown al proveedor: {type(envoltorio_seleccionado).__name__}")
         try:
-            # Convertir ruta_guardado a Path si se proporciona y el envoltorio lo espera
-            ruta_path = Path(ruta_guardado) if ruta_guardado else None
-            return envoltorio.formatear_a_markdown(
-                contenido_texto=contenido_texto, modelo=modelo, ruta_guardado=ruta_path
-            )
-        except (ErrorEnvoltorioOllama, ErrorEnvoltorioGemini) as e:
-            mensaje_error = f"Error formateando texto a Markdown a través del proveedor: {e}"
-            registrador.error(mensaje_error)
-            raise ErrorProveedorInteligencia(mensaje_error) from e
+            # Asumimos que ambos envoltorios tienen un método 'convertir_texto_a_markdown' (o similar)
+            # con firma compatible.
+            if isinstance(envoltorio_seleccionado, EnvoltorioOllama):
+                return envoltorio_seleccionado.convertir_texto_a_markdown(
+                    texto_original, nombre_modelo_formateo=nombre_modelo_especifico, ruta_archivo_guardado=ruta_archivo_para_guardar
+                )
+            elif isinstance(envoltorio_seleccionado, EnvoltorioGemini):
+                 return envoltorio_seleccionado.convertir_texto_a_markdown(
+                    texto_original, nombre_modelo_formateo=nombre_modelo_especifico, ruta_archivo_guardado=ruta_archivo_para_guardar
+                )
+            else:
+                 raise ErrorProveedorInteligencia(f"Tipo de envoltorio activo no reconocido para formateo: {type(envoltorio_seleccionado)}")
+        except (ErrorEnvoltorioOllama, ErrorEnvoltorioGemini) as e_envoltorio:
+            mensaje_error_markdown = f"Error específico del envoltorio al formatear a Markdown: {e_envoltorio}"
+            registrador.error(mensaje_error_markdown)
+            raise ErrorProveedorInteligencia(f"Error del proveedor de IA al formatear a Markdown: {e_envoltorio}", e_envoltorio)
+        except Exception as e_general:
+            registrador.exception(f"Error inesperado al formatear a Markdown a través del proveedor: {e_general}")
+            raise ErrorProveedorInteligencia(f"Error inesperado del proveedor al formatear a Markdown: {e_general}", e_general)
 
-[end of entrenai_refactor/nucleo/ia/proveedor_inteligencia.py]
+[end of entrenai_refactor/nucleo/ia/proveedor_inteligencia_refactorizado.py]
