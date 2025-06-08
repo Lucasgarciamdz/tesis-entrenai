@@ -61,12 +61,11 @@ services:
       - "${PGVECTOR_HOST_PORT:-5432}:5432" # Expose on a different host port if 5432 is taken
     volumes:
       - pgvector_data:/var/lib/postgresql/data
-      - ./src/entrenai/core/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./entrenai2/nucleo/bd/init.sql:/docker-entrypoint-initdb.d/init.sql
     environment:
       POSTGRES_USER: ${PGVECTOR_USER:-pgvector_user}
       POSTGRES_PASSWORD: ${PGVECTOR_PASSWORD:-pgvector_password}
       POSTGRES_DB: ${PGVECTOR_DB_NAME:-pgvector_db}
-      # Optional: Command to create extension if not automatically handled by the image
     networks:
       - entrenai_net
     healthcheck:
@@ -86,14 +85,6 @@ services:
       - ollama_models:/root/.ollama # Persist models
     environment:
       OLLAMA_CONTEXT_LENGTH: 25000
-    # To enable GPU support (example for NVIDIA, ensure drivers are installed on host):
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1 # or 'all'
-    #           capabilities: [gpu]
     networks:
       - entrenai_net
 
@@ -135,10 +126,9 @@ services:
       DB_POSTGRESDB_USER: ${N8N_DB_USER:-n8n_user}
       DB_POSTGRESDB_PASSWORD: ${N8N_DB_PASSWORD:-n8n_password}
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-a_very_secure_random_string_for_n8n} # CHANGE THIS IN .env!
-      N8N_EMAIL_MODE: smtp # Placeholder, can be configured later if email sending is needed
-      N8N_HOST: ${N8N_HOST_DOMAIN:-localhost} # Set to your domain if N8N is publicly accessible
-      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678} # URL N8N uses for its webhooks
-      # GENERIC_TIMEZONE: America/Argentina/Buenos_Aires # Set your timezone
+      N8N_EMAIL_MODE: smtp
+      N8N_HOST: ${N8N_HOST_DOMAIN:-localhost}
+      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678}
     depends_on:
       n8n_db:
         condition: service_healthy
@@ -166,19 +156,19 @@ services:
   entrenai_api:
     build: 
       context: .
-      dockerfile: Dockerfile  # The main Dockerfile for the full app
+      dockerfile: Dockerfile
     container_name: entrenai_api
     restart: unless-stopped
     ports:
       - "${FASTAPI_HOST_PORT:-8000}:8000"
     volumes:
-      - ./src:/app/src
-      - entrenai_data:/app/data
+      - ./entrenai2:/app/entrenai2
+      - entrenai_data:/app/datos
     env_file:
       - .env
     environment:
       APP_ENV: docker
-      DATA_DIR: /app/data
+      DATA_DIR: /app/datos
       PYTHONUNBUFFERED: 1
     depends_on:
       pgvector_db:
@@ -187,13 +177,13 @@ services:
         condition: service_started
     networks:
       - entrenai_net
-    command: sh -c "uvicorn src.entrenai.api.main:app --host 0.0.0.0 --port 8000 --reload"
+    command: sh -c "uvicorn entrenai2.api.main:aplicacion --host 0.0.0.0 --port 8000 --reload"
 
   # --- Minimalist Celery Worker ---
   celery_worker:
     build: 
       context: .
-      dockerfile: Dockerfile.celery  # The new minimalist Dockerfile
+      dockerfile: Dockerfile.celery
     container_name: entrenai_celery_worker
     restart: unless-stopped
     env_file:
@@ -201,7 +191,7 @@ services:
     environment:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
-      FASTAPI_BASE_URL: http://entrenai_api:8000  # Internal URL to contact FastAPI
+      FASTAPI_BASE_URL: http://entrenai_api:8000
       PYTHONUNBUFFERED: 1
     depends_on:
       redis:
@@ -230,22 +220,11 @@ volumes:
     driver: local
   n8n_app_data:
     driver: local
-  redis_data: # Added for Redis
+  redis_data:
     driver: local
-  entrenai_data: # Added for Celery worker data
+  entrenai_data:
     driver: local
 
 networks:
   entrenai_net:
     driver: bridge
-
-# --- API Service (Example - assuming you have one) ---
-# Ensure your API service (if it uses Celery) has these settings:
-#   depends_on:
-#     - redis # Add other dependencies like databases as needed
-#   environment:
-#     CELERY_BROKER_URL: redis://redis:6379/0
-#     CELERY_RESULT_BACKEND: redis://redis:6379/0
-#     # ... other environment variables
-#   networks:
-#     - entrenai_net

@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entrenai - Panel de Control</title>
+    <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="logo-container">
+            <a href="index.html" class="site-title">Entrenai</a>
+        </div>
+        <nav class="main-nav">
+            <ul>
+                <li><a href="index.html" class="active">Panel de Control</a></li>
+                <li><a href="#" id="nav-gestionar-archivos">Archivos</a></li>
+                <li><a href="#">Configuración</a></li>
+                <li><a href="#">Ayuda</a></li>
+            </ul>
+        </nav>
+        <div class="user-profile-icon">
+            <img src="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👤</text></svg>" alt="Perfil">
+        </div>
+    </header>
+
+    <main class="main-content">
+        <div class="page-container">
+            <div class="page-header">
+                <h1>Panel de Control</h1>
+            </div>
+
+            <!-- Sección de Estadísticas -->
+            <section class="dashboard-grid mb-4">
+                <div class="card stat-card">
+                    <div class="stat-value" id="stat-cursos-configurados">0</div>
+                    <div class="stat-label">Cursos Configurados</div>
+                </div>
+                <div class="card stat-card">
+                    <div class="stat-value" id="stat-archivos-procesados">0</div>
+                    <div class="stat-label">Archivos Procesados (Total)</div>
+                </div>
+                <div class="card stat-card">
+                    <div class="stat-value" id="stat-archivos-en-proceso">0</div>
+                    <div class="stat-label">Archivos en Procesamiento</div>
+                </div>
+                <div class="card stat-card">
+                    <div class="stat-value" id="stat-estado-moodle">N/A</div>
+                    <div class="stat-label">Integración Moodle</div>
+                </div>
+            </section>
+
+            <!-- Sección de Configuración de Curso -->
+            <section class="card mb-4">
+                <div class="card-header">
+                    Configurar IA para un Curso
+                </div>
+                <div class="card-body">
+                    <div class="form-group">
+                        <label for="selector-curso" class="form-label">Selecciona un Curso de Moodle:</label>
+                        <select id="selector-curso" name="selector-curso" class="form-select">
+                            <option value="">Cargando cursos...</option>
+                        </select>
+                        <small class="form-text text-muted">
+                            Si no ves cursos después de unos segundos, verifica que Moodle esté configurado correctamente.
+                        </small>
+                    </div>
+                    
+                    <div class="form-group" id="entrada-manual-curso" style="display: none;">
+                        <label for="id-curso-manual" class="form-label">ID del Curso (Manual):</label>
+                        <input type="number" id="id-curso-manual" class="form-control" placeholder="Ingresa el ID del curso">
+                        <small class="form-text text-muted">
+                            Usa esta opción si Moodle no está disponible. Ingresa el ID numérico del curso.
+                        </small>
+                    </div>
+                    
+                    <div class="d-flex" style="gap: 1rem;">
+                        <button id="boton-configurar-ia" class="btn btn-primary" style="flex-grow: 1;">
+                            <span class="btn-spinner d-none"></span>
+                            Crear/Actualizar IA para este Curso
+                        </button>
+                        <button id="boton-gestionar-archivos" class="btn btn-secondary" style="display:none; flex-grow: 1;">
+                            Gestionar Archivos del Curso
+                        </button>
+                    </div>
+
+                    <div class="form-group">
+                        <button type="button" id="alternar-entrada-manual" class="btn btn-sm btn-outline-secondary">
+                            Usar ID de curso manual
+                        </button>
+                    </div>
+                </div>
+            </section>
+            
+            <div id="contenedor-mensajes-estado"></div>
+
+            <section class="card">
+                <div class="card-header">
+                    ¿Qué es Entrenai?
+                </div>
+                <div class="card-body">
+                    <p>Entrenai es tu asistente de IA para Moodle. Transforma los materiales de tu curso (PDFs, DOCXs, PPTXs) en una base de conocimiento interactiva. Esto permite a tus estudiantes obtener respuestas instantáneas y precisas a sus preguntas, directamente dentro de Moodle.</p>
+                    <h4>¿Cómo empezar?</h4>
+                    <ol>
+                        <li><strong>Selecciona tu curso</strong> de la lista desplegable.</li>
+                        <li>Pulsa en <strong>"Crear/Actualizar IA para este Curso"</strong>. Esto configurará o actualizará la sección de IA en tu curso de Moodle.</li>
+                        <li>Una vez hecho, podrás <strong>gestionar los archivos</strong> que usará la IA y supervisar su aprendizaje.</li>
+                    </ol>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <footer class="site-footer">
+        © 2024-2025 Entrenai - Universidad de Mendoza. Todos los derechos reservados.
+    </footer>
+    
+    <script src="script.js"></script>
+    <script>
+        document.getElementById('nav-gestionar-archivos').addEventListener('click', function(event) {
+            event.preventDefault();
+            const selectorCurso = document.getElementById('selector-curso');
+            const idCursoSeleccionado = selectorCurso ? selectorCurso.value : null;
+            const contenedorMensajes = document.getElementById('contenedor-mensajes-estado');
+
+            function mostrarAlerta(mensaje, tipo = 'warning') {
+                if (!contenedorMensajes) return;
+                const divAlerta = document.createElement('div');
+                divAlerta.className = `alert alert-${type} alert-dismissible fade show`;
+                divAlerta.setAttribute('role', 'alert');
+                divAlerta.innerHTML = `
+                    ${mensaje}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar" style="background: none; border: none; font-size: 1.2rem; float: right; cursor: pointer;">&times;</button>
+                `;
+                contenedorMensajes.appendChild(divAlerta);
+                setTimeout(() => {
+                    divAlerta.style.opacity = '0';
+                    setTimeout(() => divAlerta.remove(), 500);
+                }, 5000);
+
+                divAlerta.querySelector('.btn-close').addEventListener('click', () => {
+                    divAlerta.style.opacity = '0';
+                    setTimeout(() => divAlerta.remove(), 500);
+                });
+            }
+
+            if (idCursoSeleccionado) {
+                window.location.href = `/ui/gestionar_archivos.html?id_curso=${idCursoSeleccionado}`;
+            } else {
+                mostrarAlerta('Por favor, selecciona un curso primero desde el Panel de Control para gestionar sus archivos.');
+            }
+        });
+
+        document.getElementById('alternar-entrada-manual').addEventListener('click', function() {
+            const divEntradaManual = document.getElementById('entrada-manual-curso');
+            const divSelectorCurso = document.getElementById('selector-curso').closest('.form-group');
+            const esVisibleEntradaManual = divEntradaManual.style.display === 'block';
+
+            if (esVisibleEntradaManual) {
+                divEntradaManual.style.display = 'none';
+                divSelectorCurso.style.display = 'block';
+                this.textContent = 'Usar ID de curso manual';
+            } else {
+                const valorSeleccionado = document.getElementById('selector-curso').value;
+                if (valorSeleccionado) {
+                    if (!confirm('Tienes una selección activa en el menú desplegable. ¿Estás seguro de que deseas cambiar a entrada manual?')) {
+                        return;
+                    }
+                }
+
+                divEntradaManual.style.display = 'block';
+                divSelectorCurso.style.display = 'none';
+                this.textContent = 'Volver a seleccionar curso';
+            }
+        });
+    </script>
+</body>
+</html>

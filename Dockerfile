@@ -40,7 +40,7 @@ RUN --mount=type=bind,source=requirements.txt,target=/tmp/requirements.txt \
     uv pip install --no-cache-dir -r /tmp/requirements.txt
 
 # Copy source code
-COPY ./src ./src
+COPY ./entrenai2 ./entrenai2
 
 # Stage 2: Final Application
 # This stage contains the final application code and runtime dependencies for the API.
@@ -77,7 +77,7 @@ RUN groupadd -g ${APP_GID} -r ${APP_USER} && \
 
 # Copy virtual environment and source code from the builder stage
 COPY --from=builder /opt/venv /opt/venv
-COPY --from=builder --chown=${APP_USER}:${APP_USER} /app/src ./src
+COPY --from=builder --chown=${APP_USER}:${APP_USER} /app/entrenai2 ./entrenai2
 
 # Set Python environment variables for optimization
 ENV PYTHONPATH=/app
@@ -88,19 +88,19 @@ ENV PYTHONIOENCODING=utf-8
 ENV PYTHONHASHSEED=random
 
 # Create data directories and set ownership
-RUN mkdir -p /app/data/downloads && \
-    chown -R ${APP_USER}:${APP_USER} /app/data
+RUN mkdir -p /app/datos/descargas && \
+    chown -R ${APP_USER}:${APP_USER} /app/datos
 
 # Create volume for persistent data
-VOLUME ["/app/data"]
+VOLUME ["/app/datos"]
 
 # Switch to the non-root user
 USER ${APP_USER}
 
 # Add health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8000/health', timeout=5)" || exit 1
+    CMD python -c "import requests; requests.get('http://localhost:8000/salud', timeout=5)" || exit 1
 
 # Expose port and set the command to run the FastAPI application
 EXPOSE 8000
-CMD ["uvicorn", "src.entrenai.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+CMD ["uvicorn", "entrenai2.api.main:aplicacion", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

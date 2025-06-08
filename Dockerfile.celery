@@ -1,30 +1,33 @@
-# Minimalist Dockerfile for Celery - HTTP Queue Handling Only
-FROM python:3.11-slim
+# Dockerfile minimalista para Celery - Manejo de colas HTTP únicamente
+FROM python:3.12-slim-bookworm@sha256:da2d7af143dab7cd5b0d5a5c9545fe14e67fc24c394fcf1cf15e8ea16cbd8637
 
-# Create a non-root user for security
+# Crear un usuario no root por seguridad
 RUN groupadd -r celery && useradd -r -g celery celery
 
 WORKDIR /app
 
-# Install only minimal dependencies for Celery and HTTP requests
+# Instalar solo las dependencias mínimas para Celery y solicitudes HTTP
 COPY requirements.celery.txt .
 RUN pip install --no-cache-dir -r requirements.celery.txt
 
-# Copy the necessary module structure
-COPY src/__init__.py src/
-COPY src/entrenai/__init__.py src/entrenai/
-COPY src/entrenai/celery/celery_app_minimal.py src/entrenai/
-COPY src/entrenai/celery/tasks_minimal.py src/entrenai/
+# Copiar la estructura de módulos necesaria
+COPY entrenai2/__init__.py entrenai2/
+COPY entrenai2/celery/__init__.py entrenai2/celery/
+COPY entrenai2/celery/aplicacion_celery_minimal.py entrenai2/celery/
+COPY entrenai2/celery/tareas_minimal.py entrenai2/celery/
+COPY entrenai2/configuracion/__init__.py entrenai2/configuracion/
+COPY entrenai2/configuracion/configuracion.py entrenai2/configuracion/
+COPY entrenai2/configuracion/registrador.py entrenai2/configuracion/
 
-# Change ownership of the app directory to the celery user
+# Cambiar el propietario del directorio de la aplicación al usuario celery
 RUN chown -R celery:celery /app
 
-# Switch to non-root user
+# Cambiar al usuario no root
 USER celery
 
-# Set environment variables
+# Establecer variables de entorno
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
-# Set the command to run the Celery worker with threads instead of eventlet
-CMD ["celery", "-A", "src.entrenai.tasks_minimal.app", "worker", "-l", "INFO", "-P", "threads"]
+# Establecer el comando para ejecutar el worker de Celery con hilos en lugar de eventlet
+CMD ["celery", "-A", "entrenai2.celery.tareas_minimal.aplicacion", "worker", "-l", "INFO", "-P", "threads"]

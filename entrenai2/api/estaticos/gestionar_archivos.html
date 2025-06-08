@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entrenai - Gestionar Archivos</title>
+    <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="logo-container">
+            <a href="index.html" class="site-title">Entrenai</a>
+        </div>
+        <nav class="main-nav">
+            <ul>
+                <li><a href="index.html">Panel de Control</a></li>
+                <li><a href="#" id="nav-gestionar-archivos" class="active">Archivos</a></li>
+                <li><a href="#">Configuración</a></li>
+                <li><a href="#">Ayuda</a></li>
+            </ul>
+        </nav>
+        <div class="user-profile-icon">
+            <img src="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👤</text></svg>" alt="Perfil">
+        </div>
+    </header>
+
+    <main class="main-content">
+        <div class="page-container">
+            <div class="page-header">
+                <h1>Gestionar Archivos para el Curso: <span id="nombre-curso-placeholder">[Cargando...]</span></h1>
+                <a href="index.html" class="btn btn-sm btn-outline-primary mt-2">&larr; Volver al Panel de Control</a>
+            </div>
+
+            <div id="contenedor-mensajes-gestion"></div>
+            
+            <section class="card mb-4">
+                <div class="card-header">
+                    Acciones del Curso
+                </div>
+                <div class="card-body">
+                    <button id="boton-refrescar-archivos-moodle" class="btn btn-primary">
+                        <span class="btn-spinner d-none"></span>
+                        Actualizar Archivos desde Moodle
+                    </button>
+                    <p class="form-text mt-2">
+                        Haz clic aquí para que Entrenai revise la carpeta del curso en Moodle en busca de archivos nuevos o actualizados para procesar.
+                    </p>
+                </div>
+            </section>
+
+            <section class="card">
+                <div class="card-header">
+                    Archivos del Curso
+                </div>
+                <div class="card-body">
+                    <div class="table-container">
+                        <table class="table" id="tabla-archivos">
+                            <thead>
+                                <tr>
+                                    <th>Nombre del Archivo</th>
+                                    <th>Estado</th>
+                                    <th>Progreso</th>
+                                    <th>Última Modificación (Moodle)</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cuerpo-tabla-archivos">
+                                <tr>
+                                    <td colspan="5" class="text-center p-3">
+                                        <span class="btn-spinner"></span> Cargando archivos...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p id="mensaje-sin-archivos" class="text-center p-3 d-none">No hay archivos para mostrar.</p>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <footer class="site-footer">
+        © 2024-2025 Entrenai - Universidad de Mendoza. Todos los derechos reservados.
+    </footer>
+
+    <script src="gestionar_archivos.js"></script>
+    <script>
+        document.getElementById('nav-gestionar-archivos').addEventListener('click', function(event) {
+            event.preventDefault();
+            const params = new URLSearchParams(window.location.search);
+            const idCurso = params.get('id_curso');
+            if (!idCurso) {
+                window.location.href = 'index.html';
+            } else {
+                console.log("Ya estás en la página de gestión de archivos para el curso ID:", idCurso);
+            }
+        });
+    </script>
+</body>
+</html>
