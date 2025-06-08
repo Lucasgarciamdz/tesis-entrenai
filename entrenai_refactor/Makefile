@@ -1,85 +1,118 @@
-# Makefile para el Proyecto Entrenai
+# Makefile para el Proyecto EntrenAI Refactorizado (dentro de entrenai_refactor/)
 
 # Intérprete de Python por defecto
 PYTHON = python3
 
-# Directorio del entorno virtual
+# Directorio del entorno virtual (dentro de entrenai_refactor)
 VENV_DIR = .venv
 VENV_ACTIVATE = . $(VENV_DIR)/bin/activate
 
-# Argumentos por defecto para ejecutar FastAPI
-# Asume que el Makefile está en entrenai_refactor y .env en el directorio padre (raíz del proyecto)
-RUN_ARGS = --host $(shell grep FASTAPI_HOST ../.env | cut -d '=' -f2) --port $(shell grep FASTAPI_PORT ../.env | cut -d '=' -f2) --reload
+# Archivos de entorno (dentro de entrenai_refactor)
+ENV_FILE_LOCAL = .env
+ENV_FILE_DOCKER = .env.docker
 
-.PHONY: ayuda instalar correr probar limpiar servicios-levantar servicios-bajar servicios-logs servicios-reiniciar correr-worker-celery prueba
+# Argumentos para ejecutar FastAPI localmente, leyendo del .env local
+# Usamos un truco para leer variables del .env; requiere que las variables NO tengan espacios alrededor del '='
+FASTAPI_HOST_LOCAL = $(shell grep -E '^FASTAPI_HOST\s*=' $(ENV_FILE_LOCAL) | cut -d '=' -f2)
+FASTAPI_PORT_LOCAL = $(shell grep -E '^FASTAPI_PORT\s*=' $(ENV_FILE_LOCAL) | cut -d '=' -f2)
+RUN_ARGS_LOCAL = --host $(FASTAPI_HOST_LOCAL) --port $(FASTAPI_PORT_LOCAL) --reload
+
+# Comprobar si los archivos .env existen y mostrar advertencia si no.
+# Esta es una forma simple, make no es ideal para lógica compleja.
+check_env_local:
+	@if [ ! -f "$(ENV_FILE_LOCAL)" ]; then \
+		echo "ADVERTENCIA: Archivo de entorno local '$(ENV_FILE_LOCAL)' no encontrado."; \
+		echo "Por favor, copie '.env.example' a '$(ENV_FILE_LOCAL)' y configúrelo para ejecuciones locales."; \
+		echo "Algunos comandos podrían no funcionar correctamente."; \
+	fi
+
+check_env_docker:
+	@if [ ! -f "$(ENV_FILE_DOCKER)" ]; then \
+		echo "ADVERTENCIA: Archivo de entorno para Docker '$(ENV_FILE_DOCKER)' no encontrado."; \
+		echo "Por favor, copie '.env.example' a '$(ENV_FILE_DOCKER)' y configúrelo para Docker Compose."; \
+		echo "El comando 'make levantar-servicios' podría fallar o usar configuraciones por defecto."; \
+	fi
+
+.PHONY: ayuda instalar correr-api correr-worker-celery probar limpiar levantar-servicios bajar-servicios logs-servicios reiniciar-servicios levantar-demo
 
 ayuda:
-	@echo "Comandos disponibles:"
-	@echo "  instalar         : Crea un entorno virtual e instala las dependencias"
-	@echo "  correr           : Ejecuta la aplicación FastAPI"
-	@echo "  probar           : Ejecuta las pruebas con pytest"
-	@echo "  limpiar          : Elimina el entorno virtual y los archivos de caché"
-	@echo "  servicios-levantar: Inicia los servicios de Docker Compose en modo detached"
-	@echo "  servicios-bajar  : Detiene los servicios de Docker Compose"
-	@echo "  servicios-logs   : Muestra los logs de los servicios de Docker Compose"
-	@echo "  servicios-reiniciar: Reinicia los servicios de Docker Compose"
-	@echo "  correr-worker-celery: Ejecuta un worker de Celery localmente"
-	@echo "  prueba           : Levanta un sistema de demo completo (placeholder)"
+	@echo "Comandos disponibles para el proyecto EntrenAI (desde el directorio entrenai_refactor/):"
+	@echo ""
+	@echo "  Desarrollo Local:"
+	@echo "    instalar                : Crea un entorno virtual '.venv/' e instala las dependencias de 'requirements.txt'."
+	@echo "    correr-api              : Ejecuta la aplicación FastAPI localmente (Uvicorn con recarga). Requiere './.env'."
+	@echo "    correr-worker-celery    : Ejecuta un worker de Celery localmente. Requiere './.env' y Redis."
+	@echo "    probar                  : Ejecuta las pruebas con pytest (si están configuradas)."
+	@echo "    limpiar                 : Elimina el entorno virtual y los archivos de caché de Python."
+	@echo ""
+	@echo "  Gestión de Servicios Docker (usando './docker-compose.yml' y './.env.docker'):"
+	@echo "    levantar-servicios      : Inicia todos los servicios definidos en Docker Compose en modo detached (segundo plano)."
+	@echo "    bajar-servicios         : Detiene y elimina los contenedores de los servicios de Docker Compose."
+	@echo "    logs-servicios          : Muestra los logs en tiempo real de todos los servicios Docker."
+	@echo "    reiniciar-servicios     : Reinicia todos los servicios de Docker Compose."
+	@echo ""
+	@echo "  Otros:"
+	@echo "    levantar-demo           : Placeholder para un futuro comando que levante un sistema de demo completo."
+	@echo "    ayuda                   : Muestra este mensaje de ayuda."
 
 instalar: $(VENV_DIR)/bin/activate
-# Asume que requirements.txt está en el mismo directorio que el Makefile (entrenai_refactor)
-$(VENV_DIR)/bin/activate: requirements.txt
+# Instala dependencias desde requirements.txt y requirements.celery.txt que están en este directorio.
+$(VENV_DIR)/bin/activate: requirements.txt requirements.celery.txt
 	test -d $(VENV_DIR) || $(PYTHON) -m venv $(VENV_DIR)
 	$(VENV_ACTIVATE); pip install --upgrade pip
 	$(VENV_ACTIVATE); pip install -r requirements.txt
-	@echo "Entorno virtual creado y dependencias instaladas."
-	@touch $(VENV_DIR)/bin/activate
+	$(VENV_ACTIVATE); pip install -r requirements.celery.txt
+	@echo "Entorno virtual '$(VENV_DIR)' creado y dependencias instaladas."
+	@touch $(VENV_DIR)/bin/activate # Actualizar timestamp para make
 
-# Asume que .env está en el directorio padre
-correr: $(VENV_DIR)/bin/activate ../.env
-	@echo "Iniciando la aplicación FastAPI..."
-	# PYTHONPATH=. para asegurar que los módulos locales de entrenai_refactor se encuentren
-	$(VENV_ACTIVATE); PYTHONPATH=. uvicorn api.principal:aplicacion $(RUN_ARGS)
+correr-api: check_env_local $(VENV_DIR)/bin/activate
+	@echo "Iniciando la aplicación FastAPI localmente..."
+	@echo "Usando host: $(FASTAPI_HOST_LOCAL), puerto: $(FASTAPI_PORT_LOCAL) (de $(ENV_FILE_LOCAL))"
+	# PYTHONPATH=. asegura que los módulos locales de entrenai_refactor se encuentren correctamente.
+	$(VENV_ACTIVATE); PYTHONPATH=. uvicorn api.principal:aplicacion_fastapi $(RUN_ARGS_LOCAL)
 
-# Asume que .env está en el directorio padre
-correr-worker-celery: $(VENV_DIR)/bin/activate ../.env
-	@echo "Iniciando worker de Celery..."
-	# PYTHONPATH=. para asegurar que los módulos locales de entrenai_refactor se encuentren
-	$(VENV_ACTIVATE); PYTHONPATH=. celery -A celery.tareas:aplicacion worker -l INFO -P threads
+correr-worker-celery: check_env_local $(VENV_DIR)/bin/activate
+	@echo "Iniciando worker de Celery localmente..."
+	# PYTHONPATH=. para que Celery encuentre los módulos de la aplicación.
+	# '-A entrenai_refactor.celery' apunta al __init__.py del paquete celery, que importa 'aplicacion_celery'.
+	$(VENV_ACTIVATE); PYTHONPATH=. celery -A entrenai_refactor.celery worker -l INFO -P threads
 
 probar: $(VENV_DIR)/bin/activate
-	@echo "Ejecutando pruebas..."
-	$(VENV_ACTIVATE); pytest
+	@echo "Ejecutando pruebas con pytest..."
+	$(VENV_ACTIVATE); PYTHONPATH=. pytest tests/
+	@echo "Pruebas finalizadas. Revisa la salida para ver los resultados."
 
 limpiar:
 	rm -rf $(VENV_DIR)
 	find . -type d -name "__pycache__" -exec rm -rf {} +
 	find . -type d -name ".pytest_cache" -exec rm -rf {} +
-	@echo "Entorno virtual y archivos de caché eliminados."
+	@echo "Entorno virtual, archivos __pycache__ y .pytest_cache eliminados."
 
 # Comandos de Docker Compose
-# Asume que docker-compose.yml está en el mismo directorio que este Makefile (entrenai_refactor)
-# y que .env está en el directorio padre
-servicios-levantar: ../.env
-	@echo "Iniciando servicios de Docker (desde entrenai_refactor/docker-compose.yml)..."
-	docker compose -f docker-compose.yml up -d --remove-orphans --build
+# Usan docker-compose.yml y .env.docker en el directorio actual (entrenai_refactor/)
+levantar-servicios: check_env_docker
+	@echo "Iniciando servicios de Docker definidos en './docker-compose.yml'..."
+	@echo "Se utilizará el archivo de entorno './$(ENV_FILE_DOCKER)'."
+	docker compose -f docker-compose.yml --env-file $(ENV_FILE_DOCKER) up -d --remove-orphans --build
 
-servicios-bajar:
-	@echo "Deteniendo servicios de Docker (desde entrenai_refactor/docker-compose.yml)..."
+bajar-servicios:
+	@echo "Deteniendo servicios de Docker definidos en './docker-compose.yml'..."
 	docker compose -f docker-compose.yml down
 
-servicios-logs:
-	@echo "Mostrando logs de los servicios de Docker (desde entrenai_refactor/docker-compose.yml)..."
+logs-servicios:
+	@echo "Mostrando logs de los servicios de Docker (presiona Ctrl+C para salir)..."
 	docker compose -f docker-compose.yml logs -f
 
-servicios-reiniciar: servicios-bajar servicios-levantar
+reiniciar-servicios: bajar-servicios levantar-servicios
+	@echo "Servicios Docker reiniciados."
 
-# Comando de prueba general
-prueba: servicios-levantar
-	@echo "Sistema de demo levantado."
-	# Aquí se podrían añadir más pasos, como poblar la base de datos con datos de prueba.
+levantar-demo: levantar-servicios
+	@echo "Sistema de demo (servicios Docker) levantado."
+	@echo "Accede a la API en http://localhost:<PUERTO_FASTAPI_HOST> (ver .env.docker)."
+	# Aquí se podrían añadir más pasos, como poblar la base de datos con datos de prueba,
+	# o abrir un navegador a la interfaz de usuario.
+	# Ejemplo: $(PYTHON) -m webbrowser http://localhost:$(shell grep FASTAPI_HOST_PORT $(ENV_FILE_DOCKER) | cut -d '=' -f2)
 
-# Asegurar que .env exista en el directorio padre para los comandos que lo necesiten
-../.env:
-	@echo "Error: Archivo ../.env no encontrado. Por favor, copia .env.example a .env en la raíz del proyecto y configúralo."
-	@exit 1
+# Nota: La comprobación explícita de la existencia de .env y .env.docker se hace al inicio de los targets relevantes.
+# Esto evita que 'make' falle si los archivos no existen pero el comando no los requiere directamente.
+# Por ejemplo, 'make ayuda' no necesita los .env.

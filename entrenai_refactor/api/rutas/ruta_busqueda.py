@@ -1,101 +1,149 @@
-from fastapi import APIRouter, HTTPException, Depends, Query, status
-from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, HTTPException, Depends, status
+from typing import List, Optional # No se usa Dict, Any directamente aquí
 
-from entrenai_refactor.api import modelos as modelos_api
-from entrenai_refactor.nucleo.bd.envoltorio_pgvector import EnvoltorioPgVector, ErrorEnvoltorioPgVector
-from entrenai_refactor.nucleo.ia.proveedor_inteligencia import ProveedorInteligencia, ErrorProveedorInteligencia
+# Importar modelos Pydantic refactorizados (usando sus nuevos nombres en español)
+from entrenai_refactor.api import modelos as modelos_api_traducidos
+# Importar clases refactorizadas del núcleo
+from entrenai_refactor.nucleo.bd import EnvoltorioPgVector, ErrorBaseDeDatosVectorial
+from entrenai_refactor.nucleo.ia import ProveedorInteligencia, ErrorProveedorInteligencia
 from entrenai_refactor.config.registrador import obtener_registrador
-from entrenai_refactor.config.configuracion import configuracion_global # Aunque no se use directamente, es bueno tenerlo si se necesita config general
 
 registrador = obtener_registrador(__name__)
 
-enrutador = APIRouter(
-    prefix="/api/v1/busqueda", # Prefijo para todos los endpoints en este router
-    tags=["Búsqueda Contextual"], # Etiqueta para la documentación de Swagger/OpenAPI
+enrutador_busqueda = APIRouter( # Renombrado para más claridad si se importa en otro lado
+    prefix="/api/v1/busqueda",
+    tags=["Búsqueda Semántica y Contextual"],
 )
 
-# --- Funciones de Dependencia (Inyección) ---
+# --- Funciones de Dependencia (Inyección de Dependencias de FastAPI) ---
 
-def obtener_envoltorio_pgvector() -> EnvoltorioPgVector:
+def obtener_conexion_envoltorio_pgvector() -> EnvoltorioPgVector:
+    """
+    Dependencia de FastAPI para obtener una instancia del EnvoltorioPgVector.
+    Maneja errores de inicialización y los convierte en HTTPExceptions.
+    """
     try:
+        # EnvoltorioPgVector se inicializa de forma perezosa, la conexión real ocurre al usarlo.
         return EnvoltorioPgVector()
-    except Exception as e:
-        registrador.error(f"Error al crear instancia de EnvoltorioPgVector: {e}")
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"No se pudo conectar con la base de datos vectorial: {str(e)}")
+    except ErrorBaseDeDatosVectorial as e_bd_vec: # Captura la excepción personalizada del envoltorio
+        registrador.error(f"Error crítico al inicializar EnvoltorioPgVector: {e_bd_vec}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"No se pudo establecer conexión con el servicio de base de datos vectorial: {str(e_bd_vec)}"
+        )
+    except Exception as e_inesperado: # Otros errores inesperados durante la instanciación
+        registrador.exception(f"Error inesperado al instanciar EnvoltorioPgVector: {e_inesperado}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error interno del servidor al configurar el acceso a la base de datos."
+        )
 
-def obtener_proveedor_inteligencia() -> ProveedorInteligencia:
+def obtener_instancia_proveedor_inteligencia() -> ProveedorInteligencia:
+    """
+    Dependencia de FastAPI para obtener una instancia del ProveedorInteligencia.
+    Maneja errores de inicialización y los convierte en HTTPExceptions.
+    """
     try:
         return ProveedorInteligencia()
-    except ErrorProveedorInteligencia as e:
-        registrador.error(f"Error al crear instancia de ProveedorInteligencia: {e}")
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"No se pudo inicializar el proveedor de IA: {str(e)}")
-    except Exception as e:
-        registrador.error(f"Error inesperado al crear ProveedorInteligencia: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno al configurar el proveedor de IA.")
+    except ErrorProveedorInteligencia as e_prov_ia: # Captura la excepción personalizada
+        registrador.error(f"Error crítico al inicializar ProveedorInteligencia: {e_prov_ia}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"No se pudo inicializar el proveedor de inteligencia artificial configurado: {str(e_prov_ia)}"
+        )
+    except Exception as e_inesperado: # Otros errores
+        registrador.exception(f"Error inesperado al instanciar ProveedorInteligencia: {e_inesperado}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error interno del servidor al configurar el proveedor de inteligencia artificial."
+        )
 
-# --- Endpoint de Búsqueda ---
+# --- Endpoint de Búsqueda Contextual ---
 
-@enrutador.post("/contextual",
-                 response_model=modelos_api.RespuestaBusqueda,
-                 summary="Realizar Búsqueda Contextual en un Curso",
-                 description="Genera un embedding para la consulta y busca fragmentos de documentos similares en la base de datos vectorial del curso especificado.")
-async def buscar_contextual(
-    solicitud: modelos_api.SolicitudBusquedaContextual,
-    bd_pgvector: EnvoltorioPgVector = Depends(obtener_envoltorio_pgvector),
-    proveedor_ia: ProveedorInteligencia = Depends(obtener_proveedor_inteligencia)
+@enrutador_busqueda.post("/contextual", # Mantener la ruta como estaba
+                         response_model=modelos_api_traducidos.RespuestaBusquedaContextual, # Usar modelo traducido
+                         summary="Realizar Búsqueda Semántica Contextual en un Curso Específico",
+                         description="Genera un embedding para la consulta del usuario y busca fragmentos de documentos semánticamente similares dentro de la base de datos vectorial del curso indicado.")
+async def realizar_busqueda_contextual_en_curso( # Nombre de función traducido y más descriptivo
+    peticion_busqueda: modelos_api_traducidos.SolicitudBusquedaContextual, # Usar modelo traducido
+    envoltorio_bd_pgvector: EnvoltorioPgVector = Depends(obtener_conexion_envoltorio_pgvector),
+    proveedor_ia_seleccionado: ProveedorInteligencia = Depends(obtener_instancia_proveedor_inteligencia)
 ):
-    registrador.info(f"Recibida solicitud de búsqueda contextual para curso ID '{solicitud.id_curso}' con consulta: '{solicitud.consulta[:50]}...'")
+    registrador.info(
+        f"Recibida solicitud de búsqueda contextual para curso ID '{peticion_busqueda.id_curso}' "
+        f"con consulta: '{peticion_busqueda.consulta_usuario[:70]}...' (límite: {peticion_busqueda.numero_resultados})."
+    )
 
     try:
-        # Obtener el nombre de la tabla para el curso.
-        # El modelo usa id_curso, el envoltorio pgvector puede tomar id_curso directamente para generar el nombre de tabla.
-        # nombre_tabla_curso = bd_pgvector.obtener_nombre_tabla_curso(str(solicitud.id_curso)) # Asumiendo que toma string o int
-
-        registrador.debug(f"Generando embedding para la consulta: '{solicitud.consulta}'")
-        embedding_generado = proveedor_ia.generar_embedding(texto=solicitud.consulta)
-
-        if not embedding_generado:
-            registrador.error("No se pudo generar el embedding para la consulta.")
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error al generar embedding para la consulta.")
-
-        registrador.debug(f"Buscando fragmentos similares en curso ID '{solicitud.id_curso}' (límite: {solicitud.limite}).")
-        # buscar_fragmentos_similares espera nombre_curso_o_id_curso, podemos pasar id_curso directamente.
-        resultados_busqueda_crudos = bd_pgvector.buscar_fragmentos_similares(
-            nombre_curso_o_id_curso=solicitud.id_curso,
-            embedding_consulta=embedding_generado,
-            limite=solicitud.limite
+        # Generar embedding para la consulta del usuario usando el proveedor de IA.
+        # El método en ProveedorInteligencia ya fue refactorizado a 'generar_embedding'.
+        registrador.debug(f"Generando embedding para la consulta: '{peticion_busqueda.consulta_usuario}'.")
+        embedding_de_consulta = proveedor_ia_seleccionado.generar_embedding(
+            texto_entrada=peticion_busqueda.consulta_usuario
         )
 
-        resultados_mapeados: List[modelos_api.ResultadoBusquedaItem] = []
-        for res_crudo in resultados_busqueda_crudos:
-            # El payload ya contiene texto y metadatos según la implementación de buscar_fragmentos_similares
-            payload = res_crudo.get("payload", {})
-            item = modelos_api.ResultadoBusquedaItem(
-                id_fragmento=res_crudo.get("id_fragmento", ""), # id_fragmento es el id del DocumentChunk
-                similitud=res_crudo.get("similitud", 0.0),
-                texto_fragmento=payload.get("texto", ""), # El texto del fragmento
-                metadatos=payload # Todos los metadatos del payload
+        if not embedding_de_consulta: # Si el embedding es None o lista vacía
+            registrador.error("No se pudo generar el embedding para la consulta del usuario.")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Ocurrió un error al procesar la consulta para la búsqueda (generación de embedding fallida)."
             )
-            resultados_mapeados.append(item)
 
-        registrador.info(f"Búsqueda contextual completada. Se encontraron {len(resultados_mapeados)} resultados para la consulta.")
-
-        return modelos_api.RespuestaBusqueda(
-            consulta_original=solicitud.consulta,
-            resultados=resultados_mapeados,
-            total_resultados=len(resultados_mapeados)
+        # Buscar fragmentos similares en la base de datos vectorial.
+        # El método en EnvoltorioPgVector ya fue refactorizado a 'buscar_fragmentos_similares_por_embedding'.
+        registrador.debug(
+            f"Buscando fragmentos similares en curso ID '{peticion_busqueda.id_curso}' "
+            f"con límite de {peticion_busqueda.numero_resultados} resultados."
+        )
+        resultados_crudos_bd = envoltorio_bd_pgvector.buscar_fragmentos_similares_por_embedding(
+            identificador_curso=peticion_busqueda.id_curso, # El método espera 'identificador_curso'
+            embedding_consulta=embedding_de_consulta,
+            limite_resultados=peticion_busqueda.numero_resultados
         )
 
-    except ErrorEnvoltorioPgVector as e_pg:
-        registrador.error(f"Error de base de datos vectorial durante búsqueda: {e_pg}")
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Error en la base de datos de búsqueda: {str(e_pg)}")
-    except ErrorProveedorInteligencia as e_ia:
-        registrador.error(f"Error del proveedor de IA durante búsqueda: {e_ia}")
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Error en el proveedor de IA: {str(e_ia)}")
-    except HTTPException as e_http: # Re-lanzar HTTPExceptions de las dependencias
-        raise e_http
-    except Exception as e_gen:
-        registrador.exception(f"Error inesperado durante búsqueda contextual: {e_gen}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error interno del servidor durante la búsqueda: {str(e_gen)}")
+        # Mapear los resultados crudos de la base de datos al modelo de respuesta de la API.
+        items_resultado_mapeados: List[modelos_api_traducidos.ItemResultadoBusqueda] = []
+        for resultado_crudo_item in resultados_crudos_bd:
+            # El payload ya contiene 'texto' y otros metadatos según la implementación de 'buscar_fragmentos_similares_por_embedding'.
+            payload_fragmento = resultado_crudo_item.get("payload", {})
+            item_mapeado = modelos_api_traducidos.ItemResultadoBusqueda(
+                id_fragmento=resultado_crudo_item.get("id_fragmento", ""),
+                similitud=resultado_crudo_item.get("similitud", 0.0),
+                texto_fragmento=payload_fragmento.get("texto", "Texto no disponible."),
+                metadatos=payload_fragmento # Todos los metadatos del payload se incluyen aquí
+            )
+            items_resultado_mapeados.append(item_mapeado)
+
+        registrador.info(
+            f"Búsqueda contextual completada para curso ID '{peticion_busqueda.id_curso}'. "
+            f"Se encontraron {len(items_resultado_mapeados)} resultados para la consulta."
+        )
+
+        return modelos_api_traducidos.RespuestaBusquedaContextual(
+            consulta_original_usuario=peticion_busqueda.consulta_usuario,
+            resultados_busqueda=items_resultado_mapeados,
+            total_resultados_devueltos=len(items_resultado_mapeados)
+        )
+
+    except ErrorBaseDeDatosVectorial as e_bd_vec:
+        registrador.error(f"Error específico de la base de datos vectorial durante la búsqueda: {e_bd_vec}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Error al acceder a la base de datos durante la búsqueda: {str(e_bd_vec)}"
+        )
+    except ErrorProveedorInteligencia as e_prov_ia:
+        registrador.error(f"Error específico del proveedor de IA durante la búsqueda: {e_prov_ia}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Error con el servicio de inteligencia artificial durante la búsqueda: {str(e_prov_ia)}"
+        )
+    except HTTPException: # Re-lanzar HTTPExceptions que puedan originarse en las dependencias
+        raise
+    except Exception as e_general: # Capturar cualquier otra excepción no esperada
+        registrador.exception(f"Error inesperado durante la ejecución de la búsqueda contextual: {e_general}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Se produjo un error interno en el servidor al realizar la búsqueda: {str(e_general)}"
+        )
 
 [end of entrenai_refactor/api/rutas/ruta_busqueda.py]

@@ -61,7 +61,7 @@ services:
       - "${PGVECTOR_HOST_PORT:-5432}:5432" # Expose on a different host port if 5432 is taken
     volumes:
       - pgvector_data:/var/lib/postgresql/data
-      - ./entrenai2/nucleo/bd/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./nucleo/bd/init.sql:/docker-entrypoint-initdb.d/init.sql # MODIFICADO: Ruta al init.sql corregida
     environment:
       POSTGRES_USER: ${PGVECTOR_USER:-pgvector_user}
       POSTGRES_PASSWORD: ${PGVECTOR_PASSWORD:-pgvector_password}
@@ -169,7 +169,7 @@ services:
       # - ./entrenai_refactor:/app # Simpler, maps entire project
       - entrenai_data:/app/persistent_data # For truly persistent data not code
     env_file:
-      - ../.env # Assuming .env is in the root project directory
+      - ./.env.docker # MODIFICADO: Usar .env.docker desde el directorio entrenai_refactor
     environment:
       APP_ENV: docker
       DATA_DIR: /app/data # Internal data directory
@@ -192,7 +192,7 @@ services:
     container_name: entrenai_celery_worker # Keeping container name
     restart: unless-stopped
     env_file:
-      - ../.env # Assuming .env is in the root project directory
+      - ./.env.docker # MODIFICADO: Usar .env.docker desde el directorio entrenai_refactor
     volumes: # Adding volumes for celery worker to access necessary code
       - ./celery:/app/celery
       - ./nucleo:/app/nucleo

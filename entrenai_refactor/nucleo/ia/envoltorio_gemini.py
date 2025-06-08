@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 from google import genai
-from google.generativeai import types as google_types # Renombrado para evitar conflicto con typing.types
+from google.generativeai import types as tipos_google_genai # Renombrado para evitar conflicto y por claridad
 
 from entrenai_refactor.config.configuracion import configuracion_global
 from entrenai_refactor.config.registrador import obtener_registrador
@@ -14,173 +14,229 @@ from entrenai_refactor.nucleo.ia.utilidades_comunes_ia import (
 
 registrador = obtener_registrador(__name__)
 
-MENSAJE_CLIENTE_NO_INICIALIZADO = "Cliente Gemini no inicializado."
-MENSAJE_CLAVE_API_NO_CONFIGURADA = "Clave API de Gemini no configurada."
+MENSAJE_CLIENTE_NO_INICIALIZADO_GEMINI = "El cliente de Google Gemini no ha sido inicializado correctamente."
+MENSAJE_CLAVE_API_NO_CONFIGURADA_GEMINI = "La clave API de Google Gemini no está configurada en el entorno."
 
 class ErrorEnvoltorioGemini(Exception):
-    """Excepción personalizada para errores del EnvoltorioGemini."""
-    pass
+    """Excepción personalizada para errores específicos del EnvoltorioGemini."""
+    def __init__(self, mensaje: str, error_original: Optional[Exception] = None):
+        super().__init__(mensaje)
+        self.error_original = error_original
+        registrador.debug(f"Excepción ErrorEnvoltorioGemini creada: {mensaje}, Original: {error_original}")
+
+    def __str__(self):
+        if self.error_original:
+            return f"{super().__str__()} (Error original: {type(self.error_original).__name__}: {str(self.error_original)})"
+        return super().__str__()
 
 class EnvoltorioGemini:
-    """Envoltorio para interactuar con la API de Google Gemini."""
+    """
+    Envoltorio para interactuar con la API de Google Gemini.
+    Gestiona la configuración, generación de embeddings, completaciones de chat y formateo de texto.
+    """
 
     def __init__(self):
         self.config_gemini = configuracion_global.gemini
-        self.cliente_genai = None # El cliente se inicializa con genai.configure
+        # El "cliente" de Gemini se configura globalmente a través de genai.configure()
+        # No se instancia un objeto cliente como en otras librerías.
+
+        registrador.info("Inicializando EnvoltorioGemini...")
+        if not self.config_gemini.clave_api_gemini: # CAMBIADO
+            registrador.error(MENSAJE_CLAVE_API_NO_CONFIGURADA_GEMINI)
+            raise ErrorEnvoltorioGemini(MENSAJE_CLAVE_API_NO_CONFIGURADA_GEMINI)
+
         try:
-            if self.config_gemini.clave_api:
-                genai.configure(api_key=self.config_gemini.clave_api)
-                # No hay un objeto cliente como tal, las llamadas son a través del módulo genai.
-                # Se puede listar modelos para verificar la configuración.
-                # list(genai.list_models()) # Esto podría ser una prueba de conexión/configuración
-                registrador.info("Cliente Gemini inicializado exitosamente con la Clave API.")
-            else:
-                registrador.error(f"{MENSAJE_CLAVE_API_NO_CONFIGURADA} EnvoltorioGemini no funcional.")
-                raise ErrorEnvoltorioGemini(MENSAJE_CLAVE_API_NO_CONFIGURADA)
-        except Exception as e:
-            registrador.error(f"Falló la inicialización del cliente Gemini: {e}")
-            raise ErrorEnvoltorioGemini(f"Falló la inicialización del cliente Gemini: {e}") from e
+            genai.configure(api_key=self.config_gemini.clave_api_gemini) # CAMBIADO
+            # Se podría realizar una llamada de prueba, como listar modelos, para verificar la configuración.
+            # Ejemplo: list(genai.list_models())
+            registrador.info("Google Gemini SDK configurado exitosamente con la clave API.")
+        except Exception as e_config:
+            registrador.error(f"Falló la configuración del SDK de Google Gemini: {e_config}")
+            raise ErrorEnvoltorioGemini(f"Falló la configuración del SDK de Gemini: {e_config}", e_config)
 
-    def _obtener_config_seguridad(self) -> Optional[List[Dict[str, Any]]]:
-        """Obtiene la configuración de seguridad para las llamadas a la API."""
-        if not self.config_gemini.seguridad_habilitada:
-            # Configuración para desactivar/minimizar filtros de seguridad
+    def _obtener_configuracion_de_seguridad(self) -> Optional[List[Dict[str, Any]]]:
+        """
+        Construye la configuración de seguridad para las llamadas a la API de Gemini.
+        Si la seguridad está deshabilitada en la configuración, devuelve umbrales para bloquear nada.
+        """
+        if not self.config_gemini.seguridad_gemini_habilitada: # CAMBIADO
+            registrador.debug("Configuración de seguridad de Gemini deshabilitada. Se aplicarán umbrales BLOCK_NONE.")
+            # Referencia: https://ai.google.dev/docs/safety_setting_gemini
             return [
-                {"category": google_types.HarmCategory.HARM_CATEGORY_HARASSMENT, "threshold": google_types.HarmBlockThreshold.BLOCK_NONE},
-                {"category": google_types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, "threshold": google_types.HarmBlockThreshold.BLOCK_NONE},
-                {"category": google_types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, "threshold": google_types.HarmBlockThreshold.BLOCK_NONE},
-                {"category": google_types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, "threshold": google_types.HarmBlockThreshold.BLOCK_NONE},
+                {"category": tipos_google_genai.HarmCategory.HARM_CATEGORY_HARASSMENT, "threshold": tipos_google_genai.HarmBlockThreshold.BLOCK_NONE},
+                {"category": tipos_google_genai.HarmCategory.HARM_CATEGORY_HATE_SPEECH, "threshold": tipos_google_genai.HarmBlockThreshold.BLOCK_NONE},
+                {"category": tipos_google_genai.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, "threshold": tipos_google_genai.HarmBlockThreshold.BLOCK_NONE},
+                {"category": tipos_google_genai.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, "threshold": tipos_google_genai.HarmBlockThreshold.BLOCK_NONE},
             ]
-        return None # Usar configuración de seguridad predeterminada de Gemini
+        registrador.debug("Utilizando configuración de seguridad predeterminada de Gemini.")
+        return None # Usar la configuración de seguridad predeterminada de la API
 
-    def generar_embedding(self, texto: str, modelo: Optional[str] = None) -> List[float]:
-        modelo_a_usar = modelo or self.config_gemini.modelo_embedding
-        if not modelo_a_usar:
+    def generar_embedding_de_texto(self, texto_entrada: str, nombre_modelo_embedding: Optional[str] = None) -> List[float]:
+        """Genera un vector de embedding para un texto dado utilizando un modelo de Gemini."""
+        modelo_seleccionado = nombre_modelo_embedding or self.config_gemini.modelo_embedding_gemini # CAMBIADO
+        if not modelo_seleccionado:
+            registrador.error("No se ha especificado un modelo de embedding de Gemini para usar.")
             raise ErrorEnvoltorioGemini("Modelo de embedding de Gemini no especificado.")
 
+        registrador.debug(f"Generando embedding con modelo Gemini '{modelo_seleccionado}' para texto de longitud {len(texto_entrada)}.")
         try:
-            # Preprocesar texto antes de enviar a embedding
-            texto_preprocesado = preprocesar_contenido_texto(texto)
+            texto_preprocesado_para_embedding = preprocesar_contenido_texto(texto_entrada)
 
-            # La API de embeddings de Gemini espera 'model' (ej. 'models/embedding-001') y 'content'
-            respuesta = genai.embed_content(model=modelo_a_usar, content=texto_preprocesado)
+            # La API de embeddings de Gemini espera 'model' (ej. 'models/embedding-001') y 'content'.
+            respuesta_embedding = genai.embed_content(model=modelo_seleccionado, content=texto_preprocesado_para_embedding)
 
-            if "embedding" in respuesta and isinstance(respuesta["embedding"], list):
-                return respuesta["embedding"]
+            if "embedding" in respuesta_embedding and isinstance(respuesta_embedding["embedding"], list):
+                registrador.info(f"Embedding generado exitosamente con modelo '{modelo_seleccionado}'. Dimensión: {len(respuesta_embedding['embedding'])}.")
+                return respuesta_embedding["embedding"]
             else:
-                registrador.error(f"Respuesta de embedding no contiene un vector válido: {respuesta}")
-                raise ErrorEnvoltorioGemini("Respuesta de embedding no contiene un vector válido.")
-        except Exception as e:
-            registrador.error(f"Error generando embedding con modelo Gemini '{modelo_a_usar}': {e}")
-            raise ErrorEnvoltorioGemini(f"Falló la generación del embedding con Gemini: {e}") from e
+                registrador.error(f"La respuesta de la API de embedding de Gemini no contiene un vector válido. Respuesta: {respuesta_embedding}")
+                raise ErrorEnvoltorioGemini("Respuesta de embedding de Gemini no contiene un vector válido.")
+        except Exception as e_embedding:
+            registrador.error(f"Error al generar embedding con modelo Gemini '{modelo_seleccionado}': {e_embedding}")
+            raise ErrorEnvoltorioGemini(f"Falló la generación del embedding con Gemini: {e_embedding}", e_embedding)
 
-    def generar_completacion_chat(
-        self, prompt: str, modelo: Optional[str] = None,
-        mensaje_sistema: Optional[str] = None,
-        fragmentos_contexto: Optional[List[str]] = None,
-        stream: bool = False # El streaming no está implementado aún
+    def generar_respuesta_de_chat(
+        self,
+        prompt_usuario: str,
+        nombre_modelo_chat: Optional[str] = None,
+        mensaje_de_sistema: Optional[str] = None,
+        historial_chat_previo: Optional[List[Dict[str, str]]] = None, # Formato: [{"role": "user/model", "parts": ["texto"]}]
+        fragmentos_de_contexto: Optional[List[str]] = None,
+        # stream: bool = False # El streaming aún no está implementado en este envoltorio
     ) -> str:
-        modelo_a_usar = modelo or self.config_gemini.modelo_texto # Usar modelo_texto para chat general
-        if not modelo_a_usar:
+        """
+        Genera una respuesta de chat utilizando un modelo de Gemini,
+        opcionalmente con un mensaje de sistema, historial de chat y contexto adicional.
+        """
+        modelo_seleccionado = nombre_modelo_chat or self.config_gemini.modelo_texto_gemini # CAMBIADO
+        if not modelo_seleccionado:
+            registrador.error("No se ha especificado un modelo de texto/chat de Gemini para usar.")
             raise ErrorEnvoltorioGemini("Modelo de texto/chat de Gemini no especificado.")
 
+        registrador.debug(f"Generando completación de chat con modelo Gemini '{modelo_seleccionado}'.")
         try:
-            # Construir el historial de chat y el prompt
-            # Gemini API v1 (genai) usa un enfoque multimodal para 'contents'
-            # y 'system_instruction' para el mensaje de sistema.
+            # Construir el historial de 'contents' para la API de Gemini
+            # Referencia: https://ai.google.dev/docs/gemini_api_overview#chat_conversations
+            contenido_peticion_api = []
+            if historial_chat_previo:
+                for item_historial in historial_chat_previo:
+                    # Asegurar que el formato sea correcto para la API de Gemini
+                    if "role" in item_historial and "parts" in item_historial:
+                         contenido_peticion_api.append(item_historial)
+                    else:
+                        registrador.warning(f"Item de historial de chat malformado omitido: {item_historial}")
 
-            contenido_peticion = []
-            if fragmentos_contexto:
-                contexto_str = "\n\n".join(fragmentos_contexto)
-                prompt_completo = f"Contexto:\n{contexto_str}\n\nPregunta: {prompt}"
-                contenido_peticion.append(prompt_completo)
-            else:
-                contenido_peticion.append(prompt)
 
-            opciones_generacion = google_types.GenerationConfig(candidate_count=1) # Por ahora, solo una respuesta candidata
-            config_seguridad = self._obtener_config_seguridad()
+            # Añadir el contexto y el prompt actual del usuario
+            prompt_final_con_contexto = prompt_usuario
+            if fragmentos_de_contexto:
+                contexto_como_string = "\n\n".join(fragmentos_de_contexto)
+                prompt_final_con_contexto = f"Contexto relevante:\n{contexto_como_string}\n\nPregunta del usuario: {prompt_usuario}"
 
-            # Crear el modelo generativo
-            modelo_generativo = genai.GenerativeModel(
-                model_name=modelo_a_usar,
-                safety_settings=config_seguridad,
-                system_instruction=mensaje_sistema if mensaje_sistema else None
+            contenido_peticion_api.append({"role": "user", "parts": [prompt_final_con_contexto]})
+
+            opciones_config_generacion = tipos_google_genai.GenerationConfig(candidate_count=1) # Solicitar una sola respuesta candidata
+            configuracion_seguridad_api = self._obtener_configuracion_de_seguridad()
+
+            # Crear el modelo generativo con la instrucción de sistema si se proporciona
+            modelo_generativo_gemini = genai.GenerativeModel(
+                model_name=modelo_seleccionado,
+                safety_settings=configuracion_seguridad_api,
+                system_instruction=mensaje_de_sistema if mensaje_de_sistema else None
             )
 
-            if stream:
-                registrador.warning("Streaming no está implementado para Gemini en este wrapper. Devolviendo respuesta completa.")
-                # Aquí iría la lógica de streaming si se implementa
+            # Iniciar una sesión de chat (si hay historial) o generar contenido directamente
+            # Por simplicidad, si hay historial, se pasa todo en 'contents'.
+            # Para conversaciones más largas y con estado, se usaría model.start_chat(history=...).
 
-            respuesta = modelo_generativo.generate_content(contents=contenido_peticion, generation_config=opciones_generacion, stream=stream)
+            registrador.debug(f"Enviando a Gemini (modelo {modelo_seleccionado}): Instrucción sistema: '{mensaje_de_sistema if mensaje_de_sistema else 'Ninguna'}', Contenido: {json.dumps(contenido_peticion_api, indent=2, ensure_ascii=False)}")
 
-            # Extraer contenido de la respuesta
-            # La respuesta.text es la forma más directa si no hay errores o bloqueos.
-            contenido_respuesta = ""
-            if respuesta.parts:
-                 contenido_respuesta = "".join(part.text for part in respuesta.parts if hasattr(part, "text"))
+            respuesta_gemini = modelo_generativo_gemini.generate_content(
+                contents=contenido_peticion_api,
+                generation_config=opciones_config_generacion,
+                # stream=stream # El streaming requeriría un manejo diferente del iterador de respuesta
+            )
 
-            if not contenido_respuesta and respuesta.prompt_feedback and respuesta.prompt_feedback.block_reason:
-                registrador.error(f"Contenido bloqueado por Gemini. Razón: {respuesta.prompt_feedback.block_reason_message}")
-                raise ErrorEnvoltorioGemini(f"Contenido bloqueado por Gemini: {respuesta.prompt_feedback.block_reason_message}")
+            # Extraer el contenido de texto de la respuesta
+            contenido_texto_respuesta = ""
+            if respuesta_gemini.parts:
+                 contenido_texto_respuesta = "".join(part.text for part in respuesta_gemini.parts if hasattr(part, "text"))
 
-            if not contenido_respuesta:
-                registrador.warning("La completación de chat de Gemini devolvió contenido vacío.")
+            # Verificar si el contenido fue bloqueado o la respuesta está vacía
+            if not contenido_texto_respuesta and respuesta_gemini.prompt_feedback and respuesta_gemini.prompt_feedback.block_reason:
+                mensaje_bloqueo = respuesta_gemini.prompt_feedback.block_reason_message or str(respuesta_gemini.prompt_feedback.block_reason)
+                registrador.error(f"La generación de contenido fue bloqueada por Gemini. Razón: {mensaje_bloqueo}")
+                raise ErrorEnvoltorioGemini(f"Contenido bloqueado por Gemini: {mensaje_bloqueo}")
 
-            return contenido_respuesta
+            if not contenido_texto_respuesta:
+                registrador.warning(f"La completación de chat del modelo Gemini '{modelo_seleccionado}' devolvió contenido vacío.")
 
-        except Exception as e:
-            registrador.exception(f"Error generando completación de chat con modelo Gemini '{modelo_a_usar}': {e}")
-            raise ErrorEnvoltorioGemini(f"Falló la generación de completación de chat con Gemini: {e}") from e
+            registrador.info(f"Respuesta de chat generada exitosamente con modelo '{modelo_seleccionado}'.")
+            return contenido_texto_respuesta
 
-    def formatear_a_markdown(
-        self, contenido_texto: str, modelo: Optional[str] = None, ruta_guardado: Optional[Path] = None
+        except Exception as e_chat:
+            registrador.exception(f"Error al generar completación de chat con modelo Gemini '{modelo_seleccionado}': {e_chat}")
+            raise ErrorEnvoltorioGemini(f"Falló la generación de completación de chat con Gemini: {e_chat}", e_chat)
+
+    def convertir_texto_a_markdown(
+        self,
+        texto_original: str,
+        nombre_modelo_formateo: Optional[str] = None,
+        ruta_archivo_guardado: Optional[Path] = None
     ) -> str:
-        modelo_a_usar = modelo or self.config_gemini.modelo_texto # Usar modelo_texto para esta tarea
-        if not modelo_a_usar:
+        """Formatea un texto crudo a formato Markdown utilizando un modelo de Gemini."""
+        modelo_seleccionado = nombre_modelo_formateo or self.config_gemini.modelo_texto_gemini # CAMBIADO
+        if not modelo_seleccionado:
+            registrador.error("No se ha especificado un modelo de texto de Gemini para el formateo a Markdown.")
             raise ErrorEnvoltorioGemini("Modelo de texto de Gemini no especificado para formateo a Markdown.")
 
-        texto_limpio = preprocesar_contenido_texto(contenido_texto)
+        texto_limpio_para_formateo = preprocesar_contenido_texto(texto_original)
+        registrador.info(f"Formateando texto a Markdown con modelo Gemini '{modelo_seleccionado}'. Longitud original: {len(texto_original)}, preprocesado: {len(texto_limpio_para_formateo)}.")
 
-        prompt_formateo = (
-            "Eres un experto formateador de texto especializado en convertir texto crudo a Markdown limpio y bien estructurado. "
-            "Tu tarea es transformar el contenido proporcionado a un formato Markdown. Sigue estas reglas estrictamente:\n"
+        prompt_instruccion_formateo = (
+            "Eres un experto formateador de texto especializado en convertir texto crudo a Markdown limpio y bien estructurado.\n"
+            "Tu tarea es transformar el siguiente contenido proporcionado a un formato Markdown. Sigue estas reglas estrictamente:\n"
             "1. Mantén el significado y la información factual del contenido original.\n"
-            "2. Crea encabezados y estructura apropiados basados en la jerarquía del contenido.\n"
-            "3. Formatea correctamente listas, tablas, bloques de código y otros elementos Markdown.\n"
-            "4. Corrige errores tipográficos y de formato obvios mientras preservas el significado.\n"
-            "5. NO añadas ningún contenido nuevo, introducciones, resúmenes o conclusiones.\n"
-            "6. NO incluyas ningún meta-comentario o notas sobre el proceso de formateo.\n"
-            "7. SOLO devuelve el contenido Markdown formateado correctamente, nada más.\n\n"
-            "El objetivo es un Markdown limpio que represente con precisión el contenido original.\n\n"
+            "2. Crea encabezados (#, ##, ###) y estructura apropiados basados en la jerarquía implícita del contenido.\n"
+            "3. Formatea correctamente listas (numeradas y con viñetas), tablas (si son detectables), bloques de código (si aplica), y otros elementos Markdown (negritas, cursivas, etc.).\n"
+            "4. Corrige errores tipográficos y de formato obvios (ej. múltiples espacios) mientras preservas el significado.\n"
+            "5. NO añadas ningún contenido nuevo, introducciones, resúmenes, conclusiones o información que no esté en el texto original.\n"
+            "6. NO incluyas ningún meta-comentario, notas sobre el proceso de formateo, o disculpas.\n"
+            "7. SOLO devuelve el contenido Markdown formateado correctamente. Nada antes, nada después.\n\n"
+            "El objetivo es un Markdown limpio que represente con precisión el contenido original, listo para ser usado directamente.\n\n"
             "Texto a convertir:\n"
-            f"{texto_limpio}"
+            f"\"\"\"\n{texto_limpio_para_formateo}\n\"\"\""
         )
 
         try:
-            registrador.info(f"Formateando texto a Markdown usando el modelo Gemini '{modelo_a_usar}'...")
+            modelo_generativo_gemini = genai.GenerativeModel(
+                modelo_seleccionado,
+                safety_settings=self._obtener_configuracion_de_seguridad()
+            )
+            respuesta_formateo = modelo_generativo_gemini.generate_content(prompt_instruccion_formateo)
 
-            modelo_generativo = genai.GenerativeModel(modelo_a_usar, safety_settings=self._obtener_config_seguridad())
-            respuesta = modelo_generativo.generate_content(prompt_formateo)
+            contenido_markdown_generado = ""
+            if respuesta_formateo.parts:
+                 contenido_markdown_generado = "".join(part.text for part in respuesta_formateo.parts if hasattr(part, "text"))
 
-            contenido_markdown = ""
-            if respuesta.parts:
-                 contenido_markdown = "".join(part.text for part in respuesta.parts if hasattr(part, "text"))
+            if not contenido_markdown_generado and respuesta_formateo.prompt_feedback and respuesta_formateo.prompt_feedback.block_reason:
+                mensaje_bloqueo = respuesta_formateo.prompt_feedback.block_reason_message or str(respuesta_formateo.prompt_feedback.block_reason)
+                registrador.error(f"La tarea de formateo a Markdown fue bloqueada por Gemini. Razón: {mensaje_bloqueo}")
+                raise ErrorEnvoltorioGemini(f"Formateo a Markdown bloqueado por Gemini: {mensaje_bloqueo}")
 
-            if not contenido_markdown and respuesta.prompt_feedback and respuesta.prompt_feedback.block_reason:
-                registrador.error(f"Formateo a Markdown bloqueado por Gemini. Razón: {respuesta.prompt_feedback.block_reason_message}")
-                raise ErrorEnvoltorioGemini(f"Formateo a Markdown bloqueado por Gemini: {respuesta.prompt_feedback.block_reason_message}")
+            contenido_markdown_final = postprocesar_contenido_markdown(contenido_markdown_generado)
 
-            contenido_markdown_postprocesado = postprocesar_contenido_markdown(contenido_markdown)
-
-            if contenido_markdown_postprocesado:
-                registrador.info(f"Texto formateado a Markdown con Gemini exitosamente (longitud: {len(contenido_markdown_postprocesado)}).")
-                if ruta_guardado:
-                    guardar_markdown_en_archivo(contenido_markdown_postprocesado, ruta_guardado)
+            if contenido_markdown_final:
+                registrador.info(f"Texto formateado a Markdown con Gemini exitosamente (longitud: {len(contenido_markdown_final)}).")
+                if ruta_archivo_guardado:
+                    guardar_markdown_en_archivo(contenido_markdown_final, ruta_archivo_guardado) # Utilidad común para guardar
             else:
-                registrador.warning("El formateo a Markdown con Gemini devolvió contenido vacío.")
-            return contenido_markdown_postprocesado
-        except Exception as e:
-            registrador.exception(f"Error formateando texto a Markdown con modelo Gemini '{modelo_a_usar}': {e}")
-            raise ErrorEnvoltorioGemini(f"Falló el formateo de texto a Markdown con Gemini: {e}") from e
+                registrador.warning(f"El formateo a Markdown con modelo Gemini '{modelo_seleccionado}' devolvió contenido vacío.")
 
-[end of entrenai_refactor/nucleo/ia/envoltorio_gemini.py]
+            return contenido_markdown_final
+
+        except Exception as e_formateo:
+            registrador.exception(f"Error al formatear texto a Markdown con modelo Gemini '{modelo_seleccionado}': {e_formateo}")
+            raise ErrorEnvoltorioGemini(f"Falló el formateo de texto a Markdown con Gemini: {e_formateo}", e_formateo)
+
+[end of entrenai_refactor/nucleo/ia/envoltorio_gemini_refactorizado.py]

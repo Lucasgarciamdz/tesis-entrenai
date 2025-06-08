@@ -2,7 +2,51 @@
 
 Este documento detalla la estructura técnica, la configuración y el registro de cambios del proyecto EntrenAI refactorizado.
 
-## Registro de Cambios (Refactorización)
+## Registro de Cambios
+
+### Refactorización Principal (Completa a Fecha de la Última Refactorización)
+
+Esta sección resume los cambios más significativos realizados durante la refactorización completa del proyecto en el directorio `entrenai_refactor`.
+
+*   **Estructura del Proyecto y Autocontención:**
+    *   Todo el código fuente, configuración, Dockerfiles, Makefile y documentación relevante del proyecto se han consolidado dentro del directorio `entrenai_refactor` para que sea autocontenido.
+    *   Los archivos de entorno (`.env.example`, `.env.docker`) y de ignorar Docker (`.dockerignore`) ahora residen y se gestionan desde `entrenai_refactor`.
+    *   Los Dockerfiles y `docker-compose.yml` han sido actualizados para funcionar correctamente desde el contexto de `entrenai_refactor`.
+
+*   **Traducción Integral al Español:**
+    *   Todo el código fuente (nombres de variables, funciones, clases, métodos), comentarios y docstrings han sido traducidos al español.
+    *   Los modelos Pydantic (en `api/modelos.py`) y sus descripciones de campos están en español.
+    *   Los mensajes de log y las respuestas de error de la API se han traducido al español.
+    *   Los archivos estáticos HTML (`api/estaticos/`) ya se encontraban mayormente en español.
+
+*   **Mejoras en Configuración y Logging:**
+    *   Configuración centralizada en `config/configuracion.py` (`configuracion_global`), cargando desde `entrenai_refactor/.env`. Todos los campos de configuración fueron traducidos al español, lo que requirió actualizar sus referencias en todo el proyecto.
+    *   Sistema de logging mejorado y estandarizado mediante `config/registrador.py`, configurable mediante `configuracion_global.nivel_registro_log`.
+
+*   **Refactorización del Núcleo (`nucleo/`):**
+    *   **Clientes (`nucleo/clientes/`):** `ClienteMoodle` y `ClienteN8N` refactorizados, traducidos, con mejor manejo de errores y uso de `configuracion_global`. Lógica de plantillas N8N verificada.
+    *   **Base de Datos (`nucleo/bd/`):** `EnvoltorioPgVector` refactorizado, traducido, con manejo de errores mejorado y uso de `configuracion_global`. Script `init.sql` actualizado.
+    *   **Inteligencia Artificial (`nucleo/ia/`):**
+        *   `EnvoltorioGemini` y `EnvoltorioOllama` refactorizados, traducidos, con manejo de errores y logging mejorados, y uso de `configuracion_global`.
+        *   `GestorEmbeddings` y `ProveedorInteligencia` refactorizados y traducidos, asegurando la correcta interacción y selección de proveedores de IA.
+        *   `UtilidadesComunesIA` refactorizadas y traducidas.
+    *   **Archivos (`nucleo/archivos/`):** `ProcesadorArchivos` (ahora `GestorMaestroDeProcesadoresArchivos` con `ProcesadorArchivoInterfaz` y procesadores específicos) refactorizado, traducido, con manejo de errores mejorado para diversos tipos de archivo.
+
+*   **Refactorización de la API (`api/`):**
+    *   `principal.py`: Código de inicio de FastAPI, configuración de CORS, inclusión de routers y montaje de archivos estáticos revisado y traducido.
+    *   `rutas/`: Todos los endpoints en `ruta_busqueda.py`, `ruta_configuracion_curso.py`, y `ruta_procesamiento_interno.py` han sido traducidos (nombres de funciones, parámetros, variables, respuestas de error), y actualizados para usar los modelos Pydantic y componentes del núcleo refactorizados.
+    *   `modelos.py`: Modelos Pydantic completamente traducidos (nombres de clases y campos, descripciones).
+
+*   **Refactorización de Celery (`celery/`):**
+    *   `aplicacion_celery.py`: Configuración de la app Celery actualizada para usar `configuracion_global.celery` y con nombres/logging en español.
+    *   `tareas.py`: Tareas de Celery simplificadas para delegar la lógica de procesamiento principal a la API de FastAPI mediante peticiones HTTP, con manejo de errores y logging mejorados.
+
+*   **Documentación (`README.md`, `docs/documentacion.md`):**
+    *   `README.md` actualizado para reflejar la nueva estructura, instrucciones de configuración y ejecución dentro de `entrenai_refactor`.
+    *   Este archivo (`docs/documentacion.md`) sirve como registro de cambios detallado.
+
+---
+## Registro de Cambios (Refactorización Inicial - Previo)
 
 -   **General**: Inicio de la refactorización para simplificar el código, mejorar la organización, traducir todo a español y seguir buenas prácticas de desarrollo en Python.
 -   **Estructura del Proyecto**:
