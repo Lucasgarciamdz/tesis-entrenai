@@ -1,4 +1,10 @@
-# Inicialización del submódulo de IA de EntrenAI
+# -*- coding: utf-8 -*-
+# Paquete: entrenai_refactor.nucleo.ia
+# Descripción:
+# Inicializa el submódulo 'ia' del núcleo de EntrenAI.
+# Este archivo define la interfaz pública del paquete 'ia', especificando
+# qué módulos, clases y funciones se exportan cuando se importa este paquete.
+# Facilita el acceso a los componentes de inteligencia artificial de la aplicación.
 
 # Importar clases principales de los envoltorios de IA
 from .envoltorio_gemini import EnvoltorioGemini, ErrorEnvoltorioGemini
@@ -13,32 +19,33 @@ from .proveedor_inteligencia import ProveedorInteligencia, ErrorProveedorIntelig
 # Importar funciones de utilidad comunes
 from .utilidades_comunes_ia import (
     postprocesar_contenido_markdown,
-    preprocesar_texto_para_llm,
-    guardar_contenido_markdown_en_archivo, # Corregido nombre de función si fue traducido
+    preprocesar_contenido_texto, # Nombre actualizado para reflejar el cambio en el módulo de utilidades
+    guardar_markdown_en_archivo,
     extraer_bloque_markdown_de_respuesta,
-    es_contenido_markdown_valido_basico, # Corregido nombre de función si fue traducido
+    es_contenido_markdown_valido_basico,
 )
 
-# Definir qué se exporta cuando se hace 'from .ia import *'
+# Define la interfaz pública del paquete 'ia' mediante la lista __all__.
+# Esto afecta a las importaciones con 'from entrenai_refactor.nucleo.ia import *'.
 __all__ = [
-    # Envoltorios y sus Errores
-    "EnvoltorioGemini", # Clase ya estaba en español
-    "ErrorEnvoltorioGemini", # Clase ya estaba en español
-    "EnvoltorioOllama", # Clase ya estaba en español
-    "ErrorEnvoltorioOllama", # Clase ya estaba en español
+    # Envoltorios de Proveedores de IA y sus Errores
+    "EnvoltorioGemini",
+    "ErrorEnvoltorioGemini",
+    "EnvoltorioOllama",
+    "ErrorEnvoltorioOllama",
 
     # Gestor de Embeddings y su Error
-    "GestorEmbeddings", # Clase ya estaba en español
-    "ErrorGestorEmbeddings", # Clase ya estaba en español
+    "GestorEmbeddings",
+    "ErrorGestorEmbeddings",
 
-    # Proveedor de Inteligencia y su Error
-    "ProveedorInteligencia", # Clase ya estaba en español
-    "ErrorProveedorInteligencia", # Clase ya estaba en español
+    # Proveedor de Inteligencia Unificado y su Error
+    "ProveedorInteligencia",
+    "ErrorProveedorInteligencia",
 
-    # Funciones de Utilidad (asegurar que los nombres coincidan con los exportados por el módulo)
-    "postprocesar_contenido_markdown", # Función ya estaba en español
-    "preprocesar_texto_para_llm", # Función ya estaba en español
-    "guardar_contenido_markdown_en_archivo", # Nombre corregido a lo que se usó en la refactorización
-    "extraer_bloque_markdown_de_respuesta", # Función ya estaba en español
-    "es_contenido_markdown_valido_basico", # Nombre corregido
+    # Funciones de Utilidad Comunes para IA
+    "postprocesar_contenido_markdown",
+    "preprocesar_contenido_texto", # Nombre actualizado
+    "guardar_markdown_en_archivo",
+    "extraer_bloque_markdown_de_respuesta",
+    "es_contenido_markdown_valido_basico",
 ]
