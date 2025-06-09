@@ -2,382 +2,418 @@ from pathlib import Path
 from typing import Optional, Dict, List, Any
 
 # --- Importaciones opcionales de bibliotecas de terceros ---
-# Estas dependencias deben estar listadas en requirements.txt
+# Estas dependencias deben estar listadas en el archivo requirements.txt del proyecto.
 try:
-    import docx # Para .docx
+    import docx # Biblioteca para leer archivos .docx (Microsoft Word)
 except ImportError:
-    docx = None
+    docx = None # Se asigna None si la biblioteca no está instalada
 
 try:
-    import pytesseract # Para OCR en PDFs
-    from pdf2image import convert_from_path # Para convertir PDF a imágenes
+    import pytesseract # Biblioteca para OCR (Reconocimiento Óptico de Caracteres)
+    from pdf2image import convert_from_path # Utilidad para convertir páginas de PDF a imágenes
 except ImportError:
     pytesseract = None
     convert_from_path = None
 
 try:
-    from pptx import Presentation # Para .pptx
+    from pptx import Presentation # Biblioteca para leer archivos .pptx (Microsoft PowerPoint)
 except ImportError:
     Presentation = None
 
 from entrenai_refactor.config.registrador import obtener_registrador
 
-registrador = obtener_registrador(__name__)
+registrador = obtener_registrador(__name__) # Registrador específico para este módulo
 
 # --- Definiciones de Excepciones Personalizadas ---
 
 class ErrorProcesamientoArchivo(Exception):
     """Excepción base para errores ocurridos durante el procesamiento de archivos."""
-    def __init__(self, mensaje: str, error_original: Optional[Exception] = None):
+    def __init__(self, mensaje: str, error_original: Optional[Exception] = None, ruta_archivo: Optional[Path] = None):
         super().__init__(mensaje)
         self.error_original = error_original
-        registrador.debug(f"Excepción ErrorProcesamientoArchivo creada: {mensaje}, Original: {error_original}")
+        self.ruta_archivo = ruta_archivo
+        detalle_archivo = f", Archivo: {ruta_archivo}" if ruta_archivo else ""
+        registrador.debug(f"Excepción ErrorProcesamientoArchivo creada: '{mensaje}'{detalle_archivo}, Original: {error_original}")
 
     def __str__(self):
+        detalle_archivo = f" (Archivo: {self.ruta_archivo})" if self.ruta_archivo else ""
         if self.error_original:
-            return f"{super().__str__()} (Error original: {type(self.error_original).__name__}: {str(self.error_original)})"
-        return super().__str__()
+            return f"{super().__str__()}{detalle_archivo} (Error original: {type(self.error_original).__name__}: {str(self.error_original)})"
+        return f"{super().__str__()}{detalle_archivo}"
 
 class ErrorTipoArchivoNoSoportado(ErrorProcesamientoArchivo):
-    """Excepción para cuando se intenta procesar un tipo de archivo no soportado."""
+    """Excepción para cuando se intenta procesar un tipo de archivo no soportado por el sistema."""
     pass
 
 class ErrorDependenciaFaltante(ErrorProcesamientoArchivo):
-    """Excepción para cuando falta una dependencia necesaria para procesar un tipo de archivo."""
+    """Excepción para cuando falta una dependencia de software necesaria para procesar un tipo de archivo."""
     pass
 
-# --- Clase Base para Procesadores de Archivos ---
+# --- Interfaz Base para Procesadores de Archivos ---
 
-class ProcesadorArchivoInterfaz: # Renombrado para reflejar que es más una interfaz
-    """Clase base abstracta que define la interfaz para los procesadores de archivos específicos."""
+class ProcesadorArchivoInterfaz:
+    """
+    Clase base abstracta (interfaz informal) que define la estructura esperada
+    para los procesadores de archivos específicos para cada tipo de documento.
+    """
 
-    # Lista de extensiones de archivo (en minúsculas, con punto) que este procesador maneja.
+    # Lista de extensiones de archivo (en minúsculas, comenzando con punto) que este procesador maneja.
+    # Ejemplo: [".txt", ".log"]
     EXTENSIONES_ARCHIVOS_SOPORTADAS: List[str] = []
 
-    def extraer_texto_de_archivo(self, ruta_del_archivo: Path) -> str:
+    def extraer_texto_de_archivo(self, ruta_archivo_entrada: Path) -> str: # Parámetro renombrado
         """
         Método abstracto para extraer contenido textual de un archivo.
         Debe ser implementado obligatoriamente por todas las subclases concretas.
+
+        Args:
+            ruta_archivo_entrada: Objeto Path apuntando al archivo a procesar.
+
+        Returns:
+            Un string con el texto extraído del archivo.
+
+        Raises:
+            NotImplementedError: Si la subclase no implementa este método.
+            ErrorProcesamientoArchivo: Si ocurre un error durante la extracción.
         """
         nombre_clase_actual = self.__class__.__name__
-        registrador.error(f"El método 'extraer_texto_de_archivo' no ha sido implementado en la clase '{nombre_clase_actual}'.")
-        raise NotImplementedError(
-            f"El método 'extraer_texto_de_archivo' debe ser implementado por las subclases de {self.__class__.__bases__[0].__name__}."
-        )
+        mensaje_error_no_implementado = f"El método 'extraer_texto_de_archivo' no ha sido implementado en la clase '{nombre_clase_actual}'."
+        registrador.error(mensaje_error_no_implementado)
+        raise NotImplementedError(mensaje_error_no_implementado)
 
-    def puede_procesar_extension(self, ruta_del_archivo: Path) -> bool:
+    def puede_procesar_extension(self, ruta_archivo_entrada: Path) -> bool: # Parámetro renombrado
         """
         Verifica si este procesador es capaz de manejar la extensión del archivo proporcionado.
         La comparación es insensible a mayúsculas/minúsculas.
+
+        Args:
+            ruta_archivo_entrada: Objeto Path apuntando al archivo.
+
+        Returns:
+            True si el procesador soporta la extensión, False en caso contrario.
         """
-        extension_archivo = ruta_del_archivo.suffix.lower()
-        puede = extension_archivo in self.EXTENSIONES_ARCHIVOS_SOPORTADAS
-        registrador.debug(f"Procesador '{self.__class__.__name__}': ¿Puede procesar '{extension_archivo}'? {'Sí' if puede else 'No'}.")
-        return puede
+        extension_archivo_actual = ruta_archivo_entrada.suffix.lower() # Obtener extensión y convertir a minúsculas
+        puede_procesar = extension_archivo_actual in self.EXTENSIONES_ARCHIVOS_SOPORTADAS
+        registrador.debug(f"Procesador '{self.__class__.__name__}': ¿Puede procesar extensión '{extension_archivo_actual}'? {'Sí' if puede_procesar else 'No'}.")
+        return puede_procesar
 
 # --- Implementaciones de Procesadores Específicos por Tipo de Archivo ---
 
 class ProcesadorArchivosTextoPlano(ProcesadorArchivoInterfaz):
-    """Procesador para archivos de texto plano (ej. .txt)."""
-    EXTENSIONES_ARCHIVOS_SOPORTADAS = [".txt", ".text"] # Añadido .text por si acaso
+    """Procesador especializado para archivos de texto plano (ej. .txt, .log, .csv)."""
+    EXTENSIONES_ARCHIVOS_SOPORTADAS = [".txt", ".text", ".log", ".csv", ".tsv"] # Ampliada lista de extensiones comunes
 
-    def extraer_texto_de_archivo(self, ruta_del_archivo: Path) -> str:
-        registrador.info(f"Intentando extraer texto del archivo de texto plano: '{ruta_del_archivo}'.")
-        # Lista de codificaciones comunes a intentar en orden de probabilidad o preferencia.
-        codificaciones_comunes = ["utf-8", "latin-1", "iso-8859-1", "cp1252"]
+    def extraer_texto_de_archivo(self, ruta_archivo_entrada: Path) -> str:
+        registrador.info(f"Intentando extraer texto del archivo de texto plano: '{ruta_archivo_entrada}'.")
+        # Lista de codificaciones comunes a intentar, en orden de probabilidad o preferencia.
+        codificaciones_comunes_a_intentar = ["utf-8", "latin-1", "iso-8859-1", "cp1252"]
 
-        for codificacion_actual in codificaciones_comunes:
+        for codificacion_prueba in codificaciones_comunes_a_intentar:
             try:
-                with open(ruta_del_archivo, "r", encoding=codificacion_actual) as archivo:
-                    texto_extraido = archivo.read()
-                registrador.info(f"Texto extraído de '{ruta_del_archivo}' utilizando la codificación '{codificacion_actual}'.")
-                return texto_extraido
-            except UnicodeDecodeError:
-                registrador.debug(f"Falló la decodificación del archivo '{ruta_del_archivo}' con la codificación '{codificacion_actual}'. Intentando siguiente.")
-                continue # Intenta la siguiente codificación
-            except IOError as e_io: # Errores de lectura del archivo
-                mensaje_error_io = f"Error de I/O al leer el archivo TXT '{ruta_del_archivo}' con codificación '{codificacion_actual}': {e_io}"
-                registrador.error(mensaje_error_io)
-                raise ErrorProcesamientoArchivo(mensaje_error_io, e_io) from e_io
-            except Exception as e_inesperado: # Otros errores
-                registrador.warning(f"Error inesperado leyendo '{ruta_del_archivo}' con '{codificacion_actual}': {e_inesperado}. Se intentará con otra codificación si es posible.")
-                continue
+                with open(ruta_archivo_entrada, "r", encoding=codificacion_prueba) as archivo_abierto:
+                    texto_extraido_del_archivo = archivo_abierto.read()
+                registrador.info(f"Texto extraído de '{ruta_archivo_entrada}' utilizando la codificación '{codificacion_prueba}'.")
+                return texto_extraido_del_archivo
+            except UnicodeDecodeError: # Error específico al intentar decodificar con una codificación incorrecta
+                registrador.debug(f"Falló la decodificación del archivo '{ruta_archivo_entrada}' con la codificación '{codificacion_prueba}'. Intentando siguiente codificación.")
+                continue # Probar la siguiente codificación en la lista
+            except IOError as e_error_io: # Errores de lectura/escritura del archivo
+                mensaje_error_io_especifico = f"Error de E/S al leer el archivo de texto '{ruta_archivo_entrada}' con codificación '{codificacion_prueba}': {e_error_io}"
+                registrador.error(mensaje_error_io_especifico)
+                raise ErrorProcesamientoArchivo(mensaje_error_io_especifico, e_error_io, ruta_archivo=ruta_archivo_entrada) from e_error_io
+            except Exception as e_error_inesperado: # Otros errores no previstos
+                registrador.warning(f"Error inesperado leyendo '{ruta_archivo_entrada}' con '{codificacion_prueba}': {e_error_inesperado}. Se intentará con otra codificación si es posible.")
+                continue # Continuar con la siguiente codificación por si acaso
 
-        mensaje_error_final = f"No se pudo extraer texto del archivo TXT '{ruta_del_archivo}' después de intentar con las codificaciones: {', '.join(codificaciones_comunes)}."
-        registrador.error(mensaje_error_final)
-        raise ErrorProcesamientoArchivo(mensaje_error_final)
+        # Si todas las codificaciones fallan
+        mensaje_error_extraccion_final = f"No se pudo extraer texto del archivo '{ruta_archivo_entrada}' después de intentar con las codificaciones: {', '.join(codificaciones_comunes_a_intentar)}."
+        registrador.error(mensaje_error_extraccion_final)
+        raise ErrorProcesamientoArchivo(mensaje_error_extraccion_final, ruta_archivo=ruta_archivo_entrada)
 
 
 class ProcesadorArchivosMarkdown(ProcesadorArchivoInterfaz):
-    """Procesador para archivos Markdown (ej. .md, .markdown)."""
+    """Procesador especializado para archivos Markdown (ej. .md, .markdown)."""
     EXTENSIONES_ARCHIVOS_SOPORTADAS = [".md", ".markdown"]
 
-    def extraer_texto_de_archivo(self, ruta_del_archivo: Path) -> str:
-        registrador.info(f"Extrayendo texto del archivo Markdown: '{ruta_del_archivo}'.")
+    def extraer_texto_de_archivo(self, ruta_archivo_entrada: Path) -> str:
+        registrador.info(f"Extrayendo texto del archivo Markdown: '{ruta_archivo_entrada}'.")
         try:
-            with open(ruta_del_archivo, "r", encoding="utf-8") as archivo: # Markdown usualmente es UTF-8
-                texto_extraido = archivo.read()
-            registrador.info(f"Texto extraído correctamente del archivo Markdown '{ruta_del_archivo}'.")
-            return texto_extraido
-        except IOError as e_io:
-            mensaje_error = f"Error de I/O al leer el archivo Markdown '{ruta_del_archivo}': {e_io}"
-            registrador.error(mensaje_error)
-            raise ErrorProcesamientoArchivo(mensaje_error, e_io) from e_io
-        except Exception as e_inesperado:
-            mensaje_error = f"Error inesperado al extraer texto del archivo Markdown '{ruta_del_archivo}': {e_inesperado}"
-            registrador.exception(mensaje_error) # Usar exception para incluir traceback
-            raise ErrorProcesamientoArchivo(mensaje_error, e_inesperado) from e_inesperado
+            # Los archivos Markdown suelen estar codificados en UTF-8.
+            with open(ruta_archivo_entrada, "r", encoding="utf-8") as archivo_md:
+                texto_extraido_md = archivo_md.read()
+            registrador.info(f"Texto extraído correctamente del archivo Markdown '{ruta_archivo_entrada}'.")
+            return texto_extraido_md
+        except IOError as e_error_io_md:
+            mensaje_error_md = f"Error de E/S al leer el archivo Markdown '{ruta_archivo_entrada}': {e_error_io_md}"
+            registrador.error(mensaje_error_md)
+            raise ErrorProcesamientoArchivo(mensaje_error_md, e_error_io_md, ruta_archivo=ruta_archivo_entrada) from e_error_io_md
+        except Exception as e_error_inesperado_md: # Capturar otros posibles errores
+            mensaje_error_inesperado_md = f"Error inesperado al extraer texto del archivo Markdown '{ruta_archivo_entrada}': {e_error_inesperado_md}"
+            registrador.exception(mensaje_error_inesperado_md) # Usar exception para incluir traceback completo en logs
+            raise ErrorProcesamientoArchivo(mensaje_error_inesperado_md, e_error_inesperado_md, ruta_archivo=ruta_archivo_entrada) from e_error_inesperado_md
 
 
 class ProcesadorArchivosPDF(ProcesadorArchivoInterfaz):
-    """Procesador para archivos PDF. Utiliza OCR (Tesseract) si el texto no es extraíble directamente."""
+    """
+    Procesador especializado para archivos PDF. Intenta extraer texto directamente si es posible (no implementado aquí),
+    y como fallback utiliza OCR (Tesseract) convirtiendo las páginas del PDF a imágenes.
+    """
     EXTENSIONES_ARCHIVOS_SOPORTADAS = [".pdf"]
 
-    def __init__(self, lenguaje_ocr: str = "spa+eng"): # Español e Inglés por defecto para OCR
+    def __init__(self, lenguaje_ocr_predeterminado: str = "spa+eng"): # Español e Inglés por defecto para OCR
         if pytesseract is None or convert_from_path is None:
-            mensaje_error_dependencia = "Las dependencias 'pytesseract' y/o 'pdf2image' no están instaladas. El procesamiento de PDF no estará disponible."
-            registrador.error(mensaje_error_dependencia)
-            # No lanzar error aquí permite que la app inicie, pero extraer_texto fallará.
-            # Se podría lanzar ErrorDependenciaFaltante si se prefiere un fallo temprano.
-        self.lenguaje_ocr = lenguaje_ocr
-        registrador.debug(f"ProcesadorArchivosPDF inicializado con lenguaje OCR: '{lenguaje_ocr}'.")
+            mensaje_advertencia_dependencia = "Dependencias 'pytesseract' y/o 'pdf2image' no están instaladas. El procesamiento de PDF con OCR no estará completamente funcional."
+            registrador.warning(mensaje_advertencia_dependencia)
+            # No se lanza ErrorDependenciaFaltante aquí para permitir que la aplicación inicie.
+            # El error se lanzará si se intenta usar `extraer_texto_de_archivo`.
+        self.lenguaje_ocr = lenguaje_ocr_predeterminado
+        registrador.debug(f"ProcesadorArchivosPDF inicializado. Lenguaje OCR predeterminado: '{self.lenguaje_ocr}'.")
 
 
-    def extraer_texto_de_archivo(self, ruta_del_archivo: Path) -> str:
+    def extraer_texto_de_archivo(self, ruta_archivo_entrada: Path) -> str:
         if pytesseract is None or convert_from_path is None:
-            # Esta comprobación se repite por si el __init__ no lanzó error.
-            mensaje_error_dep = "Faltan dependencias ('pytesseract' o 'pdf2image') para procesar archivos PDF."
-            registrador.error(mensaje_error_dep)
-            raise ErrorDependenciaFaltante(mensaje_error_dep)
+            # Comprobación de dependencias en tiempo de ejecución del método.
+            mensaje_error_dependencia_pdf = "Faltan dependencias cruciales ('pytesseract' y/o 'pdf2image') para procesar archivos PDF."
+            registrador.error(mensaje_error_dependencia_pdf)
+            raise ErrorDependenciaFaltante(mensaje_error_dependencia_pdf, ruta_archivo=ruta_archivo_entrada)
 
-        registrador.info(f"Iniciando extracción de texto del PDF: '{ruta_del_archivo}' usando OCR.")
-        fragmentos_texto_extraido: List[str] = []
+        registrador.info(f"Iniciando extracción de texto del PDF: '{ruta_archivo_entrada}' mediante OCR.")
+        lista_textos_por_pagina: List[str] = []
         try:
-            # Convertir páginas del PDF a imágenes
-            registrador.debug(f"Convirtiendo PDF '{ruta_del_archivo}' a imágenes...")
-            lista_imagenes_pagina = convert_from_path(ruta_del_archivo, timeout=60) # Timeout para conversión
+            # Convertir páginas del PDF a una lista de imágenes (objetos PIL.Image)
+            registrador.debug(f"Convirtiendo PDF '{ruta_archivo_entrada}' a imágenes para OCR...")
+            lista_imagenes_de_paginas_pdf = convert_from_path(ruta_archivo_entrada, timeout=60) # Timeout para la conversión
 
-            if not lista_imagenes_pagina:
-                registrador.warning(f"No se pudieron convertir páginas a imágenes desde el PDF '{ruta_del_archivo}'. El PDF podría estar vacío, corrupto o protegido.")
-                return "" # Devolver string vacío si no hay imágenes
+            if not lista_imagenes_de_paginas_pdf:
+                registrador.warning(f"No se pudieron convertir páginas a imágenes desde el PDF '{ruta_archivo_entrada}'. El PDF podría estar vacío, corrupto o protegido contra extracción.")
+                return "" # Devolver string vacío si no se obtuvieron imágenes
 
-            registrador.info(f"PDF convertido a {len(lista_imagenes_pagina)} imágenes. Procediendo con OCR...")
-            for i, imagen_pagina_actual in enumerate(lista_imagenes_pagina):
+            registrador.info(f"PDF '{ruta_archivo_entrada}' convertido a {len(lista_imagenes_de_paginas_pdf)} imágenes. Procediendo con OCR en cada página...")
+            for i, imagen_pagina_pdf_actual in enumerate(lista_imagenes_de_paginas_pdf):
                 try:
-                    registrador.debug(f"Procesando OCR para página {i + 1} de '{ruta_del_archivo}'...")
-                    # Extraer texto de la imagen usando Tesseract OCR
-                    texto_pagina_actual = pytesseract.image_to_string(imagen_pagina_actual, lang=self.lenguaje_ocr, timeout=30) # Timeout para OCR por página
-                    if texto_pagina_actual and texto_pagina_actual.strip():
-                        fragmentos_texto_extraido.append(texto_pagina_actual.strip())
-                        registrador.debug(f"Texto extraído de página {i + 1} (longitud: {len(texto_pagina_actual.strip())}).")
+                    registrador.debug(f"Procesando OCR para página {i + 1} del PDF '{ruta_archivo_entrada}'...")
+                    # Extraer texto de la imagen de la página usando Tesseract OCR
+                    texto_extraido_pagina_actual = pytesseract.image_to_string(imagen_pagina_pdf_actual, lang=self.lenguaje_ocr, timeout=30) # Timeout para OCR por página
+                    if texto_extraido_pagina_actual and texto_extraido_pagina_actual.strip():
+                        lista_textos_por_pagina.append(texto_extraido_pagina_actual.strip())
+                        registrador.debug(f"Texto extraído de página {i + 1} (longitud: {len(texto_extraido_pagina_actual.strip())}).")
                     else:
-                        registrador.debug(f"No se extrajo texto de la página {i + 1} de '{ruta_del_archivo}' (posiblemente vacía o sin texto detectable).")
-                except pytesseract.TesseractError as error_ocr:
-                    registrador.warning(f"Error de Tesseract OCR en página {i + 1} de '{ruta_del_archivo}': {error_ocr}. Se omitirá esta página.")
-                except Exception as e_procesando_imagen:
-                    registrador.warning(f"Error inesperado procesando la imagen de la página {i + 1} de '{ruta_del_archivo}': {e_procesando_imagen}. Se omitirá esta página.")
+                        registrador.debug(f"No se extrajo texto de la página {i + 1} del PDF '{ruta_archivo_entrada}' (página posiblemente vacía o sin texto detectable por OCR).")
+                except pytesseract.TesseractError as error_tesseract_ocr: # Errores específicos de Tesseract
+                    registrador.warning(f"Error de Tesseract OCR procesando página {i + 1} del PDF '{ruta_archivo_entrada}': {error_tesseract_ocr}. Se omitirá esta página.")
+                except Exception as e_procesamiento_pagina_pdf: # Otros errores al procesar una imagen de página
+                    registrador.warning(f"Error inesperado procesando la imagen de la página {i + 1} del PDF '{ruta_archivo_entrada}': {e_procesamiento_pagina_pdf}. Se omitirá esta página.")
 
-            if not fragmentos_texto_extraido and lista_imagenes_pagina:
-                 registrador.warning(f"No se extrajo texto de ninguna página del PDF '{ruta_del_archivo}' mediante OCR. El PDF podría no contener texto legible o el OCR falló consistentemente.")
+            if not lista_textos_por_pagina and lista_imagenes_de_paginas_pdf: # Si se procesaron imágenes pero no se obtuvo texto
+                 registrador.warning(f"No se extrajo texto de ninguna página del PDF '{ruta_archivo_entrada}' mediante OCR. El PDF podría no contener texto legible o el OCR falló consistentemente en todas las páginas.")
 
-            texto_completo_pdf = "\n\n".join(filter(None, fragmentos_texto_extraido)) # Unir fragmentos con doble salto de línea
-            registrador.info(f"Extracción de texto de PDF '{ruta_del_archivo}' completada. Páginas procesadas: {len(lista_imagenes_pagina)}, fragmentos con texto: {len(fragmentos_texto_extraido)}.")
-            return texto_completo_pdf
+            texto_completo_extraido_pdf = "\n\n".join(filter(None, lista_textos_por_pagina)) # Unir textos de páginas, con doble salto de línea como separador
+            registrador.info(f"Extracción de texto del PDF '{ruta_archivo_entrada}' completada. Páginas procesadas: {len(lista_imagenes_de_paginas_pdf)}, fragmentos de texto con contenido: {len(lista_textos_por_pagina)}.")
+            return texto_completo_extraido_pdf
 
-        except Exception as e_general_pdf: # Captura errores de convert_from_path o cualquier otro no previsto
-            mensaje_error = f"No se pudo extraer texto del PDF '{ruta_del_archivo}' debido a un error general: {e_general_pdf}"
-            registrador.exception(mensaje_error)
-            raise ErrorProcesamientoArchivo(mensaje_error, e_general_pdf) from e_general_pdf
+        except Exception as e_error_general_pdf: # Captura errores de convert_from_path o cualquier otro no previsto
+            mensaje_error_pdf_general = f"No se pudo extraer texto del PDF '{ruta_archivo_entrada}' debido a un error general: {e_error_general_pdf}"
+            registrador.exception(mensaje_error_pdf_general) # Loguear con traceback
+            raise ErrorProcesamientoArchivo(mensaje_error_pdf_general, e_error_general_pdf, ruta_archivo=ruta_archivo_entrada) from e_error_general_pdf
 
 
 class ProcesadorArchivosDocx(ProcesadorArchivoInterfaz):
-    """Procesador para archivos DOCX (Microsoft Word)."""
+    """Procesador especializado para archivos DOCX (formato de Microsoft Word)."""
     EXTENSIONES_ARCHIVOS_SOPORTADAS = [".docx"]
 
     def __init__(self):
-        if docx is None:
-            # Esta comprobación en __init__ podría ser útil si se quiere fallar temprano.
-            # mensaje_error_dep = "Dependencia 'python-docx' no instalada. El procesamiento de DOCX no estará disponible."
-            # registrador.error(mensaje_error_dep)
-            # raise ErrorDependenciaFaltante(mensaje_error_dep)
-            pass # Permitir instanciación, fallará en extraer_texto_de_archivo
+        if docx is None: # Comprobar dependencia al inicializar
+            registrador.warning("Dependencia 'python-docx' no está instalada. El procesador de DOCX no estará funcional.")
+            # No lanzar error aquí para permitir que la aplicación inicie.
 
-    def extraer_texto_de_archivo(self, ruta_del_archivo: Path) -> str:
-        if docx is None:
-            mensaje_error_dep = "La dependencia 'python-docx' no está instalada. No se puede procesar el archivo DOCX."
-            registrador.error(mensaje_error_dep)
-            raise ErrorDependenciaFaltante(mensaje_error_dep)
+    def extraer_texto_de_archivo(self, ruta_archivo_entrada: Path) -> str:
+        if docx is None: # Comprobar dependencia en tiempo de ejecución
+            mensaje_error_dependencia_docx = "La dependencia 'python-docx' no está instalada. No se puede procesar el archivo DOCX."
+            registrador.error(mensaje_error_dependencia_docx)
+            raise ErrorDependenciaFaltante(mensaje_error_dependencia_docx, ruta_archivo=ruta_archivo_entrada)
 
-        registrador.info(f"Extrayendo texto del archivo DOCX: '{ruta_del_archivo}'.")
+        registrador.info(f"Extrayendo texto del archivo DOCX: '{ruta_archivo_entrada}'.")
         try:
-            documento_word = docx.Document(str(ruta_del_archivo)) # python-docx espera un string o un stream
+            documento_word_abierto = docx.Document(str(ruta_archivo_entrada)) # python-docx espera un string con la ruta o un stream
 
-            # Extraer texto de párrafos
-            textos_de_parrafos = [parrafo.text.strip() for parrafo in documento_word.paragraphs if parrafo.text and parrafo.text.strip()]
+            # Extraer texto de los párrafos del documento
+            textos_parrafos_documento = [parrafo.text.strip() for parrafo in documento_word_abierto.paragraphs if parrafo.text and parrafo.text.strip()]
 
-            # Extraer texto de tablas
-            textos_de_tablas = []
-            for tabla_actual in documento_word.tables:
-                for fila_actual in tabla_actual.rows:
-                    for celda_actual in fila_actual.cells:
-                        if celda_actual.text and celda_actual.text.strip():
-                            textos_de_tablas.append(celda_actual.text.strip())
+            # Extraer texto de las tablas del documento
+            textos_celdas_tablas = []
+            for tabla_doc in documento_word_abierto.tables:
+                for fila_tabla in tabla_doc.rows:
+                    for celda_tabla in fila_tabla.cells:
+                        if celda_tabla.text and celda_tabla.text.strip():
+                            textos_celdas_tablas.append(celda_tabla.text.strip())
 
-            # Combinar todo el texto extraído
-            texto_completo_docx = "\n\n".join(textos_de_parrafos + textos_de_tablas)
-            registrador.info(f"Texto extraído correctamente del archivo DOCX '{ruta_del_archivo}'. Longitud: {len(texto_completo_docx)}.")
-            return texto_completo_docx
-        except Exception as e_docx: # Capturar excepciones específicas de python-docx si se conocen, o genéricas
-            mensaje_error = f"No se pudo extraer texto del archivo DOCX '{ruta_del_archivo}': {e_docx}"
-            registrador.exception(mensaje_error)
-            raise ErrorProcesamientoArchivo(mensaje_error, e_docx) from e_docx
+            # Combinar todo el texto extraído de párrafos y tablas
+            texto_completo_extraido_docx = "\n\n".join(textos_parrafos_documento + textos_celdas_tablas)
+            registrador.info(f"Texto extraído correctamente del archivo DOCX '{ruta_archivo_entrada}'. Longitud total: {len(texto_completo_extraido_docx)} caracteres.")
+            return texto_completo_extraido_docx
+        except Exception as e_error_docx: # Capturar excepciones específicas de python-docx si se conocen, o genéricas
+            mensaje_error_docx = f"No se pudo extraer texto del archivo DOCX '{ruta_archivo_entrada}': {e_error_docx}"
+            registrador.exception(mensaje_error_docx)
+            raise ErrorProcesamientoArchivo(mensaje_error_docx, e_error_docx, ruta_archivo=ruta_archivo_entrada) from e_error_docx
 
 
 class ProcesadorArchivosPptx(ProcesadorArchivoInterfaz):
-    """Procesador para archivos PPTX (Microsoft PowerPoint)."""
+    """Procesador especializado para archivos PPTX (formato de Microsoft PowerPoint)."""
     EXTENSIONES_ARCHIVOS_SOPORTADAS = [".pptx"]
 
     def __init__(self):
-        if Presentation is None:
-            pass # Permitir instanciación, fallará en extraer_texto_de_archivo
+        if Presentation is None: # Comprobar dependencia al inicializar
+            registrador.warning("Dependencia 'python-pptx' no está instalada. El procesador de PPTX no estará funcional.")
+            # No lanzar error aquí.
 
+    def extraer_texto_de_archivo(self, ruta_archivo_entrada: Path) -> str:
+        if Presentation is None: # Comprobar dependencia en tiempo de ejecución
+            mensaje_error_dependencia_pptx = "La dependencia 'python-pptx' no está instalada. No se puede procesar el archivo PPTX."
+            registrador.error(mensaje_error_dependencia_pptx)
+            raise ErrorDependenciaFaltante(mensaje_error_dependencia_pptx, ruta_archivo=ruta_archivo_entrada)
 
-    def extraer_texto_de_archivo(self, ruta_del_archivo: Path) -> str:
-        if Presentation is None:
-            mensaje_error_dep = "La dependencia 'python-pptx' no está instalada. No se puede procesar el archivo PPTX."
-            registrador.error(mensaje_error_dep)
-            raise ErrorDependenciaFaltante(mensaje_error_dep)
-
-        registrador.info(f"Extrayendo texto del archivo PPTX: '{ruta_del_archivo}'.")
+        registrador.info(f"Extrayendo texto del archivo PPTX: '{ruta_archivo_entrada}'.")
         try:
-            presentacion_powerpoint = Presentation(str(ruta_del_archivo)) # python-pptx espera un string o un stream
+            presentacion_powerpoint_abierta = Presentation(str(ruta_archivo_entrada)) # python-pptx espera un string con la ruta o un stream
 
-            textos_de_diapositivas = []
-            for i, diapositiva_actual in enumerate(presentacion_powerpoint.slides):
-                texto_formas_en_diapositiva = []
+            textos_extraidos_diapositivas = []
+            for i, diapositiva_actual_ppt in enumerate(presentacion_powerpoint_abierta.slides):
+                textos_formas_diapositiva_actual = []
                 # Extraer texto de las formas (shapes) en cada diapositiva
-                for forma_actual in diapositiva_actual.shapes:
-                    if hasattr(forma_actual, "text_frame") and forma_actual.text_frame and forma_actual.text_frame.text:
-                        texto_formas_en_diapositiva.append(forma_actual.text_frame.text.strip())
-                    elif hasattr(forma_actual, "text") and forma_actual.text: # Algunas formas simples tienen .text directamente
-                        texto_formas_en_diapositiva.append(forma_actual.text.strip())
+                for forma_ppt_actual in diapositiva_actual_ppt.shapes:
+                    if hasattr(forma_ppt_actual, "text_frame") and forma_ppt_actual.text_frame and forma_ppt_actual.text_frame.text:
+                        textos_formas_diapositiva_actual.append(forma_ppt_actual.text_frame.text.strip())
+                    elif hasattr(forma_ppt_actual, "text") and forma_ppt_actual.text: # Algunas formas simples pueden tener .text directamente
+                        textos_formas_diapositiva_actual.append(forma_ppt_actual.text.strip())
 
-                # Extraer texto de las notas de la diapositiva, si existen
-                if diapositiva_actual.has_notes_slide and \
-                   diapositiva_actual.notes_slide.notes_text_frame and \
-                   diapositiva_actual.notes_slide.notes_text_frame.text:
-                    notas_diapositiva = diapositiva_actual.notes_slide.notes_text_frame.text.strip()
-                    if notas_diapositiva:
-                        texto_formas_en_diapositiva.append(f"\n[Notas de Diapositiva {i + 1}]:\n{notas_diapositiva}")
+                # Extraer texto de las notas de la diapositiva, si existen y tienen contenido
+                if diapositiva_actual_ppt.has_notes_slide and \
+                   diapositiva_actual_ppt.notes_slide and \
+                   diapositiva_actual_ppt.notes_slide.notes_text_frame and \
+                   diapositiva_actual_ppt.notes_slide.notes_text_frame.text:
+                    texto_notas_diapositiva_actual = diapositiva_actual_ppt.notes_slide.notes_text_frame.text.strip()
+                    if texto_notas_diapositiva_actual: # Solo añadir si hay contenido en las notas
+                        textos_formas_diapositiva_actual.append(f"\n[Notas de Diapositiva {i + 1}]:\n{texto_notas_diapositiva_actual}")
 
-                texto_consolidado_diapositiva = "\n".join(filter(None, texto_formas_en_diapositiva))
-                if texto_consolidado_diapositiva:
-                    textos_de_diapositivas.append(f"[Contenido Diapositiva {i + 1}]:\n{texto_consolidado_diapositiva}")
+                texto_consolidado_diapositiva_actual = "\n".join(filter(None, textos_formas_diapositiva_actual)) # Unir textos de formas y notas de la diapositiva
+                if texto_consolidado_diapositiva_actual: # Solo añadir si la diapositiva tiene texto
+                    textos_extraidos_diapositivas.append(f"[Contenido Diapositiva {i + 1}]:\n{texto_consolidado_diapositiva_actual}")
 
-            texto_completo_pptx = "\n\n".join(filter(None, textos_de_diapositivas))
-            registrador.info(f"Texto extraído correctamente del archivo PPTX '{ruta_del_archivo}'. Longitud: {len(texto_completo_pptx)}.")
-            return texto_completo_pptx
-        except Exception as e_pptx: # Capturar excepciones específicas de python-pptx si se conocen
-            mensaje_error = f"No se pudo extraer texto del archivo PPTX '{ruta_del_archivo}': {e_pptx}"
-            registrador.exception(mensaje_error)
-            raise ErrorProcesamientoArchivo(mensaje_error, e_pptx) from e_pptx
+            texto_completo_extraido_pptx = "\n\n".join(filter(None, textos_extraidos_diapositivas)) # Unir textos de todas las diapositivas
+            registrador.info(f"Texto extraído correctamente del archivo PPTX '{ruta_archivo_entrada}'. Longitud total: {len(texto_completo_extraido_pptx)}.")
+            return texto_completo_extraido_pptx
+        except Exception as e_error_pptx: # Capturar excepciones específicas de python-pptx si se conocen, o genéricas
+            mensaje_error_pptx = f"No se pudo extraer texto del archivo PPTX '{ruta_archivo_entrada}': {e_error_pptx}"
+            registrador.exception(mensaje_error_pptx)
+            raise ErrorProcesamientoArchivo(mensaje_error_pptx, e_error_pptx, ruta_archivo=ruta_archivo_entrada) from e_error_pptx
 
 # --- Gestor Principal de Procesadores de Archivos ---
 
 class GestorMaestroDeProcesadoresArchivos:
     """
-    Clase central que gestiona una colección de procesadores de archivos
-    y delega la tarea de procesamiento al procesador adecuado según la extensión del archivo.
+    Clase central que gestiona una colección de procesadores de archivos.
+    Delega la tarea de procesamiento de un archivo al procesador adecuado
+    según la extensión del archivo.
     """
     def __init__(self):
         self.mapeo_procesadores_por_extension: Dict[str, ProcesadorArchivoInterfaz] = {}
-        self._registrar_procesadores_disponibles_por_defecto()
-        registrador.info("GestorMaestroDeProcesadoresArchivos inicializado con procesadores por defecto.")
+        self._registrar_procesadores_disponibles_por_defecto() # Registrar procesadores al inicializar
+        registrador.info("GestorMaestroDeProcesadoresArchivos inicializado con procesadores de archivo por defecto.")
 
     def _registrar_procesadores_disponibles_por_defecto(self):
-        """Registra instancias de los procesadores de archivo por defecto que están disponibles (dependencias cumplidas)."""
+        """
+        Registra instancias de los procesadores de archivo por defecto que están disponibles
+        (es decir, cuyas dependencias de software están cumplidas).
+        """
         self.intentar_registrar_procesador(ProcesadorArchivosTextoPlano())
         self.intentar_registrar_procesador(ProcesadorArchivosMarkdown())
 
+        # Registrar procesador de PDF solo si las dependencias están presentes
         if pytesseract and convert_from_path:
             self.intentar_registrar_procesador(ProcesadorArchivosPDF())
         else:
-            registrador.warning("Procesador de PDF no será registrado debido a que faltan las dependencias 'pytesseract' o 'pdf2image'.")
+            registrador.warning("Procesador de PDF (ProcesadorArchivosPDF) no será registrado debido a que faltan las dependencias 'pytesseract' y/o 'pdf2image'.")
 
+        # Registrar procesador de DOCX solo si la dependencia está presente
         if docx:
             self.intentar_registrar_procesador(ProcesadorArchivosDocx())
         else:
-            registrador.warning("Procesador de DOCX no será registrado porque falta la dependencia 'python-docx'.")
+            registrador.warning("Procesador de DOCX (ProcesadorArchivosDocx) no será registrado porque falta la dependencia 'python-docx'.")
 
-        if Presentation: # Clase Presentation de python-pptx
+        # Registrar procesador de PPTX solo si la dependencia está presente
+        if Presentation: # Clase Presentation de la biblioteca python-pptx
             self.intentar_registrar_procesador(ProcesadorArchivosPptx())
         else:
-            registrador.warning("Procesador de PPTX no será registrado porque falta la dependencia 'python-pptx'.")
+            registrador.warning("Procesador de PPTX (ProcesadorArchivosPptx) no será registrado porque falta la dependencia 'python-pptx'.")
 
-    def intentar_registrar_procesador(self, procesador_a_registrar: ProcesadorArchivoInterfaz):
+    def intentar_registrar_procesador(self, procesador_para_registrar: ProcesadorArchivoInterfaz): # Parámetro renombrado
         """
-        Registra un procesador de archivos para cada una de las extensiones que soporta.
-        Si una extensión ya tiene un procesador registrado, será sobrescrito.
+        Registra un procesador de archivos para cada una de las extensiones que este soporta.
+        Si una extensión ya tiene un procesador registrado, el nuevo procesador lo sobrescribirá.
+
+        Args:
+            procesador_para_registrar: Instancia del procesador a registrar.
         """
-        if not isinstance(procesador_a_registrar, ProcesadorArchivoInterfaz):
-            registrador.error(f"Intento de registrar un objeto que no es instancia de ProcesadorArchivoInterfaz: {type(procesador_a_registrar)}")
+        if not isinstance(procesador_para_registrar, ProcesadorArchivoInterfaz): # Verificar tipo
+            registrador.error(f"Intento de registrar un objeto que no es una instancia válida de ProcesadorArchivoInterfaz: {type(procesador_para_registrar)}")
             return
 
-        for extension_soportada in procesador_a_registrar.EXTENSIONES_ARCHIVOS_SOPORTADAS:
-            extension_normalizada = extension_soportada.lower()
-            self.mapeo_procesadores_por_extension[extension_normalizada] = procesador_a_registrar
-            registrador.info(f"Procesador para extensión '{extension_normalizada}' registrado: {type(procesador_a_registrar).__name__}")
+        for extension_soportada_actual in procesador_para_registrar.EXTENSIONES_ARCHIVOS_SOPORTADAS:
+            extension_normalizada_actual = extension_soportada_actual.lower() # Asegurar minúsculas
+            self.mapeo_procesadores_por_extension[extension_normalizada_actual] = procesador_para_registrar
+            registrador.info(f"Procesador para extensión '{extension_normalizada_actual}' registrado: {type(procesador_para_registrar).__name__}")
 
-    def procesar_archivo_segun_tipo(self, ruta_del_archivo_a_procesar: Path) -> Optional[str]:
+    def procesar_archivo_segun_tipo(self, ruta_archivo_entrada_a_procesar: Path) -> Optional[str]: # Parámetro renombrado
         """
         Procesa un archivo utilizando el procesador adecuado según su extensión.
 
         Args:
-            ruta_del_archivo_a_procesar: Objeto Path que apunta al archivo a procesar.
+            ruta_archivo_entrada_a_procesar: Objeto Path que apunta al archivo a procesar.
 
         Returns:
             El texto extraído como un string, o None si el archivo no existe,
             no hay un procesador registrado para su extensión, o si ocurre un error
-            durante el procesamiento.
+            durante el procesamiento y el procesador específico no maneja la excepción.
         """
-        if not isinstance(ruta_del_archivo_a_procesar, Path):
+        if not isinstance(ruta_archivo_entrada_a_procesar, Path): # Verificar tipo de entrada
             try:
-                # Intentar convertir a Path si es un string
-                ruta_del_archivo_a_procesar = Path(ruta_del_archivo_a_procesar)
-            except TypeError:
-                registrador.error(f"La ruta del archivo proporcionada es inválida: '{ruta_del_archivo_a_procesar}' (tipo: {type(ruta_del_archivo_a_procesar)}).")
-                return None
+                # Intentar convertir a Path si se recibió un string, por flexibilidad.
+                ruta_archivo_entrada_a_procesar = Path(ruta_archivo_entrada_a_procesar)
+            except TypeError: # Si no se puede convertir a Path (ej. es None o un tipo incompatible)
+                registrador.error(f"La ruta del archivo proporcionada es inválida o de tipo incorrecto: '{ruta_archivo_entrada_a_procesar}' (tipo: {type(ruta_archivo_entrada_a_procesar)}).")
+                return None # No se puede procesar
 
-        registrador.info(f"Solicitud para procesar archivo: '{ruta_del_archivo_a_procesar}'.")
-        if not ruta_del_archivo_a_procesar.is_file():
-            registrador.error(f"El archivo especificado '{ruta_del_archivo_a_procesar}' no existe o no es un archivo.")
-            return None
+        registrador.info(f"Solicitud para procesar archivo: '{ruta_archivo_entrada_a_procesar}'.")
+        if not ruta_archivo_entrada_a_procesar.is_file(): # Verificar si el archivo existe y es un archivo
+            registrador.error(f"El archivo especificado '{ruta_archivo_entrada_a_procesar}' no existe o no es un archivo válido.")
+            return None # Archivo no encontrado o no es un archivo
 
-        extension_archivo_actual = ruta_del_archivo_a_procesar.suffix.lower()
-        procesador_seleccionado = self.mapeo_procesadores_por_extension.get(extension_archivo_actual)
+        extension_archivo_a_procesar = ruta_archivo_entrada_a_procesar.suffix.lower() # Obtener extensión en minúsculas
+        procesador_seleccionado_para_extension = self.mapeo_procesadores_por_extension.get(extension_archivo_a_procesar)
 
-        if procesador_seleccionado:
-            registrador.info(f"Procesando archivo '{ruta_del_archivo_a_procesar}' con el procesador: {type(procesador_seleccionado).__name__}.")
+        if procesador_seleccionado_para_extension:
+            nombre_procesador_seleccionado = type(procesador_seleccionado_para_extension).__name__
+            registrador.info(f"Procesando archivo '{ruta_archivo_entrada_a_procesar}' con el procesador: {nombre_procesador_seleccionado}.")
             try:
-                texto_extraido = procesador_seleccionado.extraer_texto_de_archivo(ruta_del_archivo_a_procesar)
-                registrador.info(f"Procesamiento de '{ruta_del_archivo_a_procesar}' finalizado. Longitud del texto extraído: {len(texto_extraido) if texto_extraido else 0}.")
-                return texto_extraido
-            except ErrorDependenciaFaltante as e_dep: # Capturar error de dependencia específica
-                registrador.error(f"Error de dependencia al procesar '{ruta_del_archivo_a_procesar}' con {type(procesador_seleccionado).__name__}: {e_dep}")
+                texto_extraido_del_archivo = procesador_seleccionado_para_extension.extraer_texto_de_archivo(ruta_archivo_entrada_a_procesar)
+                registrador.info(f"Procesamiento de '{ruta_archivo_entrada_a_procesar}' con '{nombre_procesador_seleccionado}' finalizado. Longitud del texto extraído: {len(texto_extraido_del_archivo) if texto_extraido_del_archivo is not None else 'N/A'}.")
+                return texto_extraido_del_archivo
+            except ErrorDependenciaFaltante as e_error_dependencia: # Capturar error de dependencia específica si es lanzado por el procesador
+                registrador.error(f"Error de dependencia faltante al procesar '{ruta_archivo_entrada_a_procesar}' con {nombre_procesador_seleccionado}: {e_error_dependencia}")
                 # No relanzar, simplemente devolver None para indicar fallo de procesamiento.
                 return None
-            except ErrorProcesamientoArchivo as e_proc: # Otros errores de procesamiento definidos
-                registrador.error(f"Error específico de procesamiento al procesar '{ruta_del_archivo_a_procesar}' con {type(procesador_seleccionado).__name__}: {e_proc}")
-                return None
-            except Exception as e_inesperado: # Errores completamente inesperados
-                 registrador.exception(f"Error inesperado y no capturado durante el procesamiento de '{ruta_del_archivo_a_procesar}' con {type(procesador_seleccionado).__name__}: {e_inesperado}")
+            except ErrorProcesamientoArchivo as e_error_procesamiento_archivo: # Otros errores de procesamiento definidos
+                registrador.error(f"Error específico de procesamiento al procesar '{ruta_archivo_entrada_a_procesar}' con {nombre_procesador_seleccionado}: {e_error_procesamiento_archivo}")
+                return None # Devolver None para indicar fallo
+            except Exception as e_error_inesperado_procesamiento: # Errores completamente inesperados no capturados por el procesador
+                 registrador.exception(f"Error inesperado y no capturado durante el procesamiento de '{ruta_archivo_entrada_a_procesar}' con {nombre_procesador_seleccionado}: {e_error_inesperado_procesamiento}")
                  return None # Devolver None para indicar fallo
-        else:
-            mensaje_no_soporte = f"No se encontró un procesador adecuado para la extensión '{extension_archivo_actual}' del archivo '{ruta_del_archivo_a_procesar}'."
-            registrador.warning(mensaje_no_soporte)
+        else: # No se encontró un procesador para la extensión
+            mensaje_tipo_no_soportado = f"No se encontró un procesador adecuado para la extensión '{extension_archivo_a_procesar}' del archivo '{ruta_archivo_entrada_a_procesar}'. Archivo no será procesado."
+            registrador.warning(mensaje_tipo_no_soportado)
             # Considerar si se debe lanzar ErrorTipoArchivoNoSoportado aquí o simplemente devolver None.
-            # Devolver None es más suave para el flujo general si se esperan archivos no soportados.
+            # Devolver None es más suave si se esperan archivos no soportados.
             # Si se espera que todos los archivos sean soportados, lanzar una excepción sería mejor.
-            # Por ahora, se devuelve None.
+            # Por ahora, se devuelve None, y el llamador puede verificar si el resultado es None.
             return None
-[end of entrenai_refactor/nucleo/archivos/procesador_archivos_refactorizado.py]
+[end of entrenai_refactor/nucleo/archivos/procesador_archivos.py]

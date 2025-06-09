@@ -1,9 +1,8 @@
-import uuid
 from typing import List, Optional, Dict, Any
 
-from entrenai_refactor.api import modelos as modelos_api
+from entrenai_refactor.api import modelos as modelos_api # Modelos Pydantic para la API
 from entrenai_refactor.config.registrador import obtener_registrador
-from entrenai_refactor.nucleo.ia.proveedor_inteligencia import ProveedorInteligencia
+from entrenai_refactor.nucleo.ia.proveedor_inteligencia import ProveedorInteligencia, ErrorProveedorInteligencia
 
 registrador = obtener_registrador(__name__)
 
@@ -22,14 +21,14 @@ class ErrorGestorEmbeddings(Exception):
 class GestorEmbeddings:
     """
     Clase responsable de gestionar la creación de embeddings a partir de texto.
-    Incluye la división de texto en fragmentos (chunking), la adición de contexto a estos
-    fragmentos (opcional), y la generación de los vectores de embedding a través
-    de un proveedor de inteligencia artificial configurado.
+    Incluye la división de texto en fragmentos (chunking), la contextualización
+    de estos fragmentos, la generación de los vectores de embedding a través de
+    un proveedor de inteligencia artificial, y la preparación de los datos para su almacenamiento.
     """
 
     def __init__(
         self,
-        proveedor_ia_configurado: ProveedorInteligencia,
+        proveedor_ia: ProveedorInteligencia,
         tamano_fragmento_predeterminado: int = 1000,  # En número de caracteres
         solapamiento_fragmento_predeterminado: int = 150,  # En número de caracteres
     ):
@@ -37,11 +36,11 @@ class GestorEmbeddings:
         Inicializa el GestorEmbeddings.
 
         Args:
-            proveedor_ia_configurado: Instancia del ProveedorInteligencia ya inicializado.
-            tamano_fragmento_predeterminado: Tamaño por defecto para dividir el texto.
-            solapamiento_fragmento_predeterminado: Solapamiento por defecto entre fragmentos.
+            proveedor_ia: Instancia del ProveedorInteligencia ya inicializado.
+            tamano_fragmento_predeterminado: Tamaño por defecto para dividir el texto en caracteres.
+            solapamiento_fragmento_predeterminado: Solapamiento por defecto entre fragmentos en caracteres.
         """
-        self.proveedor_ia = proveedor_ia_configurado
+        self.proveedor_ia = proveedor_ia
         self.tamano_fragmento_predeterminado = tamano_fragmento_predeterminado
         self.solapamiento_fragmento_predeterminado = solapamiento_fragmento_predeterminado
         registrador.info(
@@ -52,20 +51,39 @@ class GestorEmbeddings:
     def dividir_texto_en_fragmentos(
         self,
         texto_completo: str,
-        tamano_max_fragmento: Optional[int] = None, # Permitir override del tamaño
-        solapamiento_entre_fragmentos: Optional[int] = None, # Permitir override del solapamiento
+        tamano_max_fragmento: Optional[int] = None,
+        solapamiento_entre_fragmentos: Optional[int] = None,
     ) -> List[str]:
         """
         Divide un texto largo en fragmentos (chunks) más pequeños y manejables.
-        Actualmente utiliza una lógica simple de división basada en caracteres.
+        Esta implementación utiliza una división simple basada en caracteres.
+
+        Args:
+            texto_completo: El texto a dividir.
+            tamano_max_fragmento: Opcional. Tamaño máximo de cada fragmento en caracteres.
+                                   Si es None, usa el valor predeterminado del gestor.
+            solapamiento_entre_fragmentos: Opcional. Número de caracteres de solapamiento entre fragmentos.
+                                           Si es None, usa el valor predeterminado del gestor.
+
+        Returns:
+            Una lista de strings, donde cada string es un fragmento del texto original.
+
+        Raises:
+            ValueError: Si el solapamiento es mayor o igual al tamaño del fragmento,
+                        o si los tamaños son inválidos.
+            TypeError: Si el texto_completo no es un string.
         """
-        tam_fragmento_actual = tamano_max_fragmento or self.tamano_fragmento_predeterminado
-        solap_fragmento_actual = solapamiento_entre_fragmentos or self.solapamiento_fragmento_predeterminado
+        tam_fragmento_actual = tamano_max_fragmento if tamano_max_fragmento is not None else self.tamano_fragmento_predeterminado
+        solap_fragmento_actual = solapamiento_entre_fragmentos if solapamiento_entre_fragmentos is not None else self.solapamiento_fragmento_predeterminado
 
         if not isinstance(texto_completo, str):
             registrador.error(f"Se esperaba un string para dividir, pero se recibió {type(texto_completo)}.")
-            # Podría lanzar un TypeError o devolver lista vacía según política de errores.
-            return []
+            raise TypeError("El texto_completo debe ser un string.")
+
+        if tam_fragmento_actual <= 0:
+            raise ValueError("El tamaño del fragmento debe ser un entero positivo.")
+        if solap_fragmento_actual < 0:
+            raise ValueError("El solapamiento del fragmento no puede ser negativo.")
 
         if solap_fragmento_actual >= tam_fragmento_actual:
             mensaje_error_solapamiento = (
@@ -79,11 +97,10 @@ class GestorEmbeddings:
             f"Configuración de fragmentación: Tamaño={tam_fragmento_actual}, Solapamiento={solap_fragmento_actual}."
         )
 
-        if not texto_completo.strip(): # Si el texto está vacío o solo espacios en blanco
+        if not texto_completo.strip():
             registrador.info("El texto de entrada está vacío o solo contiene espacios. No se generarán fragmentos.")
             return []
 
-        # Si el texto es más corto o igual al tamaño del fragmento, no necesita división.
         if len(texto_completo) <= tam_fragmento_actual:
             registrador.info("El texto completo es más corto o igual al tamaño del fragmento. Se devuelve como un solo fragmento.")
             return [texto_completo]
@@ -96,164 +113,196 @@ class GestorEmbeddings:
             indice_fin_actual = min(indice_inicio_actual + tam_fragmento_actual, longitud_total_texto)
             fragmento_actual = texto_completo[indice_inicio_actual:indice_fin_actual]
             lista_fragmentos.append(fragmento_actual)
-            registrador.debug(f"Fragmento generado (índices {indice_inicio_actual}-{indice_fin_actual}): '{fragmento_actual[:50]}...'")
+            registrador.debug(f"Fragmento generado (índices {indice_inicio_actual}-{indice_fin_actual}): '{fragmento_actual[:50].replace('\n', ' ')}...'")
 
-            # Si el final del fragmento actual es el final del texto, hemos terminado.
             if indice_fin_actual == longitud_total_texto:
                 break
 
-            # Mover el índice de inicio para el siguiente fragmento, aplicando el solapamiento.
-            avance_para_siguiente_fragmento = tam_fragmento_actual - solap_fragmento_actual
-            if avance_para_siguiente_fragmento <= 0:
-                # Esta condición no debería alcanzarse si la validación de solapamiento funciona,
-                # pero es una salvaguarda contra bucles infinitos.
-                registrador.critical("El avance calculado para el siguiente fragmento es cero o negativo. Deteniendo la fragmentación.")
-                break
-            indice_inicio_actual += avance_para_siguiente_fragmento
+            paso_siguiente_fragmento = tam_fragmento_actual - solap_fragmento_actual
+            indice_inicio_actual += paso_siguiente_fragmento
 
         registrador.info(f"El texto fue dividido en {len(lista_fragmentos)} fragmentos.")
         return lista_fragmentos
 
     @staticmethod
-    def _contextualizar_fragmento_individual( # Renombrado para indicar que es para un solo fragmento
-        texto_del_fragmento: str,
-        titulo_del_documento: Optional[str] = None,
-        nombre_del_archivo_fuente: Optional[str] = None,
-        # metadatos_adicionales_fragmento: Optional[Dict[str, Any]] = None, # No se usa en esta implementación simple
+    def _contextualizar_texto_fragmento(
+        texto_fragmento: str,
+        nombre_archivo: Optional[str] = None,
+        titulo_documento: Optional[str] = None
     ) -> str:
         """
-        Añade información contextual simple (como nombre de archivo y título)
-        al inicio de un fragmento de texto.
+        Añade información contextual (nombre de archivo, título del documento)
+        al inicio de un fragmento de texto. Esta información puede ayudar al modelo
+        de embedding a generar representaciones más ricas y específicas.
+
+        Args:
+            texto_fragmento: El texto original del fragmento.
+            nombre_archivo: Opcional. Nombre del archivo de origen del fragmento.
+            titulo_documento: Opcional. Título del documento al que pertenece el fragmento.
+
+        Returns:
+            El texto del fragmento con la información contextual prependiada, si se proporcionó.
+            Si no se proporciona contexto, devuelve el texto del fragmento original.
         """
-        elementos_de_contexto = []
-        if nombre_del_archivo_fuente:
-            elementos_de_contexto.append(f"Nombre del Archivo Original: {nombre_del_archivo_fuente}")
-        if titulo_del_documento:
-            elementos_de_contexto.append(f"Título del Documento Asociado: {titulo_del_documento}")
+        elementos_contexto = []
+        if nombre_archivo:
+            elementos_contexto.append(f"Fuente del archivo: {nombre_archivo}.")
+        if titulo_documento:
+            elementos_contexto.append(f"Título del documento: {titulo_documento}.")
 
-        prefijo_contextual = "\n".join(elementos_de_contexto)
+        if not elementos_contexto:
+            return texto_fragmento
 
-        if prefijo_contextual:
-            # Devuelve el fragmento con el contexto añadido al principio.
-            fragmento_contextualizado = f"{prefijo_contextual}\n\n--- Inicio del Contenido del Fragmento ---\n{texto_del_fragmento}\n--- Fin del Contenido del Fragmento ---"
-            registrador.debug(f"Contexto añadido al fragmento. Prefijo: '{prefijo_contextual}'.")
-            return fragmento_contextualizado
-        else:
-            # Si no hay contexto para añadir, devuelve el fragmento original.
-            registrador.debug("No se añadió contexto adicional al fragmento (sin metadatos provistos).")
-            return texto_del_fragmento
+        prefijo_contextual = " ".join(elementos_contexto)
+        texto_contextualizado = f"{prefijo_contextual}\n\nContenido del fragmento:\n{texto_fragmento}"
+        registrador.debug(f"Contexto añadido al fragmento: '{prefijo_contextual}'")
+        return texto_contextualizado
 
-    def generar_embeddings_para_lista_de_fragmentos(
+    def generar_embeddings_para_lista_de_textos(
         self,
-        lista_de_textos_fragmentados: List[str],
-        nombre_modelo_embedding: Optional[str] = None
-    ) -> List[Optional[List[float]]]: # La lista puede contener None si un embedding falla
+        lista_de_textos: List[str],
+        nombre_modelo_embedding: Optional[str] = None,
+        nombre_archivo_origen: Optional[str] = None,
+        titulo_documento_origen: Optional[str] = None
+    ) -> List[Optional[List[float]]]:
         """
-        Genera vectores de embedding para una lista de fragmentos de texto.
-        Delega la generación al proveedor de IA configurado (Ollama o Gemini).
-        Si la generación de un embedding falla, se guarda un None en su lugar.
+        Genera vectores de embedding para una lista de textos (fragmentos).
+        Contextualiza cada texto con el nombre del archivo y título del documento
+        antes de generar el embedding. Delega la generación al proveedor de IA configurado.
+        Si la generación de un embedding falla para un texto, se guarda un None en su lugar.
+
+        Args:
+            lista_de_textos: Lista de strings (fragmentos) para los cuales generar embeddings.
+            nombre_modelo_embedding: Opcional. Nombre específico del modelo de embedding a usar.
+            nombre_archivo_origen: Opcional. Nombre del archivo de origen para todos los textos en la lista.
+            titulo_documento_origen: Opcional. Título del documento de origen para todos los textos en la lista.
+
+        Returns:
+            Una lista de embeddings. Cada embedding es una lista de floats.
+            Si un embedding falla, se incluye `None` en esa posición.
         """
-        if not lista_de_textos_fragmentados:
-            registrador.info("Lista de fragmentos vacía, no se generarán embeddings.")
+        if not lista_de_textos:
+            registrador.info("Lista de textos vacía, no se generarán embeddings.")
             return []
 
-        registrador.info(f"Iniciando generación de embeddings para {len(lista_de_textos_fragmentados)} fragmentos de texto.")
+        registrador.info(f"Iniciando generación de embeddings para {len(lista_de_textos)} textos. Contexto global: Archivo='{nombre_archivo_origen}', Título='{titulo_documento_origen}'.")
         embeddings_generados: List[Optional[List[float]]] = []
 
-        for indice, texto_fragmento_actual in enumerate(lista_de_textos_fragmentados):
+        for indice, texto_original_fragmento in enumerate(lista_de_textos):
             registrador.debug(
-                f"Procesando fragmento {indice + 1}/{len(lista_de_textos_fragmentados)} "
-                f"(longitud: {len(texto_fragmento_actual)} caracteres) para embedding."
+                f"Procesando texto {indice + 1}/{len(lista_de_textos)} "
+                f"(longitud original: {len(texto_original_fragmento)} caracteres) para embedding."
             )
-            if not texto_fragmento_actual.strip():
-                registrador.warning(f"Fragmento {indice + 1} está vacío o solo contiene espacios. Se omitirá y se guardará None para su embedding.")
+            if not texto_original_fragmento.strip():
+                registrador.warning(f"Texto {indice + 1} está vacío o solo contiene espacios. Se omitirá y se guardará None para su embedding.")
                 embeddings_generados.append(None)
                 continue
+
+            texto_a_embeder = self._contextualizar_texto_fragmento(
+                texto_fragmento=texto_original_fragmento,
+                nombre_archivo=nombre_archivo_origen,
+                titulo_documento=titulo_documento_origen
+            )
+            if texto_a_embeder != texto_original_fragmento:
+                 registrador.debug(f"Texto {indice + 1} contextualizado. Longitud nueva: {len(texto_a_embeder)}.")
+
             try:
-                # Llama al método del ProveedorInteligencia, que internamente usa el envoltorio activo (Ollama o Gemini)
-                embedding_actual = self.proveedor_ia.generar_embedding(texto=texto_fragmento_actual, modelo=nombre_modelo_embedding)
+                embedding_actual = self.proveedor_ia.generar_embedding(
+                    texto_entrada=texto_a_embeder, # Usar el texto contextualizado
+                    nombre_modelo_especifico=nombre_modelo_embedding
+                )
                 if embedding_actual:
                     embeddings_generados.append(embedding_actual)
-                    registrador.debug(f"Embedding generado para fragmento {indice + 1} (dimensión: {len(embedding_actual)}).")
-                else: # Si el proveedor devuelve None o lista vacía por alguna razón
-                    registrador.warning(f"El proveedor de IA devolvió un embedding vacío/None para el fragmento {indice + 1}. Se guardará None.")
+                    registrador.debug(f"Embedding generado para texto {indice + 1} (dimensión: {len(embedding_actual)}).")
+                else:
+                    registrador.warning(f"El proveedor de IA devolvió un embedding vacío/None para el texto contextualizado {indice + 1}. Se guardará None.")
                     embeddings_generados.append(None)
-            except ErrorGestorEmbeddings as e_gestor: # Si el proveedor lanza nuestra propia excepción
-                 registrador.error(f"Error del gestor de embeddings al procesar fragmento {indice + 1}: {e_gestor}. Se guardará None para su embedding.")
+            except ErrorProveedorInteligencia as e_proveedor:
+                 registrador.error(f"Error del proveedor de IA al generar embedding para texto {indice + 1}: {e_proveedor}. Se guardará None.")
                  embeddings_generados.append(None)
-            except Exception as e_inesperado: # Captura cualquier otra excepción del proveedor o subyacente
-                registrador.error(
-                    f"Falló la generación de embedding para el fragmento {indice + 1}: {e_inesperado}. "
+            except Exception as e_inesperado:
+                registrador.exception(
+                    f"Falló inesperadamente la generación de embedding para el texto {indice + 1}: {e_inesperado}. "
                     "Se guardará None para su embedding."
                 )
                 embeddings_generados.append(None)
 
         num_embeddings_exitosos = sum(1 for emb in embeddings_generados if emb is not None and len(emb) > 0)
-        registrador.info(f"Generación de embeddings completada. Éxito para {num_embeddings_exitosos} de {len(lista_de_textos_fragmentados)} fragmentos.")
+        registrador.info(f"Generación de embeddings completada. Éxito para {num_embeddings_exitosos} de {len(lista_de_textos)} textos.")
         return embeddings_generados
 
     @staticmethod
     def construir_objetos_fragmento_para_bd(
-        id_del_curso: int,
-        id_del_documento: str, # Identificador único del documento (ej. hash o ID de Moodle)
+        id_curso: int,
+        id_documento: str,
         nombre_archivo_original: str,
-        titulo_del_documento: Optional[str],
-        lista_textos_fragmentos: List[str], # Textos originales de los fragmentos (no contextualizados)
+        lista_textos_fragmentos: List[str], # Estos son los textos ORIGINALES, SIN CONTEXTO ADICIONAL PARA EMBEDDING
         lista_embeddings_fragmentos: List[Optional[List[float]]],
-        lista_metadatos_opcionales_por_fragmento: Optional[List[Optional[Dict[str, Any]]]] = None,
+        titulo_documento: Optional[str] = None,
+        metadatos_adicionales_por_fragmento: Optional[List[Optional[Dict[str, Any]]]] = None,
     ) -> List[modelos_api.FragmentoDocumento]:
         """
         Prepara una lista de objetos `FragmentoDocumento` (modelo Pydantic)
         listos para ser almacenados en la base de datos vectorial.
-        Asocia cada fragmento de texto con su embedding y metadatos correspondientes.
+        Asocia cada fragmento de texto original con su embedding y metadatos.
+
+        Args:
+            id_curso: ID del curso al que pertenece el documento.
+            id_documento: Identificador único del documento (ej. hash o ID de Moodle).
+            nombre_archivo_original: Nombre del archivo del cual provienen los fragmentos.
+            lista_textos_fragmentos: Textos originales de los fragmentos (sin el contexto añadido para el embedding).
+            lista_embeddings_fragmentos: Lista de embeddings correspondientes a los fragmentos (generados a partir de textos contextualizados).
+                                          Puede contener None si algún embedding falló.
+            titulo_documento: Opcional. Título del documento.
+            metadatos_adicionales_por_fragmento: Opcional. Lista de diccionarios con metadatos
+                                                 adicionales para cada fragmento.
+
+        Returns:
+            Una lista de instancias `modelos_api.FragmentoDocumento`.
+            Los fragmentos sin un embedding válido son omitidos.
         """
         if len(lista_textos_fragmentos) != len(lista_embeddings_fragmentos):
-            mensaje_error_longitud1 = "La cantidad de fragmentos de texto y de embeddings debe ser la misma."
-            registrador.error(mensaje_error_longitud1)
-            raise ValueError(mensaje_error_longitud1)
+            mensaje_error_longitud = "La cantidad de fragmentos de texto y de embeddings debe ser la misma."
+            registrador.error(mensaje_error_longitud)
+            raise ValueError(mensaje_error_longitud)
 
-        if lista_metadatos_opcionales_por_fragmento and len(lista_textos_fragmentos) != len(lista_metadatos_opcionales_por_fragmento):
-            mensaje_error_longitud2 = "Si se proveen metadatos opcionales, su cantidad debe coincidir con la de fragmentos de texto."
-            registrador.error(mensaje_error_longitud2)
-            raise ValueError(mensaje_error_longitud2)
+        if metadatos_adicionales_por_fragmento and len(lista_textos_fragmentos) != len(metadatos_adicionales_por_fragmento):
+            mensaje_error_longitud_meta = "Si se proveen metadatos opcionales, su cantidad debe coincidir con la de fragmentos de texto."
+            registrador.error(mensaje_error_longitud_meta)
+            raise ValueError(mensaje_error_longitud_meta)
 
-        registrador.info(f"Preparando {len(lista_textos_fragmentos)} objetos FragmentoDocumento para el documento ID '{id_del_documento}' del curso ID {id_del_curso}.")
+        registrador.info(f"Preparando {len(lista_textos_fragmentos)} objetos FragmentoDocumento para el documento ID '{id_documento}' del curso ID {id_curso}.")
         fragmentos_listos_para_bd: List[modelos_api.FragmentoDocumento] = []
 
-        for i, texto_fragmento_actual in enumerate(lista_textos_fragmentos):
+        for i, texto_fragmento_original in enumerate(lista_textos_fragmentos): # Iterar sobre el texto original
             embedding_actual = lista_embeddings_fragmentos[i]
-            if embedding_actual is None or not embedding_actual: # Si el embedding es None o lista vacía
-                registrador.warning(f"Fragmento {i+1} del documento '{id_del_documento}' no tiene un embedding válido. Se omitirá su preparación para la BD.")
-                continue # Omitir este fragmento
+            if not embedding_actual:
+                registrador.warning(f"Fragmento {i+1} ('{texto_fragmento_original[:30].replace('\n',' ')}...') del documento '{id_documento}' no tiene un embedding válido. Se omitirá.")
+                continue
 
-            # Construir metadatos base para este fragmento
-            metadatos_completos_fragmento = {
+            metadatos_base_fragmento = {
                 "nombre_archivo_fuente": nombre_archivo_original,
-                "numero_fragmento": i + 1, # Añadir número de secuencia del fragmento
-                "longitud_fragmento_caracteres": len(texto_fragmento_actual)
+                "numero_fragmento_secuencia": i + 1,
+                "longitud_fragmento_caracteres": len(texto_fragmento_original) # Longitud del texto original
             }
-            if titulo_del_documento:
-                metadatos_completos_fragmento["titulo_documento_asociado"] = titulo_del_documento
+            if titulo_documento:
+                metadatos_base_fragmento["titulo_documento_asociado"] = titulo_documento
 
-            # Añadir metadatos específicos del fragmento si se proporcionaron
-            if lista_metadatos_opcionales_por_fragmento and lista_metadatos_opcionales_por_fragmento[i]:
-                metadatos_completos_fragmento.update(lista_metadatos_opcionales_por_fragmento[i]) # type: ignore
+            metadatos_finales_fragmento = metadatos_base_fragmento.copy()
+            if metadatos_adicionales_por_fragmento and metadatos_adicionales_por_fragmento[i]:
+                metadatos_finales_fragmento.update(metadatos_adicionales_por_fragmento[i]) # type: ignore
 
-            # Crear el objeto Pydantic. El id_fragmento se generará automáticamente por el modelo si no se provee.
             try:
                 fragmento_para_bd = modelos_api.FragmentoDocumento(
-                    id_curso=id_del_curso,
-                    id_documento=id_del_documento,
-                    texto=texto_fragmento_actual, # Texto original del fragmento
+                    id_curso=id_curso,
+                    id_documento=id_documento,
+                    texto=texto_fragmento_original, # Guardar el texto original, no el contextualizado
                     embedding=embedding_actual,
-                    metadatos=metadatos_completos_fragmento,
+                    metadatos=metadatos_finales_fragmento,
                 )
                 fragmentos_listos_para_bd.append(fragmento_para_bd)
-            except Exception as e_modelo: # Captura errores de validación de Pydantic
-                registrador.error(f"Error al crear objeto FragmentoDocumento para fragmento {i+1} del doc '{id_del_documento}': {e_modelo}")
-                # Decidir si continuar con otros fragmentos o fallar todo el proceso. Por ahora, se omite el fragmento.
+            except Exception as e_modelo_pydantic:
+                registrador.error(f"Error al crear objeto FragmentoDocumento para fragmento {i+1} del doc '{id_documento}': {e_modelo_pydantic}")
 
         registrador.info(f"Se prepararon {len(fragmentos_listos_para_bd)} objetos FragmentoDocumento válidos para la BD.")
         return fragmentos_listos_para_bd
-
-[end of entrenai_refactor/nucleo/ia/gestor_embeddings_refactorizado.py]
