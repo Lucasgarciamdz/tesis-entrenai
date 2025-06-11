@@ -69,6 +69,8 @@ class N8NClient:
                 response = self.session.post(url, params=params, json=json_data)
             elif method.upper() == "PUT":
                 response = self.session.put(url, params=params, json=json_data)
+            elif method.upper() == "DELETE":
+                response = self.session.delete(url, params=params)
             else:
                 raise N8NClientError(f"Unsupported HTTP method: {method}")
             response.raise_for_status()

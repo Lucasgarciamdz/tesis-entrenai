@@ -1,8 +1,7 @@
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 import json # Añadido para manipulación de JSON
 import re  # Agregado para parsear HTML
-import copy
 
 from celery.result import AsyncResult  # Import AsyncResult
 from fastapi import APIRouter, HTTPException, Query, Depends, Request
@@ -17,9 +16,6 @@ from src.entrenai.api.models import (
 )
 from src.entrenai.celery_app import app as celery_app  # Import Celery app instance
 
-# from src.entrenai.core.files.file_tracker import FileTracker # Removed
-# from src.entrenai.core.files.file_processor import FileProcessor, FileProcessingError # Removed if not used directly
-# from src.entrenai.core.ai.embedding_manager import EmbeddingManager # Removed if not used directly
 from src.entrenai.config import (
     moodle_config,
     pgvector_config,
@@ -42,6 +38,9 @@ from src.entrenai.core.db import PgvectorWrapper, PgvectorWrapperError  # Update
 from src.entrenai.core.tasks import process_moodle_file_task  # Import Celery task
 
 logger = get_logger(__name__)
+
+# Constants
+DEFAULT_UNSPECIFIED_TEXT = "No especificado"
 
 router = APIRouter(
     prefix="/api/v1",
@@ -67,43 +66,41 @@ def _extract_chat_config_from_html(html_content: str) -> Dict[str, str]:
     
     logger.debug("Procesando HTML content para extraer configuraciones...")
     
-    # Patterns más flexibles para buscar configuraciones en el HTML
-    # Buscar por los labels específicos que se usan en el HTML generado
+    # Función para limpiar valores extraídos
+    def clean_extracted_value(value):
+        if not value:
+            return None
+        cleaned = value.strip()
+        # Remover comillas dobles al inicio y final si existen
+        if cleaned.startswith('"') and cleaned.endswith('"'):
+            cleaned = cleaned[1:-1]
+        # Remover comillas triples que puedan aparecer
+        while cleaned.startswith('"""') and cleaned.endswith('"""'):
+            cleaned = cleaned[3:-3]
+        # Remover múltiples comillas dobles consecutivas
+        while '""' in cleaned:
+            cleaned = cleaned.replace('""', '"')
+        # Devolver el valor limpio, incluso si es "No especificado"
+        return cleaned if cleaned else None
+    
+    # Patterns más específicos para buscar configuraciones en el HTML
+    # Usar patrones que capturen exactamente el valor después de los dos puntos hasta el final de la línea
     patterns = {
-        'initial_messages': [
-            r'<strong>Mensajes Iniciales:</strong>\s*["\']([^"\'<]+)["\']',
-            r'<strong>Mensajes Iniciales:</strong>\s*([^<]+)',
-            r'(?:mensaje[s]?\s+inicial[es]?|bienvenida|saludo)[:\s]*["\']([^"\']+)["\']'
-        ],
-        'system_message': [
-            r'<strong>Mensaje del Sistema:</strong>\s*["\']([^"\'<]+)["\']',
-            r'<strong>Mensaje del Sistema:</strong>\s*([^<]+)',
-            r'(?:mensaje\s+del?\s+sistema|instrucciones?)[:\s]*["\']([^"\']+)["\']'
-        ], 
-        'input_placeholder': [
-            r'<strong>Marcador de Posición de Entrada:</strong>\s*["\']([^"\'<]+)["\']',
-            r'<strong>Marcador de Posición de Entrada:</strong>\s*([^<]+)',
-            r'(?:placeholder|marcador\s+de\s+posición|texto\s+de\s+ayuda)[:\s]*["\']([^"\']+)["\']'
-        ],
-        'chat_title': [
-            r'<strong>Título del Chat:</strong>\s*["\']([^"\'<]+)["\']',
-            r'<strong>Título del Chat:</strong>\s*([^<]+)',
-            r'(?:título\s+del?\s+chat|nombre\s+del?\s+chat)[:\s]*["\']([^"\']+)["\']'
-        ]
+        'initial_messages': r'<strong>Mensajes Iniciales:</strong>\s*([^<\n\r]+)',
+        'system_message': r'<strong>Mensaje del Sistema:</strong>\s*([^<\n\r]+)',
+        'input_placeholder': r'<strong>Marcador de Posición de Entrada:</strong>\s*([^<\n\r]+)',
+        'chat_title': r'<strong>Título del Chat:</strong>\s*([^<\n\r]+)'
     }
     
-    for key, pattern_list in patterns.items():
-        for pattern in pattern_list:
-            match = re.search(pattern, html_content, re.IGNORECASE | re.MULTILINE | re.DOTALL)
-            if match:
-                extracted_value = match.group(1).strip()
-                # Limpiar el valor extraído
-                if extracted_value and extracted_value != 'No especificado':
-                    config[key] = extracted_value
-                    logger.info(f"Extraída configuración {key}: '{extracted_value}'")
-                    break  # Si encontramos una coincidencia, no buscar más patrones para esta clave
-            else:
-                logger.debug(f"No se encontró patrón para {key}: {pattern}")
+    for key, pattern in patterns.items():
+        match = re.search(pattern, html_content, re.IGNORECASE | re.MULTILINE)
+        if match:
+            extracted_value = clean_extracted_value(match.group(1))
+            if extracted_value:
+                config[key] = extracted_value
+                logger.info(f"Extraída configuración {key}: '{extracted_value}'")
+        else:
+            logger.debug(f"No se encontró patrón para {key}")
     
     if not config:
         logger.warning("No se encontraron configuraciones válidas en el HTML")
@@ -183,7 +180,7 @@ def get_pgvector_wrapper() -> (
     return PgvectorWrapper(config=pgvector_config)  # Updated instantiation
 
 
-def get_ai_client() -> OllamaWrapper | GeminiWrapper:
+def get_ai_client() -> Union[OllamaWrapper, GeminiWrapper]:
     try:
         return get_ai_wrapper()
     except AIProviderError as e:
@@ -217,19 +214,6 @@ def get_ai_client() -> OllamaWrapper | GeminiWrapper:
 
 def get_n8n_client() -> N8NClient:
     return N8NClient(config=n8n_config)
-
-
-# def get_file_tracker() -> FileTracker: # Removed
-#     return FileTracker(db_path=Path(base_config.file_tracker_db_path)) # Removed
-
-
-# def get_file_processor() -> FileProcessor: # Removed as file_processor dependency is removed
-#     return FileProcessor()
-
-# def get_embedding_manager( # Removed as embedding_manager dependency is removed
-#     ai_client=Depends(get_ai_client),
-# ) -> EmbeddingManager:
-#     return EmbeddingManager(ollama_wrapper=ai_client)
 
 
 @router.get("/courses", response_model=List[MoodleCourse])
@@ -634,10 +618,10 @@ async def setup_ia_for_course(
 {edit_instruction_message}
 <h5>Configuración del Chat de IA:</h5>
 <ul>
-    <li><strong>Mensajes Iniciales:</strong> "{initial_messages if initial_messages else 'No especificado'}"</li>
-    <li><strong>Mensaje del Sistema:</strong> "{system_message if system_message else 'No especificado'}"</li>
-    <li><strong>Marcador de Posición de Entrada:</strong> "{input_placeholder if input_placeholder else 'No especificado'}"</li>
-    <li><strong>Título del Chat:</strong> "{chat_title if chat_title else 'No especificado'}"</li>
+    <li><strong>Mensajes Iniciales:</strong> {initial_messages if initial_messages else DEFAULT_UNSPECIFIED_TEXT}</li>
+    <li><strong>Mensaje del Sistema:</strong> {system_message if system_message else DEFAULT_UNSPECIFIED_TEXT}</li>
+    <li><strong>Marcador de Posición de Entrada:</strong> {input_placeholder if input_placeholder else DEFAULT_UNSPECIFIED_TEXT}</li>
+    <li><strong>Título del Chat:</strong> {chat_title if chat_title else DEFAULT_UNSPECIFIED_TEXT}</li>
 </ul>
 """
 
@@ -703,9 +687,6 @@ async def refresh_course_files(
     course_id: int,
     moodle: MoodleClient = Depends(get_moodle_client),
     pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper),
-    # ai_client: OllamaWrapper | GeminiWrapper = Depends(get_ai_client), # Removed, task handles AI client
-    # embedding_manager: EmbeddingManager = Depends(get_embedding_manager), # Removed, task handles embeddings
-    # file_processor: FileProcessor = Depends(get_file_processor), # Removed, task handles file processing
 ):
     """
     Inicia el refresco y procesamiento asíncrono de archivos para un curso.
@@ -1161,6 +1142,7 @@ async def get_indexed_files_for_course(
         )
         raise HTTPException(
             status_code=500, detail=f"Error interno del servidor: {str(e)}"
+        )
 @router.get("/courses/{course_id}/refresh-chat-config", name="refresh_chat_config")
 async def refresh_chat_config(
     course_id: int,
@@ -1218,34 +1200,16 @@ async def refresh_chat_config(
         logger.info(f"Buscando sección de Moodle '{moodle_config.course_folder_name}' en curso {course_id}...")
         moodle_section_name_desired = moodle_config.course_folder_name
         
-        # First, try to get the section by its desired name.
-        # We need the section ID to fetch its details, especially the summary.
-        course_sections = moodle.get_course_sections(course_id)
-        target_section_id: Optional[int] = None
-        for sec in course_sections:
-            if sec.name == moodle_section_name_desired:
-                target_section_id = sec.id
-                break
+        # Try to get the section by its desired name using the correct method
+        entrenai_section = moodle.get_section_by_name(course_id, moodle_section_name_desired)
+        if not entrenai_section:
+            logger.error(f"No se encontró la sección '{moodle_section_name_desired}' en el curso {course_id}.")
+            return RedirectResponse(
+                url=f"{redirect_url_base}&status=error&message=Sección '{moodle_section_name_desired}' no encontrada en Moodle.",
+                status_code=302,
+            )
         
-        if not target_section_id:
-            logger.warning(f"No se encontró la sección '{moodle_section_name_desired}' por nombre en el curso {course_id}.")
-            # As a fallback, attempt to find ANY section that might contain entrenai config.
-            # This might be risky if there are multiple such sections.
-            # For now, we require the specific section to exist.
-            # If not found, try to get the first section of the course as a last resort or handle error.
-            # Let's try to get the section details of the *first available summary section* if specific one not found.
-            # This part of the logic might need refinement based on how sections are typically structured.
-            # The original code used get_section_by_name, then get_section_details.
-            # Let's stick to finding the specific section first.
-            entrenai_section = moodle.get_section_by_name(course_id, moodle_section_name_desired)
-            if not entrenai_section:
-                 logger.error(f"No se encontró la sección '{moodle_section_name_desired}' en el curso {course_id}.")
-                 return RedirectResponse(
-                    url=f"{redirect_url_base}&status=error&message=Sección '{moodle_section_name_desired}' no encontrada en Moodle.",
-                    status_code=302,
-                )
-            target_section_id = entrenai_section.id
-
+        target_section_id = entrenai_section.id
         logger.info(f"Sección '{moodle_section_name_desired}' encontrada con ID: {target_section_id}. Obteniendo detalles...")
         
         # Fetch the specific section's details to get the latest summary
@@ -1354,6 +1318,10 @@ async def refresh_chat_config(
         logger.info(f"Configurando y desplegando nuevo workflow de chat N8N para curso '{course_name_str}' (ID: {course_id})")
         logger.info(f"Usando nombre de tabla Pgvector para N8N: '{pgvector_table_name}'")
         
+        # Preparar parámetros para N8N - solo pasar valores válidos, no "No especificado"
+        def get_n8n_param(value):
+            return None if value == DEFAULT_UNSPECIFIED_TEXT else value
+        
         new_n8n_chat_url: Optional[HttpUrl] = None
         try:
             # Pass extracted chat parameters to the configuration function
@@ -1362,10 +1330,10 @@ async def refresh_chat_config(
                 course_name=course_name_str, # course_name_str for consistency
                 qdrant_collection_name=pgvector_table_name, # This will be used as tableName for PGVector node
                 ai_config_params=ai_params,
-                initial_messages=chat_config.get("initial_messages"),
-                system_message=chat_config.get("system_message"),
-                input_placeholder=chat_config.get("input_placeholder"),
-                chat_title=chat_config.get("chat_title"),
+                initial_messages=get_n8n_param(chat_config.get("initial_messages")),
+                system_message=get_n8n_param(chat_config.get("system_message")),
+                input_placeholder=get_n8n_param(chat_config.get("input_placeholder")),
+                chat_title=get_n8n_param(chat_config.get("chat_title")),
             )
             if new_n8n_chat_url_str:
                 new_n8n_chat_url = HttpUrl(new_n8n_chat_url_str)
@@ -1394,10 +1362,23 @@ async def refresh_chat_config(
         refresh_chat_config_api_url = str(request.url_for("refresh_chat_config", course_id=course_id))
 
         # Ensure chat parameters used in summary are the ones applied
-        applied_initial_messages = chat_config.get("initial_messages", "No especificado")
-        applied_system_message = chat_config.get("system_message", "No especificado")
-        applied_input_placeholder = chat_config.get("input_placeholder", "No especificado")
-        applied_chat_title = chat_config.get("chat_title", "No especificado")
+        # Limpiar comillas existentes para evitar acumulación infinita
+        def clean_value(value):
+            if not value or value == DEFAULT_UNSPECIFIED_TEXT:
+                return DEFAULT_UNSPECIFIED_TEXT
+            # Remover comillas dobles al inicio y final si existen
+            cleaned = str(value).strip()
+            if cleaned.startswith('"') and cleaned.endswith('"'):
+                cleaned = cleaned[1:-1]
+            # Remover múltiples comillas dobles consecutivas
+            while '""' in cleaned:
+                cleaned = cleaned.replace('""', '"')
+            return cleaned
+        
+        applied_initial_messages = clean_value(chat_config.get("initial_messages", DEFAULT_UNSPECIFIED_TEXT))
+        applied_system_message = clean_value(chat_config.get("system_message", DEFAULT_UNSPECIFIED_TEXT))
+        applied_input_placeholder = clean_value(chat_config.get("input_placeholder", DEFAULT_UNSPECIFIED_TEXT))
+        applied_chat_title = clean_value(chat_config.get("chat_title", DEFAULT_UNSPECIFIED_TEXT))
 
         # Edit instruction message
         edit_instruction_message = """
@@ -1416,10 +1397,10 @@ async def refresh_chat_config(
 {edit_instruction_message}
 <h5>Configuración del Chat de IA (Aplicada):</h5>
 <ul>
-    <li><strong>Mensajes Iniciales:</strong> "{applied_initial_messages}"</li>
-    <li><strong>Mensaje del Sistema:</strong> "{applied_system_message}"</li>
-    <li><strong>Marcador de Posición de Entrada:</strong> "{applied_input_placeholder}"</li>
-    <li><strong>Título del Chat:</strong> "{applied_chat_title}"</li>
+    <li><strong>Mensajes Iniciales:</strong> {applied_initial_messages}</li>
+    <li><strong>Mensaje del Sistema:</strong> {applied_system_message}</li>
+    <li><strong>Marcador de Posición de Entrada:</strong> {applied_input_placeholder}</li>
+    <li><strong>Título del Chat:</strong> {applied_chat_title}</li>
 </ul>
 """
         logger.debug(f"Nuevo HTML summary generado:\n{new_html_summary}")
@@ -1476,3 +1457,4 @@ async def refresh_chat_config(
             url=f"{redirect_url_base}&status=error&message=Error interno del servidor: {error_message}",
             status_code=302,
         )
+        
