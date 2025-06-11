@@ -1161,417 +1161,318 @@ async def get_indexed_files_for_course(
         )
         raise HTTPException(
             status_code=500, detail=f"Error interno del servidor: {str(e)}"
-        )
-
-
-def clean_n8n_workflow_for_update(workflow_data: dict) -> dict:
-    """
-    Limpia el JSON del workflow de n8n para que sea compatible con la API de actualización.
-    Elimina campos no permitidos y asegura que 'credentials' sea un objeto.
-    """
-    workflow_fields_to_remove = [
-        "createdAt", "updatedAt", "active", "versionId", "tags", "pinData"
-    ]
-    node_fields_to_remove = [
-        "typeVersion", "disabled", "notes", "createdAt", "updatedAt", "retryOf", "retrySuccessId"
-    ]
-    cleaned = {k: v for k, v in workflow_data.items() if k not in workflow_fields_to_remove}
-    # Limpiar nodos
-    cleaned_nodes = []
-    for node in cleaned.get("nodes", []):
-        node_clean = {k: v for k, v in node.items() if k not in node_fields_to_remove}
-        
-        # Solo el nodo chatTrigger debe tener webhookId
-        node_type = node_clean.get('type', '')
-        if node_type == "@n8n/n8n-nodes-langchain.chatTrigger":
-            # Asegurar que webhookId sea string si existe
-            if 'webhookId' in node_clean and node_clean['webhookId'] is not None:
-                node_clean['webhookId'] = str(node_clean['webhookId'])
-        else:
-            # Para todos los otros nodos, eliminar webhookId si existe
-            if 'webhookId' in node_clean:
-                del node_clean['webhookId']
-        
-        # Asegurar que credentials sea un objeto o eliminarlo si está vacío
-        if "credentials" in node_clean and (not isinstance(node_clean["credentials"], dict) or not node_clean["credentials"]):
-            node_clean["credentials"] = {}
-        elif "credentials" not in node_clean:
-            node_clean["credentials"] = {}
-        
-        cleaned_nodes.append(node_clean)
-    cleaned["nodes"] = cleaned_nodes
-    return cleaned
-
-
-def build_n8n_workflow_from_template(template_path: str, chat_config: dict) -> dict:
-    """
-    Lee el workflow de referencia y actualiza solo los parámetros de chat según chat_config.
-    """
-    with open(template_path, 'r', encoding='utf-8') as f:
-        workflow = json.load(f)
-    workflow = copy.deepcopy(workflow)
-    for node in workflow.get("nodes", []):
-        if node.get("type") == "@n8n/n8n-nodes-langchain.chatTrigger":
-            params = node.get("parameters", {})
-            options = params.get("options", {})
-            if "initial_messages" in chat_config:
-                params["initialMessages"] = chat_config["initial_messages"]
-            if "input_placeholder" in chat_config:
-                options["inputPlaceholder"] = chat_config["input_placeholder"]
-            if "chat_title" in chat_config:
-                options["title"] = chat_config["chat_title"]
-            params["options"] = options
-            node["parameters"] = params
-        if node.get("type") == "@n8n/n8n-nodes-langchain.agent":
-            params = node.get("parameters", {})
-            options = params.get("options", {})
-            if "system_message" in chat_config:
-                options["systemMessage"] = chat_config["system_message"]
-            params["options"] = options
-            node["parameters"] = params
-        # Asegurar que credentials sea un objeto
-        if "credentials" in node and not isinstance(node["credentials"], dict):
-            node["credentials"] = {}
-    return workflow
-
-
-def update_n8n_workflow_params_from_template(current_workflow: dict, template_path: str, chat_config: dict) -> dict:
-    """
-    Actualiza los parámetros de chat del workflow actual con los valores del chat_config,
-    manteniendo la estructura y los ids del workflow actual.
-    """
-    with open(template_path, 'r', encoding='utf-8') as f:
-        template = json.load(f)
-
-    template_nodes = {n['type']: n for n in template.get('nodes', [])}
-    updated = copy.deepcopy(current_workflow)
-    
-    def clean_value(value: str) -> str:
-        """Limpia un valor de configuración, removiendo comillas extras y 'No especificado'"""
-        if not value:
-            return ""
-        # Remover comillas del inicio y final si existen
-        value = value.strip('"\'')
-        # Si es "No especificado", retornar string vacío
-        if value.lower() == "no especificado":
-            return ""
-        return value
-
-    # Limpiar y asegurar webhookId correcto para todos los nodos
-    for node in updated.get('nodes', []):
-        node_type = node.get('type', '')
-        
-        # Solo el nodo chatTrigger debe tener webhookId
-        if node_type == "@n8n/n8n-nodes-langchain.chatTrigger":
-            # Asegurar que webhookId sea string si existe
-            if 'webhookId' in node and node['webhookId'] is not None:
-                node['webhookId'] = str(node['webhookId'])
-            elif 'webhookId' not in node or node['webhookId'] is None:
-                # Si no hay webhookId, mantener None o generar uno nuevo si es necesario
-                # En este caso, mantener el existente para no romper el workflow
-                pass
-        else:
-            # Para todos los otros nodos, eliminar webhookId si existe
-            if 'webhookId' in node:
-                del node['webhookId']
-            
-        t_node = template_nodes.get(node_type)
-        if not t_node:
-            continue
-            
-        # chatTrigger
-        if node_type == "@n8n/n8n-nodes-langchain.chatTrigger":
-            params = node.get("parameters", {})
-            t_params = t_node.get("parameters", {})
-            options = params.get("options", {})
-            t_options = t_params.get("options", {})
-            
-            # Actualizar initialMessages si es necesario
-            initial_msg = clean_value(chat_config.get("initial_messages", ""))
-            if initial_msg:
-                params["initialMessages"] = initial_msg
-            
-            # Actualizar solo los campos específicos en options si son válidos
-            input_placeholder = clean_value(chat_config.get("input_placeholder", ""))
-            if input_placeholder:
-                options["inputPlaceholder"] = input_placeholder
-                
-            chat_title = clean_value(chat_config.get("chat_title", ""))
-            if chat_title:
-                options["title"] = chat_title
-            
-            # Limpiar campos existentes que contienen "No especificado"
-            for key in ["inputPlaceholder", "title"]:
-                if key in options:
-                    cleaned = clean_value(str(options[key]))
-                    if cleaned:
-                        options[key] = cleaned
-                    elif key in t_options:
-                        options[key] = t_options[key]
-            
-            # Asegurar que los campos requeridos existan y mantener los valores existentes si no hay nuevos
-            for key in ["allowFileUploads", "subtitle", "customCss"]:
-                if key not in options and key in t_options:
-                    options[key] = t_options[key]
-                elif key in options and not options[key]:
-                    if key in t_options:
-                        options[key] = t_options[key]
-            
-            params["options"] = options
-            node["parameters"] = params
-            
-        # agent
-        if node_type == "@n8n/n8n-nodes-langchain.agent":
-            params = node.get("parameters", {})
-            t_params = t_node.get("parameters", {})
-            options = params.get("options", {})
-            t_options = t_params.get("options", {})
-            
-            system_msg = clean_value(chat_config.get("system_message", ""))
-            if system_msg:
-                options["systemMessage"] = system_msg
-            elif "systemMessage" in options:
-                # Limpiar el systemMessage existente
-                cleaned = clean_value(str(options["systemMessage"]))
-                if cleaned:
-                    options["systemMessage"] = cleaned
-                elif "systemMessage" in t_options:
-                    options["systemMessage"] = t_options["systemMessage"]
-            elif "systemMessage" in t_options:
-                options["systemMessage"] = t_options["systemMessage"]
-            
-            params["options"] = options
-            node["parameters"] = params
-            
-        # Asegurar que credentials sea un objeto vacío si es None o no es dict
-        if "credentials" in node and (node["credentials"] is None or not isinstance(node["credentials"], dict)):
-            node["credentials"] = {}
-            
-    return updated
-
-
 @router.get("/courses/{course_id}/refresh-chat-config", name="refresh_chat_config")
 async def refresh_chat_config(
     course_id: int,
     request: Request,
     moodle: MoodleClient = Depends(get_moodle_client),
     n8n: N8NClient = Depends(get_n8n_client),
+    pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper),
 ):
     """
-    Actualiza las configuraciones del chat de IA en el workflow de N8N 
-    leyendo el HTML Summary del curso desde Moodle.
-    
-    Este endpoint:
-    1. Obtiene el HTML Summary del curso desde Moodle
-    2. Extrae las configuraciones del chat (mensajes, placeholders, etc.)
-    3. Busca el workflow activo de N8N para el curso
-    4. Actualiza el workflow con las nuevas configuraciones
-    5. Redirige a una página de log con el resultado
-    
-    Returns:
-        RedirectResponse a la página de log con el resultado
+    Refreshes the N8n chat workflow configuration for a given course.
+
+    Steps:
+    1.  Accepts `PgvectorWrapper` as a dependency.
+    2.  Obtains `course_name_str` using `_get_course_name_for_operations`.
+    3.  Determines `pgvector_table_name` using `pgvector_db.get_table_name(course_name_str)`.
+    4.  Identifies the existing N8n workflow for the course and get its ID.
+        If multiple workflows match, attempts to find the active one.
+        If no specific workflow is found, logs a warning and attempts to proceed.
+    5.  Fetches the Moodle section summary using `moodle.get_section_details`.
+    6.  Extracts chat configuration from the HTML summary using `_extract_chat_config_from_html`.
+        If no configuration is found, redirects with an error.
+    7.  If an existing N8n workflow ID was found, calls `n8n.delete_workflow(existing_workflow_id)`.
+        Logs the outcome and proceeds even if deletion fails.
+    8.  Prepares `ai_params` (Gemini/Ollama configuration).
+    9.  Calls `n8n.configure_and_deploy_chat_workflow()` to create and activate a new workflow.
+    10. If `new_n8n_chat_url` is not obtained, redirects with an error.
+    11. Re-constructs the `html_summary` string for the Moodle section.
+    12. Updates the Moodle course section's summary.
+    13. Redirects to `config_log.html` with a success or error message.
     """
     logger.info(
-        f"Iniciando actualización de configuraciones del chat para el curso ID: {course_id}"
+        f"Iniciando refresco de configuración de chat para el curso ID: {course_id}"
     )
-    
+    base_url = str(request.base_url).rstrip("/")
+    redirect_url_base = f"{base_url}/ui/config_log.html?course_id={course_id}"
+
     try:
-        # 1. Obtener información del curso desde Moodle
-        logger.info(f"Obteniendo información del curso {course_id} desde Moodle...")
-        all_courses = moodle.get_all_courses()
-        course_info = next((c for c in all_courses if c.id == course_id), None)
-        if not course_info:
-            # Redirigir con error
-            base_url = str(request.base_url).rstrip("/")
+        # 1. & 2. Obtain course_name_str
+        logger.info(f"Obteniendo nombre del curso {course_id} para operaciones...")
+        try:
+            course_name_str = await _get_course_name_for_operations(course_id, moodle)
+        except HTTPException as e:
+            logger.error(f"Error al obtener nombre del curso: {e.detail}")
             return RedirectResponse(
-                url=f"{base_url}/ui/config_log.html?course_id={course_id}&status=error&message=Curso no encontrado en Moodle",
-                status_code=302
+                url=f"{redirect_url_base}&status=error&message=Error al obtener nombre del curso: {e.detail}",
+                status_code=302,
             )
+        logger.info(f"Nombre del curso obtenido: '{course_name_str}'")
+
+        # 3. Determine pgvector_table_name
+        pgvector_table_name = pgvector_db.get_table_name(course_name_str)
+        logger.info(f"Nombre de tabla Pgvector: '{pgvector_table_name}'")
+
+        # 5. Fetch Moodle section and extract chat config
+        logger.info(f"Buscando sección de Moodle '{moodle_config.course_folder_name}' en curso {course_id}...")
+        moodle_section_name_desired = moodle_config.course_folder_name
         
-        logger.info(f"Curso encontrado: {course_info.fullname}")
+        # First, try to get the section by its desired name.
+        # We need the section ID to fetch its details, especially the summary.
+        course_sections = moodle.get_course_sections(course_id)
+        target_section_id: Optional[int] = None
+        for sec in course_sections:
+            if sec.name == moodle_section_name_desired:
+                target_section_id = sec.id
+                break
         
-        # 2. Buscar la sección de Entrenai específicamente
-        logger.info("Buscando sección de Entrenai en el curso...")
-        entrenai_section_name = moodle_config.course_folder_name  # "Entrenai Documents" por defecto
-        entrenai_section = moodle.get_section_by_name(course_id, entrenai_section_name)
+        if not target_section_id:
+            logger.warning(f"No se encontró la sección '{moodle_section_name_desired}' por nombre en el curso {course_id}.")
+            # As a fallback, attempt to find ANY section that might contain entrenai config.
+            # This might be risky if there are multiple such sections.
+            # For now, we require the specific section to exist.
+            # If not found, try to get the first section of the course as a last resort or handle error.
+            # Let's try to get the section details of the *first available summary section* if specific one not found.
+            # This part of the logic might need refinement based on how sections are typically structured.
+            # The original code used get_section_by_name, then get_section_details.
+            # Let's stick to finding the specific section first.
+            entrenai_section = moodle.get_section_by_name(course_id, moodle_section_name_desired)
+            if not entrenai_section:
+                 logger.error(f"No se encontró la sección '{moodle_section_name_desired}' en el curso {course_id}.")
+                 return RedirectResponse(
+                    url=f"{redirect_url_base}&status=error&message=Sección '{moodle_section_name_desired}' no encontrada en Moodle.",
+                    status_code=302,
+                )
+            target_section_id = entrenai_section.id
+
+        logger.info(f"Sección '{moodle_section_name_desired}' encontrada con ID: {target_section_id}. Obteniendo detalles...")
         
-        if not entrenai_section:
-            logger.warning(f"No se encontró la sección '{entrenai_section_name}' en el curso {course_id}")
-            base_url = str(request.base_url).rstrip("/")
+        # Fetch the specific section's details to get the latest summary
+        section_details = moodle.get_section_details(section_id=target_section_id, course_id=course_id)
+
+        if not section_details or not section_details.summary:
+            logger.error(f"No se pudo obtener el summary de la sección ID {target_section_id} del curso {course_id}.")
             return RedirectResponse(
-                url=f"{base_url}/ui/config_log.html?course_id={course_id}&status=error&message=No se encontró la sección de Entrenai en el curso",
-                status_code=302
+                url=f"{redirect_url_base}&status=error&message=No se pudo obtener el contenido de la sección de Moodle.",
+                status_code=302,
             )
-        
-        logger.info(f"Sección de Entrenai encontrada: {entrenai_section.name} (ID: {entrenai_section.id})")
-        
-        # 3. Obtener detalles completos de la sección para acceder al contenido actualizado
-        logger.info("Obteniendo detalles completos de la sección...")
-        # Siempre intentar obtener el summary actualizado usando get_section_details
-        section_details = moodle.get_section_details(entrenai_section.id, course_id=course_id)
-        if section_details and section_details.summary:
-            html_summary = section_details.summary
-            logger.info("Detalles de la sección obtenidos exitosamente (summary actualizado)")
-        else:
-            # Fallback: usar el summary de la sección encontrada por nombre
-            html_summary = entrenai_section.summary or ""
-            logger.warning("No se pudieron obtener los detalles actualizados de la sección, usando summary de la sección encontrada por nombre")
-        
-        # 4. Extraer configuraciones del HTML Summary de la sección de Entrenai
-        logger.info("Extrayendo configuraciones del HTML Summary de la sección Entrenai...")
-        logger.debug(f"HTML Summary de la sección (primeros 500 caracteres): {html_summary[:500]}")
-        
+        html_summary = section_details.summary
+        logger.info(f"Summary de la sección ID {target_section_id} obtenido.")
+
+        # 6. Extract chat configuration from HTML summary
+        logger.info("Extrayendo configuraciones del chat desde el HTML summary...")
         chat_config = _extract_chat_config_from_html(html_summary)
-        logger.info(f"Configuraciones extraídas: {chat_config}")
-        
+        logger.info(f"Configuraciones del chat extraídas: {chat_config}")
         if not chat_config:
-            logger.warning("No se encontraron configuraciones de chat en el HTML Summary de la sección Entrenai")
-            base_url = str(request.base_url).rstrip("/")
+            logger.warning(f"No se encontraron configuraciones de chat válidas en el HTML summary de la sección {target_section_id}.")
             return RedirectResponse(
-                url=f"{base_url}/ui/config_log.html?course_id={course_id}&status=error&message=No se encontraron configuraciones de chat para actualizar",
-                status_code=302
+                url=f"{redirect_url_base}&status=error&message=No se encontraron configuraciones de chat para actualizar en el Moodle summary.",
+                status_code=302,
             )
-        
-        # 5. Buscar workflow activo para el curso
-        logger.info("Buscando workflow de N8N para el curso...")
-        workflows = n8n.get_workflows_list()
-        target_workflow = None
-        
-        # Buscar workflow que contenga el nombre del curso o ID del curso
-        course_name_patterns = [
-            course_info.fullname,
-            course_info.displayname,
-            f"curso_{course_id}",
-            f"entrenai_{course_id}"
-        ]
-        
-        for workflow in workflows or []:
-            for pattern in course_name_patterns:
-                if pattern and pattern.lower() in workflow.name.lower():
-                    target_workflow = workflow
-                    logger.info(f"Encontrado workflow: {workflow.name} (ID: {workflow.id})")
-                    break
-            if target_workflow:
-                break
-        
-        if not target_workflow:
-            # Si no encontramos workflow específico, buscar el workflow "Entrenai" genérico
-            for workflow in workflows or []:
-                if "entrenai" in workflow.name.lower():
-                    target_workflow = workflow
-                    logger.info(f"Usando workflow genérico: {workflow.name} (ID: {workflow.id})")
-                    break
-        
-        if not target_workflow:
-            base_url = str(request.base_url).rstrip("/")
-            return RedirectResponse(
-                url=f"{base_url}/ui/config_log.html?course_id={course_id}&status=error&message=No se encontró workflow de N8N para actualizar",
-                status_code=302
-            )
-        
-        # 6. Obtener detalles completos del workflow
-        logger.info(f"Obteniendo detalles del workflow {target_workflow.id}...")
-        workflow_details = n8n.get_workflow_details(target_workflow.id)
-        print("----------------DETAILS----------------\n\n\n")
-        print(workflow_details)
-        print("--------------------------------\n\n\n")
-        if not workflow_details:
-            base_url = str(request.base_url).rstrip("/")
-            return RedirectResponse(
-                url=f"{base_url}/ui/config_log.html?course_id={course_id}&status=error&message=No se pudieron obtener los detalles del workflow",
-                status_code=302
-            )
-        
-        # 7. Actualizar configuraciones en el workflow
-        logger.info("Actualizando configuraciones del workflow...")
-        updated = False
-        workflow_data = workflow_details.dict()
-        
-        # Buscar y actualizar el nodo chatTrigger
-        for node in workflow_data.get("nodes", []):
-            if node.get("type") == "@n8n/n8n-nodes-langchain.chatTrigger":
-                node_params = node.get("parameters", {})
-                node_options = node_params.get("options", {})
-                
-                # Actualizar configuraciones encontradas
-                if "initial_messages" in chat_config:
-                    node_params["initialMessages"] = chat_config["initial_messages"]
-                    updated = True
-                    logger.info(f"Actualizado initialMessages: {chat_config['initial_messages']}")
-                
-                if "input_placeholder" in chat_config:
-                    node_options["inputPlaceholder"] = chat_config["input_placeholder"]
-                    updated = True
-                    logger.info(f"Actualizado inputPlaceholder: {chat_config['input_placeholder']}")
-                
-                if "chat_title" in chat_config:
-                    node_options["title"] = chat_config["chat_title"]
-                    updated = True
-                    logger.info(f"Actualizado title: {chat_config['chat_title']}")
-                
-                # Guardar cambios en options
-                node_params["options"] = node_options
-                node["parameters"] = node_params
-                break
-        
-        # Buscar y actualizar el nodo AI Agent (para system message)
-        if "system_message" in chat_config:
-            for node in workflow_data.get("nodes", []):
-                if node.get("type") == "@n8n/n8n-nodes-langchain.agent":
-                    node_params = node.get("parameters", {})
-                    node_options = node_params.get("options", {})
-                    node_options["systemMessage"] = chat_config["system_message"]
-                    node_params["options"] = node_options
-                    node["parameters"] = node_params
-                    updated = True
-                    logger.info(f"Actualizado systemMessage: {chat_config['system_message']}")
-                    break
-        
-        if not updated:
-            base_url = str(request.base_url).rstrip("/")
-            return RedirectResponse(
-                url=f"{base_url}/ui/config_log.html?course_id={course_id}&status=error&message=No se realizaron actualizaciones (configuraciones no compatibles)",
-                status_code=302
-            )
-        
-        # 8. Enviar workflow actualizado a N8N usando la plantilla y manteniendo los ids
-        logger.info("Actualizando workflow manteniendo estructura e ids...")
-        template_path = "src/entrenai/n8n_workflow.json"
 
-        print("--------------------------------\n\n\n")
-        print(workflow_data)
-        print("--------------------------------\n\n\n")
-        workflow_data_clean = update_n8n_workflow_params_from_template(
-            workflow_data, template_path, chat_config
-        )
-
-
-        print("--------------------------------\n\n\n")
-        print(workflow_data_clean)
-        print("--------------------------------\n\n\n")
-        updated_workflow = n8n.update_workflow(target_workflow.id, workflow_data_clean)
+        # 4. Identify existing N8n workflow
+        logger.info(f"Buscando workflow existente de N8N para curso '{course_name_str}' (ID: {course_id})...")
+        existing_workflow_id: Optional[str] = None
+        # Prioritize exact name match first
+        exact_workflow_name = f"Entrenai - {course_id} - {course_name_str}"
+        # Fallback prefix if exact name changes or for wider matching
+        workflow_name_prefix = f"Entrenai - {course_id}"
         
-        if not updated_workflow:
-            base_url = str(request.base_url).rstrip("/")
-            return RedirectResponse(
-                url=f"{base_url}/ui/config_log.html?course_id={course_id}&status=error&message=Error al actualizar el workflow en N8N",
-                status_code=302
+        all_n8n_workflows = n8n.get_workflows_list()
+        
+        # Try exact match first
+        for wf in all_n8n_workflows:
+            if wf.name == exact_workflow_name:
+                if wf.active: # Prioritize active exact match
+                    existing_workflow_id = wf.id
+                    logger.info(f"Encontrado workflow activo con nombre exacto: '{wf.name}' (ID: {existing_workflow_id})")
+                    break
+                elif not existing_workflow_id: # Store inactive exact match if no active one found yet
+                    existing_workflow_id = wf.id
+                    logger.info(f"Encontrado workflow inactivo con nombre exacto: '{wf.name}' (ID: {existing_workflow_id})")
+        
+        # If no exact match, try prefix match (active preferred)
+        if not existing_workflow_id:
+            active_prefix_match = None
+            inactive_prefix_match = None
+            for wf in all_n8n_workflows:
+                if wf.name and wf.name.startswith(workflow_name_prefix):
+                    if wf.active:
+                        active_prefix_match = wf.id
+                        logger.info(f"Encontrado workflow activo con prefijo: '{wf.name}' (ID: {active_prefix_match})")
+                        break
+                    elif not inactive_prefix_match: # Store first inactive prefix match
+                        inactive_prefix_match = wf.id
+                        logger.info(f"Encontrado workflow inactivo con prefijo: '{wf.name}' (ID: {inactive_prefix_match})")
+
+            existing_workflow_id = active_prefix_match or inactive_prefix_match
+
+        if existing_workflow_id:
+            logger.info(f"Workflow de N8N existente identificado con ID: {existing_workflow_id}")
+        else:
+            logger.warning(
+                f"No se encontró un workflow de N8N específico para '{exact_workflow_name}' o con prefijo '{workflow_name_prefix}'. "
+                "Se procederá a crear uno nuevo. Esto es normal si es la primera configuración del chat."
             )
+
+        # 7. If an existing N8n workflow ID was found, delete it
+        if existing_workflow_id:
+            logger.info(f"Intentando eliminar workflow de N8N existente ID: {existing_workflow_id}...")
+            try:
+                delete_success = n8n.delete_workflow(existing_workflow_id)
+                if delete_success:
+                    logger.info(f"Workflow de N8N ID: {existing_workflow_id} eliminado exitosamente.")
+                else:
+                    logger.warning(f"No se pudo eliminar el workflow de N8N ID: {existing_workflow_id} o ya no existía. Se procederá a crear uno nuevo.")
+            except Exception as e_del_wf:
+                logger.error(f"Error al intentar eliminar el workflow de N8N ID: {existing_workflow_id}: {e_del_wf}. Se procederá a crear uno nuevo.")
         
-        logger.info("Configuraciones del chat actualizadas exitosamente")
+        # 8. Prepare ai_params (similar to setup_ia_for_course)
+        logger.info(f"Preparando parámetros de IA basados en la configuración: {base_config.ai_provider}")
+        if base_config.ai_provider == "gemini":
+            ai_params = {
+                "api_key": gemini_config.api_key,
+                "embedding_model": gemini_config.embedding_model,
+                "qa_model": gemini_config.text_model,
+            }
+        elif base_config.ai_provider == "ollama":
+            ai_params = {
+                "host": ollama_config.host,
+                "embedding_model": ollama_config.embedding_model,
+                "qa_model": ollama_config.qa_model,
+            }
+        else:
+            logger.error(f"Proveedor de IA no soportado: {base_config.ai_provider}")
+            return RedirectResponse(
+                url=f"{redirect_url_base}&status=error&message=Proveedor de IA no soportado: {base_config.ai_provider}",
+                status_code=302,
+            )
+        logger.debug(f"Parámetros de IA preparados: {ai_params}")
+
+        # 9. Call n8n.configure_and_deploy_chat_workflow()
+        logger.info(f"Configurando y desplegando nuevo workflow de chat N8N para curso '{course_name_str}' (ID: {course_id})")
+        logger.info(f"Usando nombre de tabla Pgvector para N8N: '{pgvector_table_name}'")
         
-        # Redirigir con éxito
-        base_url = str(request.base_url).rstrip("/")
-        config_count = len([k for k in chat_config.keys() if updated])
+        new_n8n_chat_url: Optional[HttpUrl] = None
+        try:
+            # Pass extracted chat parameters to the configuration function
+            new_n8n_chat_url_str = n8n.configure_and_deploy_chat_workflow(
+                course_id=course_id,
+                course_name=course_name_str, # course_name_str for consistency
+                qdrant_collection_name=pgvector_table_name, # This will be used as tableName for PGVector node
+                ai_config_params=ai_params,
+                initial_messages=chat_config.get("initial_messages"),
+                system_message=chat_config.get("system_message"),
+                input_placeholder=chat_config.get("input_placeholder"),
+                chat_title=chat_config.get("chat_title"),
+            )
+            if new_n8n_chat_url_str:
+                new_n8n_chat_url = HttpUrl(new_n8n_chat_url_str)
+        except Exception as e_n8n_config:
+            logger.error(f"Error al configurar/desplegar el workflow de N8N: {e_n8n_config}")
+            return RedirectResponse(
+                url=f"{redirect_url_base}&status=error&message=Error al configurar el workflow de N8N: {e_n8n_config}",
+                status_code=302,
+            )
+
+        # 10. If new_n8n_chat_url is not obtained, redirect with an error
+        if not new_n8n_chat_url:
+            logger.error(f"No se pudo obtener la nueva URL del chat de N8N para el curso '{course_name_str}'.")
+            return RedirectResponse(
+                url=f"{redirect_url_base}&status=error&message=No se pudo obtener la nueva URL del chat de N8N.",
+                status_code=302,
+            )
+        logger.info(f"Nueva URL de chat de N8N obtenida: {new_n8n_chat_url}")
+
+        # 11. Re-construct the html_summary string for the Moodle section
+        logger.info("Reconstruyendo HTML summary para la sección de Moodle...")
+        
+        # Links for Moodle section
+        refresh_files_ui_url = f"{base_url}/ui/manage_files.html?course_id={course_id}"
+        # The current endpoint itself is the refresh chat config URL
+        refresh_chat_config_api_url = str(request.url_for("refresh_chat_config", course_id=course_id))
+
+        # Ensure chat parameters used in summary are the ones applied
+        applied_initial_messages = chat_config.get("initial_messages", "No especificado")
+        applied_system_message = chat_config.get("system_message", "No especificado")
+        applied_input_placeholder = chat_config.get("input_placeholder", "No especificado")
+        applied_chat_title = chat_config.get("chat_title", "No especificado")
+
+        # Edit instruction message
+        edit_instruction_message = """
+<p><strong>Nota para el profesor:</strong> Puede modificar las configuraciones del chat directamente en la sección "Configuración del Chat de IA" a continuación. Después de realizar cambios, use el enlace "Actualizar Configuraciones del Chat" para aplicar los cambios al sistema de IA.</p>
+"""
+
+        new_html_summary = f"""
+<h4>Recursos de Entrenai IA</h4>
+<p>Utilice esta sección para interactuar con la Inteligencia Artificial de asistencia para este curso.</p>
+<ul>
+    <li><a href="{str(new_n8n_chat_url).rstrip('/')}" target="_blank">{moodle_config.chat_link_name}</a>: Acceda aquí para chatear con la IA.</li>
+    <li>Carpeta "<strong>Documentos Entrenai</strong>": Suba aquí los documentos PDF, DOCX, PPTX que la IA utilizará como base de conocimiento.</li>
+    <li><a href="{refresh_files_ui_url}" target="_blank">{moodle_config.refresh_link_name}</a>: Haga clic aquí después de subir nuevos archivos o modificar existentes en la carpeta "Documentos Entrenai" para que la IA los procese.</li>
+    <li><a href="{refresh_chat_config_api_url}" target="_blank">Actualizar Configuraciones del Chat</a>: Haga clic aquí después de modificar las configuraciones del chat (abajo) para aplicar los cambios.</li>
+</ul>
+{edit_instruction_message}
+<h5>Configuración del Chat de IA (Aplicada):</h5>
+<ul>
+    <li><strong>Mensajes Iniciales:</strong> "{applied_initial_messages}"</li>
+    <li><strong>Mensaje del Sistema:</strong> "{applied_system_message}"</li>
+    <li><strong>Marcador de Posición de Entrada:</strong> "{applied_input_placeholder}"</li>
+    <li><strong>Título del Chat:</strong> "{applied_chat_title}"</li>
+</ul>
+"""
+        logger.debug(f"Nuevo HTML summary generado:\n{new_html_summary}")
+
+        # 12. Update the Moodle course section's summary
+        logger.info(f"Actualizando summary de la sección de Moodle ID {target_section_id}...")
+        update_payload = {
+            "courseid": course_id,
+            "sections": [
+                {
+                    "type": "id", # type can be 'id' or 'sectionnumber'
+                    "section": target_section_id,
+                    "name": moodle_section_name_desired, # Keep the section name
+                    "summary": new_html_summary,
+                    "summaryformat": 1,  # 1 for HTML
+                }
+            ],
+        }
+        try:
+            update_result = moodle._make_request("local_wsmanagesections_update_sections", update_payload)
+            logger.info(f"Resultado de actualización de sección de Moodle: {update_result}")
+            # Add more robust check for update_result if the API provides clear success/failure indicators
+            if not update_result or (isinstance(update_result, list) and not update_result[0].get("success", True)): # success might not be present
+                 logger.warning(f"La actualización de la sección de Moodle para el curso {course_id} podría no haber sido exitosa. Respuesta: {update_result}")
+                 # Not necessarily a fatal error for the chat config refresh, but good to log.
+        except MoodleAPIError as e_moodle_update:
+            logger.error(f"Error de API de Moodle al actualizar la sección del curso {course_id}: {e_moodle_update}")
+            # This is not ideal, as N8N is configured, but Moodle summary update failed.
+            # For now, proceed to redirect with a partial success/warning message.
+            return RedirectResponse(
+                url=f"{redirect_url_base}&status=warning&message=Configuración del chat de IA en N8N actualizada, pero falló la actualización del resumen en Moodle: {e_moodle_update}",
+                status_code=302,
+            )
+
+        # 13. Redirect to config_log.html with a success message
+        logger.info(f"Configuración del chat para el curso {course_id} refrescada exitosamente.")
         return RedirectResponse(
-            url=f"{base_url}/ui/config_log.html?course_id={course_id}&status=success&message=Se actualizaron {config_count} configuraciones del chat exitosamente",
-            status_code=302
+            url=f"{redirect_url_base}&status=success&message=Configuración del chat de IA refrescada exitosamente. Nueva URL de chat desplegada.",
+            status_code=302,
         )
-        
+
+    except HTTPException as http_exc: # Re-raise HTTPExceptions from helpers or specific checks
+        logger.error(f"HTTPException durante el refresco de configuración de chat para el curso {course_id}: {http_exc.detail}")
+        # Ensure detail is a string for the URL
+        error_message = str(http_exc.detail) if http_exc.detail else "Error desconocido"
+        return RedirectResponse(
+            url=f"{redirect_url_base}&status=error&message={error_message}",
+            status_code=302,
+        )
     except Exception as e:
-        logger.exception(f"Error inesperado al actualizar configuraciones del chat: {e}")
-        base_url = str(request.base_url).rstrip("/")
+        logger.exception(f"Error inesperado durante el refresco de configuración de chat para el curso {course_id}: {e}")
+        error_message = str(e) if str(e) else "Error interno del servidor"
         return RedirectResponse(
-            url=f"{base_url}/ui/config_log.html?course_id={course_id}&status=error&message=Error interno del servidor",
-            status_code=302
+            url=f"{redirect_url_base}&status=error&message=Error interno del servidor: {error_message}",
+            status_code=302,
         )
