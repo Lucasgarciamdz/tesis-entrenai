@@ -225,17 +225,72 @@ class N8NClient:
     def delete_workflow(self, workflow_id: str) -> bool:
         """Deletes a workflow by its ID."""
         try:
+            logger.info(f"Attempting to delete N8N workflow with ID: {workflow_id}")
             self._make_request("DELETE", f"workflows/{workflow_id}")
-            logger.info(f"Successfully deleted workflow ID: {workflow_id}")
+            logger.info(f"Successfully deleted N8N workflow with ID: {workflow_id}")
             return True
         except N8NClientError as n8n_error:
-            logger.error(f"Failed to deactivate workflow ID {workflow_id}: {n8n_error}")
+            logger.error(f"Failed to delete N8N workflow '{workflow_id}': {n8n_error}")
             return False
         except Exception as general_error:
             logger.exception(
-                f"Unexpected error deactivating N8N workflow ID {workflow_id}: {general_error}"
+                f"Unexpected error deleting N8N workflow '{workflow_id}': {general_error}"
             )
             return False
+
+    def update_workflow(
+        self, workflow_id: str, workflow_data: Dict[str, Any]
+    ) -> Optional[N8NWorkflow]:
+        """
+        Actualiza un workflow existente en N8N.
+        
+        Args:
+            workflow_id: ID del workflow a actualizar
+            workflow_data: Datos completos del workflow (debe incluir toda la estructura)
+            
+        Returns:
+            N8NWorkflow actualizado o None si falló
+        """
+        try:
+            logger.info(f"Updating N8N workflow with ID: {workflow_id}")
+            
+            # Preparar datos del workflow para la actualización
+            # Según la API de N8N, necesitamos enviar la estructura completa
+            clean_workflow_data = {
+                "name": workflow_data.get("name", "Updated Workflow"),
+                "nodes": workflow_data.get("nodes", []),
+                "connections": workflow_data.get("connections", {}),
+                "settings": workflow_data.get("settings", {}),
+            }
+            # Agregar campos opcionales si existen
+            if "staticData" in workflow_data:
+                clean_workflow_data["staticData"] = workflow_data["staticData"]
+            # Nunca enviar 'active' (es read-only y la API lo rechaza)
+            # if "active" in workflow_data:
+            #     clean_workflow_data["active"] = workflow_data["active"]
+            # Si hay otros campos prohibidos, también los eliminamos aquí
+            # (por ahora, solo 'active' es problemático según la doc y la comunidad)
+            updated_workflow_data = self._make_request(
+                "PUT", f"workflows/{workflow_id}", json_data=clean_workflow_data
+            )
+            
+            if isinstance(updated_workflow_data, dict) and "id" in updated_workflow_data:
+                logger.info(f"Successfully updated workflow with ID: {workflow_id}")
+                return N8NWorkflow(**updated_workflow_data)
+            else:
+                logger.error(
+                    f"Unexpected response structure after updating workflow {workflow_id}: {updated_workflow_data}"
+                )
+                return None
+                
+        except N8NClientError as n8n_error:
+            logger.error(f"Failed to update N8N workflow '{workflow_id}': {n8n_error}")
+            return None
+        except Exception as general_error:
+            logger.exception(
+                f"Unexpected error updating N8N workflow '{workflow_id}': {general_error}"
+            )
+            return None
 
     def _get_webhook_url_from_workflow_json(
         self, workflow_json: Dict[str, Any]

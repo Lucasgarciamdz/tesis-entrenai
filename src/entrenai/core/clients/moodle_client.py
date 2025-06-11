@@ -655,3 +655,28 @@ class MoodleClient:
         except Exception as e:
             logger.exception(f"Error inesperado en get_all_courses: {e}")
             raise MoodleAPIError(f"Error inesperado obteniendo todos los cursos: {e}")
+
+    def get_section_details(self, section_id: int, course_id: Optional[int] = None) -> Optional[MoodleSection]:
+        """
+        Obtiene detalles específicos de una sección usando el plugin local_wsmanagesections.
+        """
+        try:
+            logger.info(f"Obteniendo detalles de la sección con ID: {section_id} usando local_wsmanagesections_get_sections")
+            # Usar el plugin para obtener detalles de la sección
+            payload = {"sectionids": [section_id]}
+            if course_id is not None:
+                payload["courseid"] = course_id
+            sections_data = self._make_request(
+                "local_wsmanagesections_get_sections",
+                payload_params=payload
+            )
+            if isinstance(sections_data, list) and sections_data:
+                return MoodleSection(**sections_data[0])
+            logger.warning(f"No se encontraron datos para la sección ID: {section_id}")
+            return None
+        except MoodleAPIError as e:
+            logger.error(f"Error de API obteniendo detalles de sección {section_id}: {e}")
+            return None
+        except Exception as e:
+            logger.exception(f"Error inesperado obteniendo detalles de sección {section_id}: {e}")
+            return None

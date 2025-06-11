@@ -19,6 +19,8 @@ class MoodleSection(BaseModel):
     id: int
     name: str
     section: Optional[int] = None  # Section number
+    summary: Optional[str] = None
+    summaryformat: Optional[int] = None
     # Add other relevant fields
 
 
@@ -86,6 +88,7 @@ class N8NNode(BaseModel):
     position: List[float]
     parameters: Optional[N8NNodeParameters] = None
     credentials: Optional[Dict[str, Any]] = None # Credentials can be complex, keep as dict for now
+    webhookId: Optional[str] = None  # Added for chat trigger nodes
     # Add other fields that might be present in a node definition
 
 class N8NWorkflow(BaseModel):

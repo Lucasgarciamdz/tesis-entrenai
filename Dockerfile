@@ -16,6 +16,15 @@ COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --no-cache-dir -r requirements.txt
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+         poppler-utils \
+         tesseract-ocr \
+         tesseract-ocr-eng \
+         tesseract-ocr-spa \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY ./src ./src
 
 
