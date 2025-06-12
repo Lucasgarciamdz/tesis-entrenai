@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 # Direct imports to avoid potential circular imports
 import src.entrenai.api.routers.course_setup as course_setup
 import src.entrenai.api.routers.search as search
+from src.entrenai.api.routers import file_processing
 from src.entrenai.config import base_config
 from src.entrenai.config.logger import get_logger
 
@@ -67,6 +68,7 @@ async def health_check():
 # Include routers
 app.include_router(course_setup.router)
 app.include_router(search.router)
+app.include_router(file_processing.router)
 
 app.mount("/ui", StaticFiles(directory="src/entrenai/api/static", html=True), name="ui")
 
