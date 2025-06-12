@@ -13,7 +13,7 @@ try:
         "src.entrenai",  # Changed to be more specific
         broker=REDIS_URL,
         backend=REDIS_URL,
-        include=["src.entrenai.core.tasks"],  # Point to the new tasks module
+        include=["src.entrenai.celery_tasks"],  # Point to the new simplified tasks module
     )
 
     # Autodiscover tasks from all registered Django app configs.

@@ -145,6 +145,44 @@ services:
     networks:
       - entrenai_net
 
+  fahapi_backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.fahapi
+    container_name: entrenai_fahapi_backend
+    restart: unless-stopped
+    ports:
+      - "${FAHAPI_HOST_PORT:-8000}:8000"
+    volumes:
+      - ./src:/app/src # For development hot-reloading; remove for production if code is solely from image
+      - entrenai_data:/app/data # For downloads, markdown files, etc.
+    env_file:
+      - .env
+    environment:
+      APP_ENV: docker # To ensure docker-specific configurations are loaded
+      DATA_DIR: /app/data # Standardized data directory within the container
+      # Add any other necessary backend-specific environment variables from .env if not covered by env_file
+      # For example, ensure FastAPI host/port are set if uvicorn command in Dockerfile.fahapi doesn't use defaults
+      # Or if they are read from base_config which is loaded via .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      pgvector_db:
+        condition: service_healthy
+      moodle_db: # If the API interacts with Moodle services that depend on Moodle DB directly
+        condition: service_healthy
+      ollama: # If Ollama is directly used by the backend
+        condition: service_healthy
+        # Add other necessary dependencies
+    networks:
+      - entrenai_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"] # Basic health check for FastAPI
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s # Give it some time to start up
+
   # --- Redis for Celery ---
   redis:
     image: "redis:alpine"
@@ -163,32 +201,27 @@ services:
       retries: 5
 
   celery_worker:
-    build: . # Assumes Dockerfile is in the root and copies src to /app/src
-    container_name: entrenai_celery_worker
+    build:
+      context: .
+      dockerfile: Dockerfile.celery
+    container_name: entrenai_celery_worker # Can remain the same
     restart: unless-stopped
     command: sh -c "celery -A src.entrenai.celery_app.app worker -l INFO -P eventlet"
-    volumes:
-      - ./src:/app/src # Mount local src to /app/src in container
-      - entrenai_data:/app/data # Use a named volume for data to avoid permission issues
+    # No src volume mount needed as Dockerfile.celery copies necessary files
+    # No data volume mount needed as it doesn't process files directly
     env_file:
-      - .env # Load environment variables from .env file
+      - .env
     environment:
-      # Override or set specific variables if needed, .env takes precedence for shared ones
-      APP_ENV: docker # Indica al config.py que use la configuración de Docker para Pgvector
+      APP_ENV: docker # May not be strictly needed by celery worker but often inherited
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
-      DATA_DIR: /app/data # Explicitly set the data directory path
-
-      # Ensure PYTHONPATH is set if your Dockerfile doesn't handle it for 'src' imports
+      FAHAPI_BACKEND_URL: http://fahapi_backend:8000 # URL for the backend API
       # PYTHONUNBUFFERED: 1 # Good for seeing logs immediately
     depends_on:
       redis:
         condition: service_healthy
-      pgvector_db: # If tasks might interact with pgvector
+      fahapi_backend: # Depends on the new backend service
         condition: service_healthy
-      # Add other dependencies if tasks directly require them at startup
-      # moodle_db:
-      #   condition: service_healthy
     networks:
       - entrenai_net
 

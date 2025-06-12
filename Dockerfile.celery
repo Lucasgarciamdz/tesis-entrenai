@@ -1,0 +1,67 @@
+FROM python:3.10-slim-bookworm AS builder
+
+RUN pip install --no-cache-dir uv
+
+WORKDIR /app
+
+# Create and activate virtual environment
+RUN uv venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Set UV environment variables
+ENV UV_COMPILE_BYTECODE=1
+
+# Copy requirements first to leverage Docker cache
+COPY requirements.txt .
+
+# Install Python dependencies using uv, with cache mount for speed
+# This will install all requirements, including celery and requests/httpx
+RUN --mount=type=cache,target=/root/.cache/uv     uv pip install --no-cache-dir -r requirements.txt
+
+# No system dependencies like poppler or tesseract needed for this worker
+
+# Copy only the necessary source files for the Celery worker
+# We'll need the celery_app configuration and the new celery_tasks.
+# We might also need the config directory if celery_app.py depends on it for broker settings,
+# but ideally, broker URL comes from environment variables.
+COPY ./src/entrenai/celery_app.py ./src/entrenai/celery_app.py
+COPY ./src/entrenai/config ./src/entrenai/config
+# Placeholder for the new tasks file, will be created in a later step
+COPY ./src/entrenai/celery_tasks.py ./src/entrenai/celery_tasks.py
+
+
+FROM python:3.10-slim-bookworm AS final
+
+WORKDIR /app
+
+# Create a non-root user for security
+ENV APP_USER=appuser
+RUN groupadd -r ${APP_USER} && useradd --no-log-init -r -g ${APP_USER} ${APP_USER}
+
+# Copy virtual environment from builder stage
+COPY --from=builder /opt/venv /opt/venv
+
+# Copy only the necessary application files from the builder stage and set ownership
+# Create the directory structure first
+RUN mkdir -p /app/src/entrenai/ &&     chown -R ${APP_USER}:${APP_USER} /app/src
+
+COPY --from=builder --chown=${APP_USER}:${APP_USER} /app/src/entrenai/celery_app.py ./src/entrenai/celery_app.py
+COPY --from=builder --chown=${APP_USER}:${APP_USER} /app/src/entrenai/config ./src/entrenai/config
+# Placeholder for copying the new tasks file
+COPY --from=builder --chown=${APP_USER}:${APP_USER} /app/src/entrenai/celery_tasks.py ./src/entrenai/celery_tasks.py
+
+
+# Set PYTHONPATH to include the app directory
+ENV PYTHONPATH=/app
+
+# Add virtual environment to PATH
+ENV PATH="/opt/venv/bin:$PATH"
+
+# No data directories needed for this worker as processing is delegated
+
+USER ${APP_USER}
+
+# Command to run the Celery worker
+# It will point to the modified celery_app and its new task definition file (once created)
+# The -P eventlet is kept from the original Dockerfile, adjust if necessary
+CMD ["celery", "-A", "src.entrenai.celery_app.app", "worker", "-l", "INFO", "-P", "eventlet"]
