@@ -17,6 +17,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     let activeTasks = {}; 
     let taskQueue = []; // Cola para taskIds que se procesarán secuencialmente
     let isCurrentlyProcessing = false; // Flag para evitar múltiples procesamientos simultáneos desde la cola
+    let isPageVisible = true; // Flag para controlar polling cuando la página no está visible
 
     // Ensure essential DOM elements are present before proceeding.
     if (!courseNamePlaceholder || !statusMessagesContainer || !refreshMoodleFilesButton || !filesTableBody || !noFilesMessage) {
@@ -491,76 +492,145 @@ document.addEventListener('DOMContentLoaded', async () => {
             ...activeTasks[taskId], // Conservar simulación si ya existe
             pollIntervalId: null,
             realStatus: activeTasks[taskId]?.realStatus || 'PENDING', // Mantener estado si ya existe
-            filename: filename // Guardar filename para re-uso
+            filename: filename, // Guardar filename para re-uso
+            lastPollTime: 0, // Para evitar múltiples requests concurrentes
+            isPolling: false, // Flag para evitar requests concurrentes
+            pollAttempts: 0, // Contador de intentos para implementar backoff
+            maxPollAttempts: 50, // Máximo 50 intentos (≈8 minutos con backoff)
         };
         
-        activeTasks[taskId].pollIntervalId = setInterval(async () => {
-            if (!activeTasks[taskId]) { // Si la tarea fue eliminada mientras el intervalo estaba activo
-                // Esto puede pasar si la tarea se completa y se elimina de activeTasks, pero el intervalo aún no se limpió
-                // o si processNextInQueue limpia una tarea que falló antes de que este intervalo se ejecute.
-                const thisIntervalId = activeTasks[taskId]?.pollIntervalId; // Intentar obtener el ID para limpiarlo
-                if (thisIntervalId) clearInterval(thisIntervalId);
-                // No podemos estar seguros de qué intervalo es, así que es mejor no limpiar todos los intervalos aquí.
-                // La limpieza principal ocurre cuando la tarea termina (SUCCESS/FAILURE) o se cancela.
+        // Función para realizar el polling con backoff exponencial
+        const pollTask = async () => {
+            if (!activeTasks[taskId]) {
+                return; // Tarea eliminada mientras se ejecutaba
+            }
+
+            // Evitar múltiples requests concurrentes
+            if (activeTasks[taskId].isPolling) {
                 return;
             }
+
+            // No hacer polling si la página no está visible (optimización de recursos)
+            if (!isPageVisible) {
+                return;
+            }
+
+            // Verificar límite de intentos
+            if (activeTasks[taskId].pollAttempts >= activeTasks[taskId].maxPollAttempts) {
+                logger.warning(`Límite de intentos alcanzado para tarea ${taskId}`);
+                if (activeTasks[taskId].pollIntervalId) {
+                    clearInterval(activeTasks[taskId].pollIntervalId);
+                }
+                addOrUpdateFileInTable(taskId, filename, 'TIMEOUT', activeTasks[taskId]?.simulatedProgress || 0, 'Tiempo de espera agotado');
+                delete activeTasks[taskId];
+                isCurrentlyProcessing = false;
+                processNextInQueue(currentCourseId);
+                return;
+            }
+
+            activeTasks[taskId].isPolling = true;
+            activeTasks[taskId].pollAttempts++;
+            
             try {
                 const response = await fetch(`${API_BASE_URL}/task/${taskId}/status`);
                 let taskData;
+                
                 try {
                     taskData = await response.json();
                 } catch (e) {
                     console.warn(`Respuesta no JSON para tarea ${taskId} (HTTP ${response.status}).`, e);
-                    if (activeTasks[taskId]) activeTasks[taskId].realStatus = 'ERROR_CHECK';
-                    addOrUpdateFileInTable(taskId, filename, 'ERROR_CHECK', activeTasks[taskId]?.simulatedProgress || 0, `Respuesta inesperada (HTTP ${response.status})`);
+                    if (activeTasks[taskId]) {
+                        activeTasks[taskId].realStatus = 'ERROR_CHECK';
+                        activeTasks[taskId].isPolling = false;
+                        addOrUpdateFileInTable(taskId, filename, 'ERROR_CHECK', activeTasks[taskId]?.simulatedProgress || 0, `Respuesta inesperada (HTTP ${response.status})`);
+                    }
                     return;
                 }
 
                 if (!response.ok) {
                     const errorDetail = taskData?.detail || `Error HTTP ${response.status}`;
                     console.warn(`No se pudo obtener estado de tarea ${taskId} (${errorDetail}).`);
-                    if (activeTasks[taskId]) activeTasks[taskId].realStatus = 'ERROR_CHECK';
-                    addOrUpdateFileInTable(taskId, filename, 'ERROR_CHECK', activeTasks[taskId]?.simulatedProgress || 0, errorDetail);
+                    if (activeTasks[taskId]) {
+                        activeTasks[taskId].realStatus = 'ERROR_CHECK';
+                        activeTasks[taskId].isPolling = false;
+                        addOrUpdateFileInTable(taskId, filename, 'ERROR_CHECK', activeTasks[taskId]?.simulatedProgress || 0, errorDetail);
+                    }
                     return;
                 }
                 
-                if (activeTasks[taskId]) activeTasks[taskId].realStatus = taskData.status;
-                let displayProgress = activeTasks[taskId]?.simulatedProgress || 0;
+                if (activeTasks[taskId]) {
+                    activeTasks[taskId].realStatus = taskData.status;
+                    activeTasks[taskId].isPolling = false;
+                    
+                    // Usar filename del resultado si está disponible
+                    const displayFilename = taskData.filename || filename;
+                    let displayProgress = activeTasks[taskId]?.simulatedProgress || 0;
 
-                if (taskData.status === 'SUCCESS' || taskData.status === 'FAILURE') {
-                    if (activeTasks[taskId]?.animationFrameId) {
-                        cancelAnimationFrame(activeTasks[taskId].animationFrameId);
-                    }
-                    if (activeTasks[taskId]?.pollIntervalId) { // Asegurarse de limpiar el intervalo correcto
-                        clearInterval(activeTasks[taskId].pollIntervalId);
-                    }
-                    
-                    displayProgress = (taskData.status === 'SUCCESS') ? 100 : 0;
-                    addOrUpdateFileInTable(taskId, filename, taskData.status, displayProgress, taskData.result);
-                    
-                    if (taskData.status === 'SUCCESS') {
-                        updateStatusManage(`Procesamiento de '${filename}' completado.`, 'success');
-                        const indexedFileRow = filesTableBody.querySelector(`tr[data-task-id="${taskId}"]`);
-                        if(indexedFileRow) {
-                           const modDate = indexedFileRow.cells[3].textContent !== 'N/A' ? indexedFileRow.cells[3].textContent : new Date().toLocaleString();
-                           addOrUpdateFileInTable(taskId, filename, 'INDEXADO', 100, null, modDate);
+                    if (taskData.status === 'SUCCESS' || taskData.status === 'FAILURE') {
+                        // Limpiar intervalos y animaciones
+                        if (activeTasks[taskId]?.animationFrameId) {
+                            cancelAnimationFrame(activeTasks[taskId].animationFrameId);
                         }
+                        if (activeTasks[taskId]?.pollIntervalId) {
+                            clearInterval(activeTasks[taskId].pollIntervalId);
+                        }
+                        
+                        displayProgress = (taskData.status === 'SUCCESS') ? 100 : 0;
+                        addOrUpdateFileInTable(taskId, displayFilename, taskData.status, displayProgress, taskData.result);
+                        
+                        if (taskData.status === 'SUCCESS') {
+                            updateStatusManage(`Procesamiento de '${displayFilename}' completado.`, 'success');
+                            const indexedFileRow = filesTableBody.querySelector(`tr[data-task-id="${taskId}"]`);
+                            if(indexedFileRow) {
+                               const modDate = indexedFileRow.cells[3].textContent !== 'N/A' ? indexedFileRow.cells[3].textContent : new Date().toLocaleString();
+                               addOrUpdateFileInTable(taskId, displayFilename, 'INDEXADO', 100, null, modDate);
+                            }
+                        } else {
+                            updateStatusManage(`Error al procesar '${displayFilename}': ${taskData.result || 'Causa desconocida'}`, 'danger');
+                        }
+                        
+                        delete activeTasks[taskId]; 
+                        isCurrentlyProcessing = false;
+                        processNextInQueue(currentCourseId);
                     } else {
-                        updateStatusManage(`Error al procesar '${filename}': ${taskData.result || 'Causa desconocida'}`, 'danger');
+                        // Tarea aún en proceso, actualizar con progreso simulado
+                        addOrUpdateFileInTable(taskId, displayFilename, taskData.status, displayProgress, taskData.result);
                     }
-                    delete activeTasks[taskId]; 
-                    isCurrentlyProcessing = false; // Liberar el flag de procesamiento
-                    processNextInQueue(currentCourseId); // Intentar procesar la siguiente
-                } else {
-                    // Si la tarea aún está en proceso, actualizamos la tabla con el progreso simulado
-                    addOrUpdateFileInTable(taskId, filename, taskData.status, displayProgress, taskData.result);
                 }
             } catch (networkError) { 
                 console.error(`Error de red al rastrear tarea ${taskId}:`, networkError);
-                if (activeTasks[taskId]) activeTasks[taskId].realStatus = 'ERROR_NETWORK';
-                addOrUpdateFileInTable(taskId, filename, 'ERROR_NETWORK', activeTasks[taskId]?.simulatedProgress || 0, 'Error de conexión');
+                if (activeTasks[taskId]) {
+                    activeTasks[taskId].realStatus = 'ERROR_NETWORK';
+                    activeTasks[taskId].isPolling = false;
+                    addOrUpdateFileInTable(taskId, filename, 'ERROR_NETWORK', activeTasks[taskId]?.simulatedProgress || 0, 'Error de conexión');
+                }
             }
-        }, 5000); 
+        };
+
+        // Calcular intervalo de polling con backoff exponencial
+        const getPollingInterval = (attempts) => {
+            const baseInterval = 8000; // 8 segundos base
+            const maxInterval = 30000; // Máximo 30 segundos
+            const interval = Math.min(baseInterval * Math.pow(1.5, Math.floor(attempts / 5)), maxInterval);
+            return interval;
+        };
+
+        // Función para actualizar el intervalo de polling
+        const updatePollingInterval = () => {
+            if (activeTasks[taskId] && activeTasks[taskId].pollIntervalId) {
+                clearInterval(activeTasks[taskId].pollIntervalId);
+            }
+            
+            if (activeTasks[taskId]) {
+                const interval = getPollingInterval(activeTasks[taskId].pollAttempts);
+                activeTasks[taskId].pollIntervalId = setInterval(pollTask, interval);
+            }
+        };
+
+        // Iniciar polling inmediatamente, luego con intervalo
+        pollTask().then(() => {
+            updatePollingInterval();
+        });
     }
 
     function startProgressSimulation(taskId, filename) {
@@ -571,10 +641,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         activeTasks[taskId].realStatus = 'PROCESSING'; // Asegurar que el estado es de procesamiento
 
         let startTime = null;
-        const durationUntil90Percent = 20000; // 10 segundos para llegar al 90%
-        const durationUntil99Percent = 30000; // 30 segundos adicionales para llegar al 99% (total 40s)
-        const targetSlowDownStart = 90; 
-        const absoluteMaxSimulated = 99; 
+        const durationUntil90Percent = 30000; // 30 segundos para llegar al 90%
+        const durationUntil99Percent = 60000; // 60 segundos adicionales para llegar al 99% (total 90s)
+        const targetSlowDownStart = 85; // Empezar a ir más lento a partir del 85%
+        const absoluteMaxSimulated = 95; // Máximo simulado al 95% para ser más conservador
 
         function animate(timestamp) {
             if (!activeTasks[taskId] || activeTasks[taskId].realStatus === 'SUCCESS' || activeTasks[taskId].realStatus === 'FAILURE') {
@@ -590,9 +660,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             let currentSimulatedProgress;
 
             if (activeTasks[taskId].simulatedProgress < targetSlowDownStart) {
+                // Fase rápida inicial
                 const progressRatio = Math.min(elapsed / durationUntil90Percent, 1);
                 currentSimulatedProgress = Math.floor(progressRatio * targetSlowDownStart);
             } else {
+                // Fase lenta final
                 const elapsedInSlowPhase = Math.max(0, elapsed - durationUntil90Percent);
                 const progressInSlowPhaseRatio = Math.min(elapsedInSlowPhase / durationUntil99Percent, 1);
                 currentSimulatedProgress = targetSlowDownStart + Math.floor(progressInSlowPhaseRatio * (absoluteMaxSimulated - targetSlowDownStart));
@@ -604,8 +676,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (activeTasks[taskId].simulatedProgress < absoluteMaxSimulated && 
                 (activeTasks[taskId].realStatus === 'PROCESSING' || activeTasks[taskId].realStatus === 'PENDING' || activeTasks[taskId].realStatus === 'STARTED') ) {
                 activeTasks[taskId].animationFrameId = requestAnimationFrame(animate);
-            } else {
-                 if(activeTasks[taskId]) activeTasks[taskId].animationFrameId = null;
+            } else if(activeTasks[taskId]) {
+                activeTasks[taskId].animationFrameId = null;
             }
         }
         if (activeTasks[taskId].animationFrameId) { // Cancelar animación previa si existe
@@ -641,6 +713,40 @@ document.addEventListener('DOMContentLoaded', async () => {
             isCurrentlyProcessing = false; // No había nada que procesar
         }
     }
+
+    // --- Gestión de visibilidad de página para optimizar polling ---
+    document.addEventListener('visibilitychange', () => {
+        isPageVisible = !document.hidden;
+        if (isPageVisible) {
+            console.log('Página visible: reactivando polling');
+            // Reactivar polling para todas las tareas activas
+            Object.keys(activeTasks).forEach(taskId => {
+                if (activeTasks[taskId] && !activeTasks[taskId].pollIntervalId) {
+                    // Reiniciar polling para tareas que no están terminadas
+                    const task = activeTasks[taskId];
+                    if (task.realStatus !== 'SUCCESS' && task.realStatus !== 'FAILURE') {
+                        const interval = 8000 * Math.pow(1.5, Math.floor(task.pollAttempts / 5));
+                        task.pollIntervalId = setInterval(() => {
+                            // Lógica simplificada para polling cuando se reactiva
+                            fetch(`${API_BASE_URL}/task/${taskId}/status`)
+                                .then(response => response.json())
+                                .then(data => {
+                                    if (data.status === 'SUCCESS' || data.status === 'FAILURE') {
+                                        clearInterval(task.pollIntervalId);
+                                        delete activeTasks[taskId];
+                                        isCurrentlyProcessing = false;
+                                        processNextInQueue(courseId);
+                                    }
+                                })
+                                .catch(error => console.error('Error en polling reactivado:', error));
+                        }, Math.min(interval, 30000));
+                    }
+                }
+            });
+        } else {
+            console.log('Página oculta: pausando polling');
+        }
+    });
 
     // --- Start ---
     initializePage().catch(error => {

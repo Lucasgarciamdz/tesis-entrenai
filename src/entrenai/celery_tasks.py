@@ -10,9 +10,9 @@ from src.entrenai.api.models import FileProcessingRequest, MoodleFile
 
 logger = logging.getLogger(__name__)
 
-# Determine the Fahapi backend URL from environment variables
+# Determine the Fastapi backend URL from environment variables
 # Default to a common local setup if not specified.
-FAHAPI_BACKEND_URL = os.getenv("FAHAPI_BACKEND_URL", "http://fahapi_backend:8000")
+FASTAPI_BACKEND_URL = os.getenv("FASTAPI_BACKEND_URL", "http://fastapi_backend:8000")
 
 @app.task(bind=True, name="entrenai.core.tasks.process_moodle_file_task")
 def forward_file_processing_to_api(
@@ -27,7 +27,7 @@ def forward_file_processing_to_api(
     base_config_dict: dict,
 ):
     """
-    Celery task that forwards file processing to the Fahapi backend via an HTTP request.
+    Celery task that forwards file processing to the Fastapi backend via an HTTP request.
     It attempts to maintain the original task name 'entrenai.core.tasks.process_moodle_file_task'.
     """
     task_id = self.request.id
@@ -48,7 +48,7 @@ def forward_file_processing_to_api(
             "task_id": task_id,
         }
 
-    # Prepare the request payload for the Fahapi API endpoint
+    # Prepare the request payload for the Fastapi API endpoint
     payload = FileProcessingRequest(
         course_id=course_id,
         course_name_for_pgvector=course_name_for_pgvector,
@@ -60,13 +60,13 @@ def forward_file_processing_to_api(
         base_config_dict=base_config_dict,
     )
 
-    api_endpoint = f"{FAHAPI_BACKEND_URL}/processing/process_file"
+    api_endpoint = f"{FASTAPI_BACKEND_URL}/processing/process_file"
     logger.info(f"Task ID: {task_id} - Posting to API endpoint: {api_endpoint} with payload for {filename}")
 
     try:
         # Using httpx.Client for synchronous request from Celery task
         with httpx.Client(timeout=None) as client: # Consider a reasonable timeout, e.g. 300 seconds for long processing
-            response = client.post(api_endpoint, json=payload.model_dump()) # Use .model_dump() for Pydantic v2+
+            response = client.post(api_endpoint, json=payload.model_dump(mode='json')) # Use mode='json' to serialize HttpUrl objects properly
 
         logger.info(f"Task ID: {task_id} - Received response from API for {filename}: {response.status_code}")
         response.raise_for_status()  # Raises an HTTPError for bad responses (4xx or 5xx)

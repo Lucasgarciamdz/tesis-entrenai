@@ -12,11 +12,11 @@ ENV PATH="/opt/venv/bin:$PATH"
 ENV UV_COMPILE_BYTECODE=1
 
 # Copy requirements first to leverage Docker cache
-COPY requirements.txt .
+COPY requirements-celery.txt .
 
 # Install Python dependencies using uv, with cache mount for speed
-# This will install all requirements, including celery and requests/httpx
-RUN --mount=type=cache,target=/root/.cache/uv     uv pip install --no-cache-dir -r requirements.txt
+# This will install only the minimal requirements needed for Celery worker
+RUN --mount=type=cache,target=/root/.cache/uv     uv pip install --no-cache-dir -r requirements-celery.txt
 
 # No system dependencies like poppler or tesseract needed for this worker
 
@@ -24,8 +24,15 @@ RUN --mount=type=cache,target=/root/.cache/uv     uv pip install --no-cache-dir 
 # We'll need the celery_app configuration and the new celery_tasks.
 # We might also need the config directory if celery_app.py depends on it for broker settings,
 # but ideally, broker URL comes from environment variables.
+# Create directory structure first, then minimal __init__.py files
+RUN mkdir -p ./src/entrenai/api && \
+    echo "# Minimal __init__.py for Celery worker container" > ./src/__init__.py && \
+    echo "# Minimal __init__.py for Celery worker container" > ./src/entrenai/__init__.py && \
+    echo "# Minimal __init__.py for Celery worker container" > ./src/entrenai/api/__init__.py
 COPY ./src/entrenai/celery_app.py ./src/entrenai/celery_app.py
 COPY ./src/entrenai/config ./src/entrenai/config
+# Copy only the API models needed for celery_tasks.py imports (not the entire api directory)
+COPY ./src/entrenai/api/models.py ./src/entrenai/api/models.py
 # Placeholder for the new tasks file, will be created in a later step
 COPY ./src/entrenai/celery_tasks.py ./src/entrenai/celery_tasks.py
 
@@ -41,12 +48,17 @@ RUN groupadd -r ${APP_USER} && useradd --no-log-init -r -g ${APP_USER} ${APP_USE
 # Copy virtual environment from builder stage
 COPY --from=builder /opt/venv /opt/venv
 
-# Copy only the necessary application files from the builder stage and set ownership
-# Create the directory structure first
-RUN mkdir -p /app/src/entrenai/ &&     chown -R ${APP_USER}:${APP_USER} /app/src
+# Create the directory structure and minimal __init__.py files
+RUN mkdir -p /app/src/entrenai/api && \
+    chown -R ${APP_USER}:${APP_USER} /app/src && \
+    echo "# Minimal __init__.py for Celery worker container" > ./src/__init__.py && \
+    echo "# Minimal __init__.py for Celery worker container" > ./src/entrenai/__init__.py && \
+    echo "# Minimal __init__.py for Celery worker container" > ./src/entrenai/api/__init__.py
 
 COPY --from=builder --chown=${APP_USER}:${APP_USER} /app/src/entrenai/celery_app.py ./src/entrenai/celery_app.py
 COPY --from=builder --chown=${APP_USER}:${APP_USER} /app/src/entrenai/config ./src/entrenai/config
+# Copy only the API models needed for celery_tasks.py imports (not the entire api directory)
+COPY --from=builder --chown=${APP_USER}:${APP_USER} /app/src/entrenai/api/models.py ./src/entrenai/api/models.py
 # Placeholder for copying the new tasks file
 COPY --from=builder --chown=${APP_USER}:${APP_USER} /app/src/entrenai/celery_tasks.py ./src/entrenai/celery_tasks.py
 

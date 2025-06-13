@@ -732,6 +732,7 @@ async def refresh_course_files(
     files_to_process_count = 0
     tasks_dispatched_count = 0
     dispatched_task_ids: List[str] = []  # To store IDs of dispatched tasks
+    filenames_by_task_id: Dict[str, str] = {}  # To store filename mapping for frontend
     # Ruta que el API podría usar para crear el directorio en el host/API-environment
     course_download_dir_on_api_host = (
         Path(base_config.download_dir) / str(course_id)
@@ -878,6 +879,7 @@ async def refresh_course_files(
                     )
                     tasks_dispatched_count += 1
                     dispatched_task_ids.append(task_result.id)
+                    filenames_by_task_id[task_result.id] = mf.filename  # Store filename mapping
                     logger.info(
                         f"Tarea Celery {task_result.id} despachada para archivo: {mf.filename}"
                     )
@@ -927,6 +929,7 @@ async def refresh_course_files(
             "files_identified_for_processing": files_to_process_count,
             "tasks_dispatched": tasks_dispatched_count,
             "task_ids": dispatched_task_ids,
+            "filenames_by_task_id": filenames_by_task_id,
         }
 
     except HTTPException as http_exc:
@@ -964,6 +967,7 @@ async def get_task_status(task_id: str):
             - `task_id` (str): El ID de la tarea consultada.
             - `status` (str): El estado actual de la tarea (ej. "PENDING", "STARTED",
                               "SUCCESS", "FAILURE", "RETRY", "REVOKED").
+            - `filename` (str): El nombre del archivo siendo procesado (si está disponible).
             - `result` (Any): El resultado de la tarea.
                 - Si `status` es "SUCCESS", este es el valor de retorno de la función de la tarea.
                 - Si `status` es "FAILURE", este es la representación string de la excepción.
@@ -979,18 +983,39 @@ async def get_task_status(task_id: str):
         "status": task_result.status,
         "result": None,
         "traceback": None,
+        "filename": None,
     }
 
+    # Intentar extraer el nombre del archivo de los argumentos de la tarea o del resultado
+    try:
+        if hasattr(task_result, 'args') and task_result.args:
+            # Los argumentos están en orden: course_id, course_name_for_pgvector, moodle_file_info, ...
+            if len(task_result.args) >= 3 and isinstance(task_result.args[2], dict):
+                moodle_file_info = task_result.args[2]
+                status_response["filename"] = moodle_file_info.get("filename", "archivo_desconocido")
+    except Exception as e:
+        logger.warning(f"No se pudo extraer el nombre del archivo de la tarea {task_id}: {e}")
+
     if task_result.successful():
-        status_response["result"] = task_result.result
+        task_result_data = task_result.result
+        status_response["result"] = task_result_data
+        # Si el resultado contiene información del archivo, usar esa información
+        if isinstance(task_result_data, dict) and "filename" in task_result_data:
+            status_response["filename"] = task_result_data["filename"]
     elif task_result.failed():
-        status_response["result"] = str(
-            task_result.result
-        )  # Exception object as string
+        task_result_data = task_result.result
+        status_response["result"] = str(task_result_data)  # Exception object as string
         status_response["traceback"] = task_result.traceback
+        # Intentar extraer filename del resultado de error
+        if isinstance(task_result_data, dict) and "filename" in task_result_data:
+            status_response["filename"] = task_result_data["filename"]
     else:
         # For PENDING, STARTED, RETRY, REVOKED, result is often None or not the final outcome
         status_response["result"] = task_result.result if task_result.result else None
+
+    # Si no pudimos obtener el filename de ninguna manera, usar un placeholder
+    if not status_response["filename"]:
+        status_response["filename"] = f"Tarea {task_id[:8]}"
 
     logger.debug(f"Estado de la tarea {task_id}: {status_response}")
     return status_response

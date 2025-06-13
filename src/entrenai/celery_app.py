@@ -1,18 +1,15 @@
-import os
 from logging import getLogger
 
 from celery import Celery
+from src.entrenai.config.config import celery_config
 
 logger = getLogger(__name__)
-
-# Default Redis URL
-REDIS_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
 
 try:
     app = Celery(
         "src.entrenai",  # Changed to be more specific
-        broker=REDIS_URL,
-        backend=REDIS_URL,
+        broker=celery_config.broker_url,
+        backend=celery_config.result_backend,
         include=["src.entrenai.celery_tasks"],  # Point to the new simplified tasks module
     )
 
@@ -31,8 +28,8 @@ try:
 
     # Optional: Log Celery configuration
     logger.info(f"Celery app '{app.main}' initialized.")
-    logger.info(f"Broker: {app.conf.broker_url}")
-    logger.info(f"Backend: {app.conf.result_backend}")
+    logger.info(f"Broker: {celery_config.broker_url}")
+    logger.info(f"Backend: {celery_config.result_backend}")
 
 except Exception as e:
     logger.error(f"Error initializing Celery app: {e}", exc_info=True)

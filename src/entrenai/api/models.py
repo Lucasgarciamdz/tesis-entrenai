@@ -143,7 +143,7 @@ class FileProcessingRequest(BaseModel):
     course_id: int
     course_name_for_pgvector: str
     moodle_file_info: MoodleFile # Reusing the existing MoodleFile model
-    download_dir_str: str # This will be a relative path within the Fahapi container's /app/data
+    download_dir_str: str # This will be a relative path within the Fastapi container's /app/data
     ai_provider_config: Dict[str, Any]
     pgvector_config_dict: Dict[str, Any] # Serialized PgvectorConfig
     moodle_config_dict: Dict[str, Any]   # Serialized MoodleConfig

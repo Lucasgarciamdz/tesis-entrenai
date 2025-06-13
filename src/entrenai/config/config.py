@@ -265,17 +265,35 @@ class N8NConfig(BaseConfig):
             logging.warning("Advertencia: N8N_URL no está configurado en el entorno.")
 
 
+# Valores constantes para Redis
+_REDIS_HOST_LOCAL: str = "localhost"
+_REDIS_PORT: int = 6379
+_REDIS_HOST_DOCKER: str = "redis"
+
+
+def _get_default_redis_host():
+    app_env = os.getenv("APP_ENV", "local").lower()
+    if app_env == "docker":
+        return _REDIS_HOST_DOCKER
+    return _REDIS_HOST_LOCAL
+
+
+def _get_default_redis_url():
+    host = _get_default_redis_host()
+    return f"redis://{host}:{_REDIS_PORT}/0"
+
+
 class CeleryConfig(BaseConfig):
     """Celery specific configurations."""
 
     broker_url: str = Field(
         default_factory=lambda: os.getenv(
-            "CELERY_BROKER_URL", "redis://localhost:6379/0"
+            "CELERY_BROKER_URL", _get_default_redis_url()
         )
     )
     result_backend: str = Field(
         default_factory=lambda: os.getenv(
-            "CELERY_RESULT_BACKEND", "redis://localhost:6379/0"
+            "CELERY_RESULT_BACKEND", _get_default_redis_url()
         )
     )
     # Consider adding other Celery settings if needed, e.g., task visibility timeout

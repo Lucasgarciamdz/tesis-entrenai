@@ -95,9 +95,9 @@ async def process_file_endpoint(request: FileProcessingRequest):
         # 6. Instantiate EmbeddingManager
         embedding_manager = EmbeddingManager(ollama_wrapper=ai_client) # Assuming ollama_wrapper can be any AI client
 
-        # 7. Determine absolute download path using BaseConfig.data_dir from Fahapi app
+        # 7. Determine absolute download path using BaseConfig.data_dir from Fastapi app
         # request.download_dir_str is relative to DATA_DIR
-        # DATA_DIR for Fahapi app will be /app/data as configured in its Dockerfile and docker-compose
+        # DATA_DIR for Fastapi app will be /app/data as configured in its Dockerfile and docker-compose
         download_dir_path = Path(b_config.data_dir) / request.download_dir_str
 
         logger.info(f"API Endpoint - Creating download directory at: {download_dir_path}")

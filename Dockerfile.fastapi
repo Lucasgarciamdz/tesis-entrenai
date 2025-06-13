@@ -17,8 +17,15 @@ COPY requirements.txt .
 # Install Python dependencies using uv, with cache mount for speed
 RUN --mount=type=cache,target=/root/.cache/uv     uv pip install --no-cache-dir -r requirements.txt
 
-# Install system dependencies required for file processing
-RUN apt-get update     && apt-get install -y --no-install-recommends          poppler-utils          tesseract-ocr          tesseract-ocr-eng          tesseract-ocr-spa     && apt-get clean     && rm -rf /var/lib/apt/lists/*
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      poppler-utils \
+      tesseract-ocr \
+      tesseract-ocr-eng \
+      tesseract-ocr-spa \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
 
 # Copy the source code
 COPY ./src ./src
@@ -46,7 +53,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # Create data directories and set ownership before switching to appuser
 # These directories are crucial for application functionality (e.g., downloads, markdown files)
-RUN mkdir -p /app/data/downloads &&     mkdir -p /app/data/markdown_files &&     chown -R ${APP_USER}:${APP_USER} /app/data
+RUN mkdir -p /app/data/downloads &&     mkdir -p /app/data/markdown_files &&     chown -R ${APP_USER}:${APP_USER} /app
 
 # Switch to non-root user
 USER ${APP_USER}
