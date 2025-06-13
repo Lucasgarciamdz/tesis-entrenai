@@ -484,104 +484,83 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     function trackTaskProgress(currentCourseId, taskId, filename) {
-        // Cancelar cualquier polling previo para esta tarea
-        if (activeTasks[taskId]?.pollIntervalId) {
-            clearInterval(activeTasks[taskId].pollIntervalId);
-        }
-
+        // Inicializar la tarea sin polling
         activeTasks[taskId] = {
-            ...activeTasks[taskId],
-            pollIntervalId: null,
-            realStatus: 'PENDING',
             filename: filename,
-            pollCount: 0,
-            maxPolls: 20, // Máximo 20 checks (≈5 minutos)
-            isPolling: false // Flag para evitar requests concurrentes
+            realStatus: 'PROCESSING'
         };
-        
-        // Función simple de polling
-        const pollTask = async () => {
-            const task = activeTasks[taskId];
-            if (!task || task.isPolling) return; // Evitar concurrencia
-            
-            task.isPolling = true;
-            task.pollCount++;
-            
-            try {
-                // Timeout agresivo si superamos el límite
-                if (task.pollCount > task.maxPolls) {
-                    clearInterval(task.pollIntervalId);
-                    addOrUpdateFileInTable(taskId, filename, 'TIMEOUT', 0, 'Tiempo de espera agotado');
-                    delete activeTasks[taskId];
-                    isCurrentlyProcessing = false;
-                    processNextInQueue(currentCourseId);
-                    return;
-                }
 
+        // Mostrar estado de procesamiento inicial
+        addOrUpdateFileInTable(taskId, filename, 'PROCESSING', 25);
+
+        // Primera consulta después de 30 segundos
+        setTimeout(async () => {
+            try {
                 const response = await fetch(`${API_BASE_URL}/task/${taskId}/status`);
                 const data = await response.json();
                 
                 if (response.ok) {
-                    task.realStatus = data.status;
                     const displayFilename = data.filename || filename;
                     
                     if (data.status === 'SUCCESS' || data.status === 'FAILURE') {
-                        // Tarea completada
-                        clearInterval(task.pollIntervalId);
-                        const progress = data.status === 'SUCCESS' ? 100 : 0;
-                        addOrUpdateFileInTable(taskId, displayFilename, data.status, progress, data.result);
-                        
-                        if (data.status === 'SUCCESS') {
-                            updateStatusManage(`Procesamiento de '${displayFilename}' completado.`, 'success');
-                            setTimeout(() => {
-                                addOrUpdateFileInTable(taskId, displayFilename, 'INDEXADO', 100, null, new Date().toLocaleString());
-                            }, 1000);
-                        } else {
-                            updateStatusManage(`Error al procesar '${displayFilename}': ${data.result || 'Error desconocido'}`, 'danger');
-                        }
-                        
-                        delete activeTasks[taskId];
-                        isCurrentlyProcessing = false;
-                        processNextInQueue(currentCourseId);
+                        handleTaskCompletion(taskId, displayFilename, data, currentCourseId);
                     } else {
-                        // Tarea en progreso - usar progreso simulado
-                        const simulatedProgress = Math.min(20 + (task.pollCount * 3), 90);
-                        addOrUpdateFileInTable(taskId, displayFilename, data.status, simulatedProgress);
+                        // Si aún está procesando, actualizar progreso y hacer una consulta final
+                        addOrUpdateFileInTable(taskId, displayFilename, 'PROCESSING', 50);
+                        
+                        // Consulta final después de 90 segundos
+                        setTimeout(async () => {
+                            try {
+                                const finalResponse = await fetch(`${API_BASE_URL}/task/${taskId}/status`);
+                                const finalData = await finalResponse.json();
+                                
+                                if (finalResponse.ok) {
+                                    const finalDisplayFilename = finalData.filename || filename;
+                                    handleTaskCompletion(taskId, finalDisplayFilename, finalData, currentCourseId);
+                                }
+                            } catch (error) {
+                                console.error(`Error en consulta final de tarea ${taskId}:`, error);
+                                handleTaskCompletion(taskId, filename, { status: 'FAILURE', result: 'Error de conexión' }, currentCourseId);
+                            }
+                        }, 60000); // 60 segundos más (total 90 segundos)
                     }
-                } else {
-                    console.warn(`Error consultando tarea ${taskId}: ${response.status}`);
                 }
             } catch (error) {
-                console.error(`Error de red consultando tarea ${taskId}:`, error);
-            } finally {
-                if (activeTasks[taskId]) {
-                    activeTasks[taskId].isPolling = false;
-                }
+                console.error(`Error consultando tarea ${taskId}:`, error);
+                handleTaskCompletion(taskId, filename, { status: 'FAILURE', result: 'Error de conexión' }, currentCourseId);
             }
-        };
+        }, 30000); // Primera consulta a los 30 segundos
+    }
 
-        // Iniciar polling cada 15 segundos (mucho menos agresivo)
-        task.pollIntervalId = setInterval(pollTask, 15000);
+    function handleTaskCompletion(taskId, displayFilename, data, currentCourseId) {
+        const progress = data.status === 'SUCCESS' ? 100 : 0;
+        addOrUpdateFileInTable(taskId, displayFilename, data.status, progress, data.result);
         
-        // Primera consulta inmediata
-        pollTask();
+        if (data.status === 'SUCCESS') {
+            updateStatusManage(`Procesamiento de '${displayFilename}' completado.`, 'success');
+            setTimeout(() => {
+                addOrUpdateFileInTable(taskId, displayFilename, 'INDEXADO', 100, null, new Date().toLocaleString());
+            }, 1000);
+        } else {
+            updateStatusManage(`Error al procesar '${displayFilename}': ${data.result || 'Error desconocido'}`, 'danger');
+        }
+        
+        delete activeTasks[taskId];
+        isCurrentlyProcessing = false;
+        processNextInQueue(currentCourseId);
     }
 
     function startProgressSimulation(taskId, filename) {
-        // Simplificado: no más animaciones complejas, solo una barra básica
+        // Simplificado: solo mostrar estado de procesamiento
         if (!activeTasks[taskId]) {
             activeTasks[taskId] = { 
-                pollIntervalId: null, 
                 realStatus: 'PROCESSING', 
-                filename: filename,
-                pollCount: 0,
-                maxPolls: 20,
-                isPolling: false
+                filename: filename
             };
         }
         
-        // Mostrar progreso inicial
-        addOrUpdateFileInTable(taskId, filename, 'PROCESSING', 10);
+        // Mostrar progreso fijo del 50%
+        addOrUpdateFileInTable(taskId, filename, 'PROCESSING', 50);
     }
 
     function processNextInQueue(currentCourseId) {

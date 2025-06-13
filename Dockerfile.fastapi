@@ -39,6 +39,17 @@ WORKDIR /app
 ENV APP_USER=appuser
 RUN groupadd -r ${APP_USER} && useradd --no-log-init -r -g ${APP_USER} ${APP_USER}
 
+# Install system dependencies
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      poppler-utils \
+      tesseract-ocr \
+      tesseract-ocr-eng \
+      tesseract-ocr-spa \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
+
 # Copy virtual environment from builder stage
 COPY --from=builder /opt/venv /opt/venv
 
@@ -64,4 +75,4 @@ EXPOSE 8000
 # Command to run the FastAPI application using Uvicorn
 # Using src.entrenai.api.main:app based on typical project structure
 # Listening on 0.0.0.0 to be accessible from outside the container
-CMD ["uvicorn", "src.entrenai.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "src.entrenai.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
