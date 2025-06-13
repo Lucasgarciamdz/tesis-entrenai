@@ -17,6 +17,15 @@ def postprocess_markdown_content(markdown: str) -> str:
     Returns:
         Markdown limpio y bien formateado.
     """
+    # Validar que markdown sea un string válido
+    if not isinstance(markdown, str):
+        logger.warning(f"postprocess_markdown_content recibió un valor no-string: {type(markdown)}")
+        return ""
+    
+    if not markdown.strip():
+        logger.warning("postprocess_markdown_content recibió un string vacío")
+        return ""
+    
     # Remover etiquetas <think> que puedan haber sido generadas
     cleaned_markdown = re.sub(r"<think>.*?</think>", "", markdown, flags=re.DOTALL)
 

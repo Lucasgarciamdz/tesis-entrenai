@@ -1,6 +1,6 @@
 from pathlib import Path
 from typing import List, Optional, Dict
-
+import time
 from google import genai
 from google.genai import types
 
@@ -17,6 +17,8 @@ logger = get_logger(__name__)
 # Common error messages as constants
 CLIENT_NOT_INITIALIZED = "Cliente Gemini no inicializado."
 API_KEY_NOT_CONFIGURED = "API Key de Gemini no configurada."
+MAX_RETRIES = 3
+RETRY_DELAY = 2  # segundos
 
 
 class GeminiWrapperError(Exception):
@@ -64,6 +66,38 @@ class GeminiWrapper:
                 },
             ]
         return None  # Usar configuración predeterminada de Gemini
+
+    def _handle_gemini_response(self, response, retry_count=0) -> str:
+        """Maneja la respuesta de Gemini y realiza reintentos si es necesario."""
+        try:
+            if not response:
+                raise GeminiWrapperError("Respuesta vacía de Gemini")
+            
+            if not hasattr(response, 'text'):
+                if retry_count < MAX_RETRIES:
+                    logger.warning(f"Respuesta sin atributo 'text', reintentando ({retry_count + 1}/{MAX_RETRIES})...")
+                    time.sleep(RETRY_DELAY)
+                    return None
+                else:
+                    raise GeminiWrapperError("La respuesta no contiene el atributo 'text' después de reintentos")
+
+            if not response.text:
+                if retry_count < MAX_RETRIES:
+                    logger.warning(f"Respuesta con texto vacío, reintentando ({retry_count + 1}/{MAX_RETRIES})...")
+                    time.sleep(RETRY_DELAY)
+                    return None
+                else:
+                    raise GeminiWrapperError("La respuesta contiene texto vacío después de reintentos")
+
+            return response.text
+
+        except Exception as e:
+            if retry_count < MAX_RETRIES:
+                logger.warning(f"Error procesando respuesta, reintentando ({retry_count + 1}/{MAX_RETRIES}): {e}")
+                time.sleep(RETRY_DELAY)
+                return None
+            else:
+                raise GeminiWrapperError(f"Error procesando respuesta después de reintentos: {e}")
 
     def generate_embedding(self, text: str, model: Optional[str] = None) -> List[float]:
         """Genera un embedding vectorial para un texto."""
@@ -135,27 +169,38 @@ class GeminiWrapper:
                 system_instruction=system_instruction,
             )
 
-            # Enviar mensaje y obtener respuesta
-            response = self.client.models.generate_content(
-                model=model_to_use, contents=contents, config=generation_config
-            )
+            # Implementar reintentos
+            for retry in range(MAX_RETRIES + 1):
+                try:
+                    # Enviar mensaje y obtener respuesta
+                    response = self.client.models.generate_content(
+                        model=model_to_use, contents=contents, config=generation_config
+                    )
 
-            # Procesar respuesta
-            if stream:
-                # Implementar manejo de streaming en versiones futuras
-                logger.warning(
-                    "El streaming no está completamente implementado. "
-                    "Devolviendo respuesta completa."
-                )
+                    # Procesar respuesta
+                    if stream:
+                        logger.warning(
+                            "El streaming no está completamente implementado. "
+                            "Devolviendo respuesta completa."
+                        )
 
-            # Extraer contenido de la respuesta
-            response_content = response.text
+                    # Manejar la respuesta con reintentos
+                    response_content = self._handle_gemini_response(response, retry)
+                    if response_content is not None:
+                        return response_content
 
-            if not response_content:
-                logger.warning("La completación de chat devolvió contenido vacío.")
-                response_content = ""
+                    if retry == MAX_RETRIES:
+                        raise GeminiWrapperError("No se pudo obtener una respuesta válida después de reintentos")
 
-            return response_content
+                except Exception as e:
+                    if retry < MAX_RETRIES:
+                        logger.warning(f"Error en intento {retry + 1}, reintentando: {e}")
+                        time.sleep(RETRY_DELAY)
+                        continue
+                    raise
+
+            raise GeminiWrapperError("No se pudo obtener una respuesta válida después de reintentos")
+
         except Exception as e:
             logger.error(
                 f"Error generando completación de chat con modelo '{model_to_use}': {e}"
@@ -250,26 +295,38 @@ class GeminiWrapper:
                 safety_settings=self._get_safety_settings()
             )
 
-            # Enviar mensaje como entrada directa
-            response = self.client.models.generate_content(
-                model=model_to_use, contents=user_prompt, config=generation_config
-            )
+            # Implementar reintentos
+            for retry in range(MAX_RETRIES + 1):
+                try:
+                    # Enviar mensaje y obtener respuesta
+                    response = self.client.models.generate_content(
+                        model=model_to_use, contents=user_prompt, config=generation_config
+                    )
 
-            # Extraer y procesar el markdown
-            markdown_content = response.text
+                    # Manejar la respuesta con reintentos
+                    markdown_content = self._handle_gemini_response(response, retry)
+                    if markdown_content is not None:
+                        # Procesar el resultado con postprocesamiento
+                        markdown_content = self._postprocess_markdown_content(markdown_content)
+                        
+                        # Guardar a archivo si se proporciona una ruta
+                        if save_path and markdown_content:
+                            self._save_markdown_to_file(markdown_content, save_path)
+                            
+                        return markdown_content
 
-            # Procesar el resultado con postprocesamiento
-            markdown_content = self._postprocess_markdown_content(markdown_content)
+                    if retry == MAX_RETRIES:
+                        raise GeminiWrapperError("No se pudo obtener una respuesta válida después de reintentos")
 
-            if not markdown_content:
-                logger.warning("El formateo a Markdown devolvió contenido vacío.")
-                markdown_content = ""
+                except Exception as e:
+                    if retry < MAX_RETRIES:
+                        logger.warning(f"Error en intento {retry + 1}, reintentando: {e}")
+                        time.sleep(RETRY_DELAY)
+                        continue
+                    raise
 
-            # Guardar a archivo si se proporciona una ruta
-            if save_path and markdown_content:
-                self._save_markdown_to_file(markdown_content, save_path)
+            raise GeminiWrapperError("No se pudo obtener una respuesta válida después de reintentos")
 
-            return markdown_content
         except Exception as e:
             logger.error(
                 f"Error formateando texto a Markdown con modelo '{model_to_use}': {e}"

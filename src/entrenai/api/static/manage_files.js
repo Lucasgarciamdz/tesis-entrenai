@@ -484,206 +484,104 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     function trackTaskProgress(currentCourseId, taskId, filename) {
-        if (activeTasks[taskId] && activeTasks[taskId].pollIntervalId) {
+        // Cancelar cualquier polling previo para esta tarea
+        if (activeTasks[taskId]?.pollIntervalId) {
             clearInterval(activeTasks[taskId].pollIntervalId);
         }
 
         activeTasks[taskId] = {
-            ...activeTasks[taskId], // Conservar simulación si ya existe
+            ...activeTasks[taskId],
             pollIntervalId: null,
-            realStatus: activeTasks[taskId]?.realStatus || 'PENDING', // Mantener estado si ya existe
-            filename: filename, // Guardar filename para re-uso
-            lastPollTime: 0, // Para evitar múltiples requests concurrentes
-            isPolling: false, // Flag para evitar requests concurrentes
-            pollAttempts: 0, // Contador de intentos para implementar backoff
-            maxPollAttempts: 50, // Máximo 50 intentos (≈8 minutos con backoff)
+            realStatus: 'PENDING',
+            filename: filename,
+            pollCount: 0,
+            maxPolls: 20, // Máximo 20 checks (≈5 minutos)
+            isPolling: false // Flag para evitar requests concurrentes
         };
         
-        // Función para realizar el polling con backoff exponencial
+        // Función simple de polling
         const pollTask = async () => {
-            if (!activeTasks[taskId]) {
-                return; // Tarea eliminada mientras se ejecutaba
-            }
-
-            // Evitar múltiples requests concurrentes
-            if (activeTasks[taskId].isPolling) {
-                return;
-            }
-
-            // No hacer polling si la página no está visible (optimización de recursos)
-            if (!isPageVisible) {
-                return;
-            }
-
-            // Verificar límite de intentos
-            if (activeTasks[taskId].pollAttempts >= activeTasks[taskId].maxPollAttempts) {
-                logger.warning(`Límite de intentos alcanzado para tarea ${taskId}`);
-                if (activeTasks[taskId].pollIntervalId) {
-                    clearInterval(activeTasks[taskId].pollIntervalId);
-                }
-                addOrUpdateFileInTable(taskId, filename, 'TIMEOUT', activeTasks[taskId]?.simulatedProgress || 0, 'Tiempo de espera agotado');
-                delete activeTasks[taskId];
-                isCurrentlyProcessing = false;
-                processNextInQueue(currentCourseId);
-                return;
-            }
-
-            activeTasks[taskId].isPolling = true;
-            activeTasks[taskId].pollAttempts++;
+            const task = activeTasks[taskId];
+            if (!task || task.isPolling) return; // Evitar concurrencia
+            
+            task.isPolling = true;
+            task.pollCount++;
             
             try {
+                // Timeout agresivo si superamos el límite
+                if (task.pollCount > task.maxPolls) {
+                    clearInterval(task.pollIntervalId);
+                    addOrUpdateFileInTable(taskId, filename, 'TIMEOUT', 0, 'Tiempo de espera agotado');
+                    delete activeTasks[taskId];
+                    isCurrentlyProcessing = false;
+                    processNextInQueue(currentCourseId);
+                    return;
+                }
+
                 const response = await fetch(`${API_BASE_URL}/task/${taskId}/status`);
-                let taskData;
+                const data = await response.json();
                 
-                try {
-                    taskData = await response.json();
-                } catch (e) {
-                    console.warn(`Respuesta no JSON para tarea ${taskId} (HTTP ${response.status}).`, e);
-                    if (activeTasks[taskId]) {
-                        activeTasks[taskId].realStatus = 'ERROR_CHECK';
-                        activeTasks[taskId].isPolling = false;
-                        addOrUpdateFileInTable(taskId, filename, 'ERROR_CHECK', activeTasks[taskId]?.simulatedProgress || 0, `Respuesta inesperada (HTTP ${response.status})`);
-                    }
-                    return;
-                }
-
-                if (!response.ok) {
-                    const errorDetail = taskData?.detail || `Error HTTP ${response.status}`;
-                    console.warn(`No se pudo obtener estado de tarea ${taskId} (${errorDetail}).`);
-                    if (activeTasks[taskId]) {
-                        activeTasks[taskId].realStatus = 'ERROR_CHECK';
-                        activeTasks[taskId].isPolling = false;
-                        addOrUpdateFileInTable(taskId, filename, 'ERROR_CHECK', activeTasks[taskId]?.simulatedProgress || 0, errorDetail);
-                    }
-                    return;
-                }
-                
-                if (activeTasks[taskId]) {
-                    activeTasks[taskId].realStatus = taskData.status;
-                    activeTasks[taskId].isPolling = false;
+                if (response.ok) {
+                    task.realStatus = data.status;
+                    const displayFilename = data.filename || filename;
                     
-                    // Usar filename del resultado si está disponible
-                    const displayFilename = taskData.filename || filename;
-                    let displayProgress = activeTasks[taskId]?.simulatedProgress || 0;
-
-                    if (taskData.status === 'SUCCESS' || taskData.status === 'FAILURE') {
-                        // Limpiar intervalos y animaciones
-                        if (activeTasks[taskId]?.animationFrameId) {
-                            cancelAnimationFrame(activeTasks[taskId].animationFrameId);
-                        }
-                        if (activeTasks[taskId]?.pollIntervalId) {
-                            clearInterval(activeTasks[taskId].pollIntervalId);
-                        }
+                    if (data.status === 'SUCCESS' || data.status === 'FAILURE') {
+                        // Tarea completada
+                        clearInterval(task.pollIntervalId);
+                        const progress = data.status === 'SUCCESS' ? 100 : 0;
+                        addOrUpdateFileInTable(taskId, displayFilename, data.status, progress, data.result);
                         
-                        displayProgress = (taskData.status === 'SUCCESS') ? 100 : 0;
-                        addOrUpdateFileInTable(taskId, displayFilename, taskData.status, displayProgress, taskData.result);
-                        
-                        if (taskData.status === 'SUCCESS') {
+                        if (data.status === 'SUCCESS') {
                             updateStatusManage(`Procesamiento de '${displayFilename}' completado.`, 'success');
-                            const indexedFileRow = filesTableBody.querySelector(`tr[data-task-id="${taskId}"]`);
-                            if(indexedFileRow) {
-                               const modDate = indexedFileRow.cells[3].textContent !== 'N/A' ? indexedFileRow.cells[3].textContent : new Date().toLocaleString();
-                               addOrUpdateFileInTable(taskId, displayFilename, 'INDEXADO', 100, null, modDate);
-                            }
+                            setTimeout(() => {
+                                addOrUpdateFileInTable(taskId, displayFilename, 'INDEXADO', 100, null, new Date().toLocaleString());
+                            }, 1000);
                         } else {
-                            updateStatusManage(`Error al procesar '${displayFilename}': ${taskData.result || 'Causa desconocida'}`, 'danger');
+                            updateStatusManage(`Error al procesar '${displayFilename}': ${data.result || 'Error desconocido'}`, 'danger');
                         }
                         
-                        delete activeTasks[taskId]; 
+                        delete activeTasks[taskId];
                         isCurrentlyProcessing = false;
                         processNextInQueue(currentCourseId);
                     } else {
-                        // Tarea aún en proceso, actualizar con progreso simulado
-                        addOrUpdateFileInTable(taskId, displayFilename, taskData.status, displayProgress, taskData.result);
+                        // Tarea en progreso - usar progreso simulado
+                        const simulatedProgress = Math.min(20 + (task.pollCount * 3), 90);
+                        addOrUpdateFileInTable(taskId, displayFilename, data.status, simulatedProgress);
                     }
+                } else {
+                    console.warn(`Error consultando tarea ${taskId}: ${response.status}`);
                 }
-            } catch (networkError) { 
-                console.error(`Error de red al rastrear tarea ${taskId}:`, networkError);
+            } catch (error) {
+                console.error(`Error de red consultando tarea ${taskId}:`, error);
+            } finally {
                 if (activeTasks[taskId]) {
-                    activeTasks[taskId].realStatus = 'ERROR_NETWORK';
                     activeTasks[taskId].isPolling = false;
-                    addOrUpdateFileInTable(taskId, filename, 'ERROR_NETWORK', activeTasks[taskId]?.simulatedProgress || 0, 'Error de conexión');
                 }
             }
         };
 
-        // Calcular intervalo de polling con backoff exponencial
-        const getPollingInterval = (attempts) => {
-            const baseInterval = 8000; // 8 segundos base
-            const maxInterval = 30000; // Máximo 30 segundos
-            const interval = Math.min(baseInterval * Math.pow(1.5, Math.floor(attempts / 5)), maxInterval);
-            return interval;
-        };
-
-        // Función para actualizar el intervalo de polling
-        const updatePollingInterval = () => {
-            if (activeTasks[taskId] && activeTasks[taskId].pollIntervalId) {
-                clearInterval(activeTasks[taskId].pollIntervalId);
-            }
-            
-            if (activeTasks[taskId]) {
-                const interval = getPollingInterval(activeTasks[taskId].pollAttempts);
-                activeTasks[taskId].pollIntervalId = setInterval(pollTask, interval);
-            }
-        };
-
-        // Iniciar polling inmediatamente, luego con intervalo
-        pollTask().then(() => {
-            updatePollingInterval();
-        });
+        // Iniciar polling cada 15 segundos (mucho menos agresivo)
+        task.pollIntervalId = setInterval(pollTask, 15000);
+        
+        // Primera consulta inmediata
+        pollTask();
     }
 
     function startProgressSimulation(taskId, filename) {
-        if (!activeTasks[taskId]) { // Debería existir por trackTaskProgress
-             activeTasks[taskId] = { pollIntervalId: null, animationFrameId: null, simulatedProgress: 0, realStatus: 'PROCESSING', filename };
+        // Simplificado: no más animaciones complejas, solo una barra básica
+        if (!activeTasks[taskId]) {
+            activeTasks[taskId] = { 
+                pollIntervalId: null, 
+                realStatus: 'PROCESSING', 
+                filename: filename,
+                pollCount: 0,
+                maxPolls: 20,
+                isPolling: false
+            };
         }
-        activeTasks[taskId].simulatedProgress = 0; // Reiniciar simulación
-        activeTasks[taskId].realStatus = 'PROCESSING'; // Asegurar que el estado es de procesamiento
-
-        let startTime = null;
-        const durationUntil90Percent = 30000; // 30 segundos para llegar al 90%
-        const durationUntil99Percent = 60000; // 60 segundos adicionales para llegar al 99% (total 90s)
-        const targetSlowDownStart = 85; // Empezar a ir más lento a partir del 85%
-        const absoluteMaxSimulated = 95; // Máximo simulado al 95% para ser más conservador
-
-        function animate(timestamp) {
-            if (!activeTasks[taskId] || activeTasks[taskId].realStatus === 'SUCCESS' || activeTasks[taskId].realStatus === 'FAILURE') {
-                if(activeTasks[taskId] && activeTasks[taskId].animationFrameId) {
-                    cancelAnimationFrame(activeTasks[taskId].animationFrameId);
-                    activeTasks[taskId].animationFrameId = null;
-                }
-                return;
-            }
-
-            if (!startTime) startTime = timestamp;
-            const elapsed = timestamp - startTime;
-            let currentSimulatedProgress;
-
-            if (activeTasks[taskId].simulatedProgress < targetSlowDownStart) {
-                // Fase rápida inicial
-                const progressRatio = Math.min(elapsed / durationUntil90Percent, 1);
-                currentSimulatedProgress = Math.floor(progressRatio * targetSlowDownStart);
-            } else {
-                // Fase lenta final
-                const elapsedInSlowPhase = Math.max(0, elapsed - durationUntil90Percent);
-                const progressInSlowPhaseRatio = Math.min(elapsedInSlowPhase / durationUntil99Percent, 1);
-                currentSimulatedProgress = targetSlowDownStart + Math.floor(progressInSlowPhaseRatio * (absoluteMaxSimulated - targetSlowDownStart));
-            }
-            
-            activeTasks[taskId].simulatedProgress = Math.min(currentSimulatedProgress, absoluteMaxSimulated);
-            addOrUpdateFileInTable(taskId, filename, activeTasks[taskId].realStatus, activeTasks[taskId].simulatedProgress);
-
-            if (activeTasks[taskId].simulatedProgress < absoluteMaxSimulated && 
-                (activeTasks[taskId].realStatus === 'PROCESSING' || activeTasks[taskId].realStatus === 'PENDING' || activeTasks[taskId].realStatus === 'STARTED') ) {
-                activeTasks[taskId].animationFrameId = requestAnimationFrame(animate);
-            } else if(activeTasks[taskId]) {
-                activeTasks[taskId].animationFrameId = null;
-            }
-        }
-        if (activeTasks[taskId].animationFrameId) { // Cancelar animación previa si existe
-            cancelAnimationFrame(activeTasks[taskId].animationFrameId);
-        }
-        activeTasks[taskId].animationFrameId = requestAnimationFrame(animate);
+        
+        // Mostrar progreso inicial
+        addOrUpdateFileInTable(taskId, filename, 'PROCESSING', 10);
     }
 
     function processNextInQueue(currentCourseId) {
@@ -714,38 +612,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // --- Gestión de visibilidad de página para optimizar polling ---
+    // --- Gestión de visibilidad de página (simplificada) ---
     document.addEventListener('visibilitychange', () => {
         isPageVisible = !document.hidden;
-        if (isPageVisible) {
-            console.log('Página visible: reactivando polling');
-            // Reactivar polling para todas las tareas activas
-            Object.keys(activeTasks).forEach(taskId => {
-                if (activeTasks[taskId] && !activeTasks[taskId].pollIntervalId) {
-                    // Reiniciar polling para tareas que no están terminadas
-                    const task = activeTasks[taskId];
-                    if (task.realStatus !== 'SUCCESS' && task.realStatus !== 'FAILURE') {
-                        const interval = 8000 * Math.pow(1.5, Math.floor(task.pollAttempts / 5));
-                        task.pollIntervalId = setInterval(() => {
-                            // Lógica simplificada para polling cuando se reactiva
-                            fetch(`${API_BASE_URL}/task/${taskId}/status`)
-                                .then(response => response.json())
-                                .then(data => {
-                                    if (data.status === 'SUCCESS' || data.status === 'FAILURE') {
-                                        clearInterval(task.pollIntervalId);
-                                        delete activeTasks[taskId];
-                                        isCurrentlyProcessing = false;
-                                        processNextInQueue(courseId);
-                                    }
-                                })
-                                .catch(error => console.error('Error en polling reactivado:', error));
-                        }, Math.min(interval, 30000));
-                    }
-                }
-            });
-        } else {
-            console.log('Página oculta: pausando polling');
-        }
+        console.log(isPageVisible ? 'Página visible' : 'Página oculta');
     });
 
     // --- Start ---
