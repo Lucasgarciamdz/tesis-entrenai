@@ -35,7 +35,7 @@ from src.entrenai.core.ai.ollama_wrapper import (
 from src.entrenai.core.clients.moodle_client import MoodleClient, MoodleAPIError
 from src.entrenai.core.clients.n8n_client import N8NClient
 from src.entrenai.core.db import PgvectorWrapper, PgvectorWrapperError  # Updated import
-from src.entrenai.core.tasks import process_moodle_file_task  # Import Celery task
+from src.entrenai.celery_tasks import forward_file_processing_to_api as process_moodle_file_task # Import Celery task for forwarding to API
 
 logger = get_logger(__name__)
 
