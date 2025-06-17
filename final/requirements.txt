@@ -1,17 +1,26 @@
-# ---- General ----
-python-dotenv
-loguru
+# EntrenAI - Dependencias simplificadas
 
-# ---- Api ----
-fastapi
-uvicorn
+# Framework web
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
 
-# ---- Moodle ----
-requests
+# Cliente HTTP async
+httpx==0.25.2
 
-# ---- Postgres ----
+# Base de datos y vectores
+asyncpg==0.29.0
+pgvector==0.2.4
 
-# ---- Ollama ----
+# Configuración
+pydantic==2.5.0
+pydantic-settings==2.1.0
 
-# ---- N8N ----
+# Archivos
+python-multipart==0.0.6
 
+# IA y embeddings (opcional según proveedor)
+# ollama  # Si usas Ollama local
+# google-generativeai  # Si usas Gemini
+
+# Utilidades
+python-dotenv==1.0.0

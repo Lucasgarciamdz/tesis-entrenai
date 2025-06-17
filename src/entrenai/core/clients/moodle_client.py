@@ -4,14 +4,14 @@ from urllib.parse import urljoin
 
 import requests
 
-from src.entrenai.api.models import (
+from entrenai.api.models import (
     MoodleCourse,
     MoodleSection,
     MoodleModule,
     MoodleFile,
 )
-from src.entrenai.config import MoodleConfig
-from src.entrenai.config.logger import get_logger
+from entrenai.config import MoodleConfig
+from entrenai.config.logger import get_logger
 
 logger = get_logger(__name__)
 

@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      - POSTGRES_DB=entrenai
+      - POSTGRES_USER=entrenai
+      - POSTGRES_PASSWORD=entrenai123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://entrenai:entrenai123@postgres:5432/entrenai
+      - MOODLE_URL=${MOODLE_URL}
+      - MOODLE_TOKEN=${MOODLE_TOKEN}
+      - N8N_URL=${N8N_URL}
+      - N8N_API_KEY=${N8N_API_KEY}
+    depends_on:
+      - postgres
+    volumes:
+      - ./data:/app/data
+
+volumes:
+  postgres_data:

@@ -1,55 +1,78 @@
-services:
-  # --- PostgreSQL Database for Moodle ---
-  moodle_db:
-    image: postgres:17.5
-    container_name: entrenai_moodle_db
-    ports:
-      - "${MOODLE_DB_HOST_PORT}:5432"
-    volumes:
-      - moodle_db_volume:/var/lib/postgresql/data
-    environment:
-      POSTGRES_USER: ${MOODLE_DB_USER}
-      POSTGRES_PASSWORD: ${MOODLE_DB_PASSWORD}
-      POSTGRES_DB: ${MOODLE_DB_NAME}
-      POSTGRES_HOST_AUTH_METHOD: trust
-    networks:
-      - entrenai_network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${MOODLE_DB_USER} -d $${MOODLE_DB_NAME}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+version: '3.8'
 
-  # --- Moodle Application ---
-  moodle:
-    image: bitnami/moodle:4.5.4
-    container_name: entrenai_moodle_app
-    ports:
-      - "${MOODLE_HOST_PORT}:8080"
-      - "${MOODLE_HOST_SSL_PORT}:8443"
-    volumes:
-      - moodle_app_volume:/bitnami/moodle
-      - moodle_data_volume:/bitnami/moodledata
+services:
+  # PostgreSQL con pgvector
+  postgres:
+    image: pgvector/pgvector:pg16
     environment:
-      MOODLE_DATABASE_TYPE: pgsql
-      MOODLE_DATABASE_HOST: moodle_db
-      MOODLE_DATABASE_PORT_NUMBER: 5432
-      MOODLE_DATABASE_USER: ${MOODLE_DB_USER}
-      MOODLE_DATABASE_PASSWORD: ${MOODLE_DB_PASSWORD}
-      MOODLE_DATABASE_NAME: ${MOODLE_DB_NAME}
-      MOODLE_USERNAME: ${MOODLE_USERNAME}
-      MOODLE_PASSWORD: ${MOODLE_PASSWORD}
+      POSTGRES_DB: entrenai
+      POSTGRES_USER: entrenai
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U entrenai -d entrenai"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # Ollama (opcional)
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+
+  # N8N (opcional)
+  n8n:
+    image: n8nio/n8n:latest
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - WEBHOOK_URL=http://localhost:5678/
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+  # EntrenAI API
+  entrenai:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=entrenai
+      - DB_USER=entrenai
+      - DB_PASSWORD=password
+      - REDIS_URL=redis://redis:6379
+      - OLLAMA_HOST=http://ollama:11434
+      - N8N_URL=http://n8n:5678
     depends_on:
-      moodle_db:
+      postgres:
         condition: service_healthy
-    networks:
-      - entrenai_network
+      redis:
+        condition: service_started
+    volumes:
+      - ./src:/app/src
+    command: uvicorn src.entrenai.api.main:app --host 0.0.0.0 --port 8000 --reload
 
 volumes:
-  moodle_db_volume:
-  moodle_app_volume:
-  moodle_data_volume:
-
-networks:
-  entrenai_network:
-    driver: bridge
+  postgres_data:
+  redis_data:
+  ollama_data:
+  n8n_data:

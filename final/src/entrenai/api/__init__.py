@@ -1,0 +1,1 @@
+"""API simplificada de EntrenAI."""

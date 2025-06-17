@@ -1,0 +1,1 @@
+"""EntrenAI - Simplificado y mejorado."""
