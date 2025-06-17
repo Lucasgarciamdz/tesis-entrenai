@@ -1,0 +1,17 @@
+# ---- General ----
+python-dotenv
+loguru
+
+# ---- Api ----
+fastapi
+uvicorn
+
+# ---- Moodle ----
+requests
+
+# ---- Postgres ----
+
+# ---- Ollama ----
+
+# ---- N8N ----
+
