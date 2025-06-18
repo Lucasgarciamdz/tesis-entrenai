@@ -16,6 +16,7 @@ from src.entrenai.core.services.pgvector_service import PgvectorService
 from src.entrenai.core.services.n8n_workflow_service import N8NWorkflowService  
 from src.entrenai.core.services.moodle_integration_service import MoodleIntegrationService
 from src.entrenai.core.services.course_setup_service import CourseSetupService
+from src.entrenai.core.services.moodle_file_discovery_service import MoodleFileDiscoveryService
 from src.entrenai.core.utils.course_utils import get_course_name_for_operations
 from src.entrenai.celery_app import app as celery_app  # Import Celery app instance
 
@@ -122,6 +123,10 @@ def get_course_setup_service(
     moodle_client: MoodleClient = Depends(get_moodle_client),
 ) -> CourseSetupService:
     return CourseSetupService(pgvector_service, n8n_service, moodle_service, moodle_client)
+
+
+def get_moodle_file_discovery_service(moodle_client: MoodleClient = Depends(get_moodle_client)) -> MoodleFileDiscoveryService:
+    return MoodleFileDiscoveryService(moodle_client)
 
 
 @router.get("/courses", response_model=List[MoodleCourse])
@@ -318,176 +323,81 @@ async def refresh_course_files(
     course_id: int,
     moodle: MoodleClient = Depends(get_moodle_client),
     pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper),
+    file_discovery: MoodleFileDiscoveryService = Depends(get_moodle_file_discovery_service),
 ):
     """
     Inicia el refresco y procesamiento asíncrono de archivos para un curso.
-
-    Esta operación identifica archivos nuevos o modificados en la carpeta designada
-    del curso en Moodle y despacha tareas Celery individuales para procesar cada archivo.
-    El procesamiento incluye la descarga, extracción de texto, formateo a Markdown,
-    generación de embeddings y almacenamiento en la base de datos vectorial (Pgvector).
-
-    La API responde inmediatamente con una lista de IDs de las tareas despachadas,
-    permitiendo al cliente rastrear el progreso de forma asíncrona usando el endpoint
-    `/api/v1/task/{task_id}/status`.
-
-    Respuesta:
-    - `message`: Mensaje indicando el inicio del proceso y el número de tareas despachadas.
-    - `course_id`: ID del curso.
-    - `files_identified_for_processing`: Número de archivos que se determinó necesitan procesamiento.
-    - `tasks_dispatched`: Número de tareas Celery efectivamente despachadas.
-    - `task_ids`: Lista de strings, donde cada string es el ID de una tarea Celery despachada.
+    
+    Descubre archivos en la carpeta designada de Moodle y despacha tareas Celery
+    para procesar cada archivo nuevo o modificado.
     """
-    logger.info(
-        f"Iniciando proceso de refresco de archivos para el curso ID: {course_id}"
-    )
-
-    # Obtener nombre del curso para Pgvector usando función helper
-    try:
-        course_name_for_pgvector = await get_course_name_for_operations(
-            course_id, moodle
-        )
-    except HTTPException as e:
-        if e.status_code == 404:
-            # Usar fallback si el curso no se encuentra
-            course_name_for_pgvector = f"Curso_{course_id}"
-            logger.warning(
-                f"No se pudo obtener el nombre para el curso ID {course_id}, usando fallback: '{course_name_for_pgvector}' para Pgvector."
-            )
-        else:
-            raise
-
-    target_section_name = moodle_config.course_folder_name
-    target_folder_name = "Documentos Entrenai"  # As defined in setup_ia_for_course
-
-    files_to_process_count = 0
-    tasks_dispatched_count = 0
-    dispatched_task_ids: List[str] = []  # To store IDs of dispatched tasks
-    filenames_by_task_id: Dict[str, str] = {}  # To store filename mapping for frontend
-    # Ruta que el API podría usar para crear el directorio en el host/API-environment
-    course_download_dir_on_api_host = (
-        Path(base_config.download_dir) / str(course_id)
-    ).resolve()
-
-    # Ruta que se pasará a la tarea Celery (relativa al WORKDIR del contenedor Celery, o absoluta dentro del contenedor)
-    # base_config.download_dir es 'data/downloads'
-    # Esto resultará en 'data/downloads/<course_id>'
-    download_dir_for_task_str = str(Path(base_config.download_dir) / str(course_id))
+    logger.info(f"Iniciando refresco de archivos para curso {course_id}")
 
     try:
-        # 1. Asegurar que existe la tabla de Pgvector antes de procesar archivos
-        vector_size = pgvector_config.default_vector_size  # Updated config usage
-        logger.info(
-            f"Asegurando tabla Pgvector para curso {course_id} ('{course_name_for_pgvector}') con tamaño de vector {vector_size}"
-        )
-        if not pgvector_db.ensure_table(
-            course_name_for_pgvector, vector_size
-        ):  # Updated method call
-            logger.error(
-                f"Falló al asegurar la tabla Pgvector para el curso {course_id} ('{course_name_for_pgvector}')"
-            )
+        # Obtener nombre del curso para Pgvector
+        try:
+            course_name_for_pgvector = await get_course_name_for_operations(course_id, moodle)
+        except HTTPException as e:
+            if e.status_code == 404:
+                course_name_for_pgvector = f"Curso_{course_id}"
+                logger.warning(f"Usando nombre fallback para curso {course_id}: '{course_name_for_pgvector}'")
+            else:
+                raise
+
+        # Asegurar tabla Pgvector
+        vector_size = pgvector_config.default_vector_size
+        logger.info(f"Asegurando tabla Pgvector para curso {course_id}")
+        if not pgvector_db.ensure_table(course_name_for_pgvector, vector_size):
             raise HTTPException(
                 status_code=500,
-                detail=f"Falló al asegurar la tabla Pgvector para el curso {course_id} ('{course_name_for_pgvector}')",
+                detail=f"Falló al asegurar tabla Pgvector para curso {course_id}"
             )
-        logger.info(
-            f"Tabla Pgvector '{pgvector_db.get_table_name(course_name_for_pgvector)}' asegurada."
+
+        # Descubrir archivos en carpeta de Moodle
+        target_section_name = moodle_config.course_folder_name
+        target_folder_name = "Documentos Entrenai"
+        
+        moodle_files = file_discovery.discover_course_files(
+            course_id, target_section_name, target_folder_name
         )
-
-        # 2. Obtener todos los contenidos del curso para encontrar la sección y módulos
-        all_course_contents = moodle._make_request(
-            "core_course_get_contents", payload_params={"courseid": course_id}
-        )
-        if not isinstance(all_course_contents, list):
-            raise HTTPException(
-                status_code=500,
-                detail="No se pudieron obtener los contenidos del curso.",
-            )
-
-        # 3. Buscar la sección objetivo por nombre
-        found_section_id: Optional[int] = None
-        for section_data in all_course_contents:
-            if section_data.get("name") == target_section_name:
-                found_section_id = section_data.get("id")
-                break
-
-        if not found_section_id:
-            logger.error(
-                f"Sección objetivo '{target_section_name}' no encontrada en curso {course_id}."
-            )
-            raise HTTPException(
-                status_code=404,
-                detail=f"Sección de configuración '{target_section_name}' no encontrada.",
-            )
-        logger.info(
-            f"Sección '{target_section_name}' encontrada con ID: {found_section_id}."
-        )
-
-        # 4. Encontrar el módulo de carpeta en la sección
-        folder_module = moodle.get_course_module_by_name(
-            course_id, found_section_id, target_folder_name, "folder"
-        )
-        if not folder_module or not folder_module.id:
-            logger.error(
-                f"Carpeta '{target_folder_name}' no encontrada en curso {course_id}, sección {found_section_id}."
-            )
-            raise HTTPException(
-                status_code=404,
-                detail=f"Carpeta designada de Moodle '{target_folder_name}' no encontrada.",
-            )
-
-        folder_cmid = folder_module.id
-        logger.info(
-            f"Carpeta '{target_folder_name}' encontrada con cmid: {folder_cmid}."
-        )
-
-        # 5. Obtener los archivos de la carpeta
-        moodle_files = moodle.get_folder_files(folder_cmid=folder_cmid)
+        
         if not moodle_files:
-            logger.info(
-                f"No se encontraron archivos en la carpeta '{target_folder_name}' (cmid: {folder_cmid})."
-            )
+            logger.info(f"No se encontraron archivos en la carpeta de curso {course_id}")
             return {
-                "message": "No se encontraron archivos en la carpeta designada de Moodle para procesar.",
+                "message": "No se encontraron archivos para procesar.",
                 "course_id": course_id,
                 "files_identified_for_processing": 0,
                 "tasks_dispatched": 0,
+                "task_ids": [],
             }
 
-        logger.info(
-            f"Se encontraron {len(moodle_files)} archivos en la carpeta de Moodle. Verificando archivos nuevos/modificados..."
-        )
-        # Asegurar que el directorio de descarga del curso exista (creado por el API en su entorno)
-        course_download_dir_on_api_host.mkdir(
-            parents=True, exist_ok=True
-        )  # Ensure download dir for the course exists
+        # Procesar archivos y despachar tareas
+        files_to_process_count = 0
+        tasks_dispatched_count = 0
+        dispatched_task_ids: List[str] = []
+        filenames_by_task_id: Dict[str, str] = {}
+        download_dir_for_task_str = str(Path(base_config.download_dir) / str(course_id))
 
-        # 6. Loop through Moodle files and dispatch tasks
         for mf in moodle_files:
             if not mf.filename or not mf.fileurl or mf.timemodified is None:
-                logger.warning(
-                    f"Omitiendo archivo de Moodle con datos incompletos: {mf.model_dump_json(exclude_none=True)}"
-                )
+                logger.warning(f"Omitiendo archivo con datos incompletos: {mf.filename}")
                 continue
 
-            if pgvector_db.is_file_new_or_modified(
-                course_id, mf.filename, mf.timemodified
-            ):
+            # Verificar si archivo necesita procesamiento (sin hash aún)
+            if pgvector_db.is_file_new_or_modified(course_id, mf.filename, mf.timemodified):
                 files_to_process_count += 1
-                logger.info(
-                    f"Archivo '{mf.filename}' es nuevo o modificado. Despachando tarea Celery..."
-                )
+                logger.info(f"Despachando tarea para archivo: {mf.filename}")
 
-                # Prepare AI provider configuration
-                ai_provider_config_payload: Dict[str, Any] = {
+                # Preparar configuración AI
+                ai_provider_config_payload = {
                     "selected_provider": base_config.ai_provider
                 }
                 if base_config.ai_provider == "gemini":
                     ai_provider_config_payload["gemini"] = vars(gemini_config)
-                else:  # Default to ollama
+                else:
                     ai_provider_config_payload["ollama"] = vars(ollama_config)
 
-                # Dispatch Celery task
+                # Despachar tarea Celery
                 try:
                     task_result = process_moodle_file_task.delay(
                         course_id=course_id,
@@ -496,13 +406,11 @@ async def refresh_course_files(
                             "filename": mf.filename,
                             "filepath": mf.filepath,
                             "filesize": mf.filesize,
-                            "fileurl": str(
-                                mf.fileurl
-                            ),  # Explicitly convert HttpUrl to string
+                            "fileurl": str(mf.fileurl),
                             "timemodified": mf.timemodified,
                             "mimetype": mf.mimetype,
                         },
-                        download_dir_str=download_dir_for_task_str,  # <--- CAMBIO CLAVE AQUÍ
+                        download_dir_str=download_dir_for_task_str,
                         ai_provider_config=ai_provider_config_payload,
                         pgvector_config_dict=vars(pgvector_config),
                         moodle_config_dict=vars(moodle_config),
@@ -510,50 +418,19 @@ async def refresh_course_files(
                     )
                     tasks_dispatched_count += 1
                     dispatched_task_ids.append(task_result.id)
-                    filenames_by_task_id[task_result.id] = mf.filename  # Store filename mapping
-                    logger.info(
-                        f"Tarea Celery {task_result.id} despachada para archivo: {mf.filename}"
-                    )
+                    filenames_by_task_id[task_result.id] = mf.filename
+                    logger.info(f"Tarea {task_result.id} despachada para {mf.filename}")
                 except Exception as e_task:
-                    logger.error(
-                        f"Error al despachar tarea Celery para {mf.filename}: {e_task}"
-                    )
-                    # Potentially add to a list of failed dispatches if needed for response
-
+                    logger.error(f"Error despachando tarea para {mf.filename}: {e_task}")
             else:
-                logger.info(
-                    f"Archivo '{mf.filename}' no ha sido modificado. Omitiendo."
-                )
+                logger.info(f"Archivo '{mf.filename}' ya actualizado. Omitiendo.")
 
-        # 7. Cleanup (optional, as tasks handle individual file cleanup)
-        # The main course_download_dir might still be useful for tasks if they are slow to pick up
-        # Or if multiple tasks share it. Consider if this cleanup is still needed.
-        # For now, individual tasks clean up their own downloaded files.
-        # If the directory is meant to be cleaned only if empty:
-        try:
-            if course_download_dir_on_api_host.exists() and not any(
-                course_download_dir_on_api_host.iterdir()
-            ):
-                # This check might be problematic if tasks haven't run yet.
-                # Consider if this cleanup is still appropriate here.
-                # shutil.rmtree(course_download_dir_on_api_host)
-                # logger.info(
-                #     f"Directorio de descargas del curso vacío (aparentemente) eliminado: {course_download_dir_on_api_host}"
-                # )
-                logger.info(
-                    f"Revisión de directorio de descargas {course_download_dir_on_api_host} completada. Las tareas gestionarán los archivos individuales."
-                )
-        except Exception as e_rm:
-            logger.warning(
-                f"No se pudo realizar la limpieza del directorio de descargas del curso {course_download_dir_on_api_host}: {e_rm}"
-            )
-
-        # 8. Prepare and return response
         response_message = (
-            f"Refresco de archivos iniciado para el curso {course_id}. "
-            f"{tasks_dispatched_count} tareas despachadas para {files_to_process_count} archivos identificados para procesamiento."
+            f"Refresco iniciado para curso {course_id}. "
+            f"{tasks_dispatched_count} tareas despachadas para {files_to_process_count} archivos."
         )
         logger.info(response_message)
+        
         return {
             "message": response_message,
             "course_id": course_id,
@@ -563,23 +440,14 @@ async def refresh_course_files(
             "filenames_by_task_id": filenames_by_task_id,
         }
 
-    except HTTPException as http_exc:
-        logger.error(
-            f"HTTPException durante el inicio del refresco de archivos para curso {course_id}: {http_exc.detail}"
-        )
-        raise http_exc
+    except HTTPException:
+        raise
     except MoodleAPIError as e:
-        logger.error(
-            f"Error de API de Moodle durante el inicio del refresco de archivos para curso {course_id}: {e}"
-        )
-        raise HTTPException(status_code=502, detail=f"Error de API de Moodle: {str(e)}")
+        logger.error(f"Error API Moodle en curso {course_id}: {e}")
+        raise HTTPException(status_code=502, detail=f"Error API Moodle: {str(e)}")
     except Exception as e:
-        logger.exception(
-            f"Error inesperado durante el inicio del refresco de archivos para curso {course_id}: {e}"
-        )
-        raise HTTPException(
-            status_code=500, detail=f"Error interno del servidor: {str(e)}"
-        )
+        logger.exception(f"Error inesperado en curso {course_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
 
 
 @router.get("/task/{task_id}/status", name="get_task_status")

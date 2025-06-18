@@ -545,39 +545,59 @@ class PgvectorWrapper:
     def ensure_file_tracker_table(self):
         """
         Ensures the file_tracker table exists. If not, creates it.
-        Schema: course_id (INTEGER), file_identifier (TEXT), moodle_timemodified (BIGINT), processed_at (BIGINT)
+        Schema: course_id (INTEGER), file_identifier (TEXT), moodle_timemodified (BIGINT), 
+                content_hash (TEXT), processed_at (BIGINT)
         Primary Key: (course_id, file_identifier)
         """
         if not self.conn or not self.cursor:
             logger.error("No database connection. Cannot ensure file_tracker table.")
-            # Potentially raise an error or handle differently if this is critical at this stage
             return
 
         try:
             self.cursor.execute(
                 f"SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = '{self.FILE_TRACKER_TABLE_NAME}');"
             )
-            if self.cursor.fetchone()["exists"]:
-                logger.info(f"Table '{self.FILE_TRACKER_TABLE_NAME}' already exists.")
+            table_exists = self.cursor.fetchone()["exists"]
+            
+            if table_exists:
+                # Check if content_hash column exists
+                self.cursor.execute(
+                    f"""
+                    SELECT column_name FROM information_schema.columns 
+                    WHERE table_name = '{self.FILE_TRACKER_TABLE_NAME}' 
+                    AND column_name = 'content_hash';
+                    """
+                )
+                has_content_hash = bool(self.cursor.fetchone())
+                
+                if not has_content_hash:
+                    # Add content_hash column to existing table
+                    alter_sql = f"ALTER TABLE {self.FILE_TRACKER_TABLE_NAME} ADD COLUMN content_hash TEXT;"
+                    self.cursor.execute(alter_sql)
+                    self.conn.commit()
+                    logger.info(f"Added content_hash column to existing '{self.FILE_TRACKER_TABLE_NAME}' table.")
+                else:
+                    logger.info(f"Table '{self.FILE_TRACKER_TABLE_NAME}' already exists with content_hash column.")
                 return
 
+            # Create new table with content_hash column
             create_table_sql = f"""
             CREATE TABLE {self.FILE_TRACKER_TABLE_NAME} (
                 course_id INTEGER NOT NULL,
                 file_identifier TEXT NOT NULL,
                 moodle_timemodified BIGINT NOT NULL,
+                content_hash TEXT,
                 processed_at BIGINT NOT NULL,
                 PRIMARY KEY (course_id, file_identifier)
             );
             """
             self.cursor.execute(create_table_sql)
             self.conn.commit()
-            logger.info(f"Table '{self.FILE_TRACKER_TABLE_NAME}' created successfully.")
+            logger.info(f"Table '{self.FILE_TRACKER_TABLE_NAME}' created successfully with content_hash column.")
         except psycopg2.Error as e:
             logger.error(f"Error ensuring table '{self.FILE_TRACKER_TABLE_NAME}': {e}")
             if self.conn:
                 self.conn.rollback()
-            # Depending on recovery strategy, might raise an error or attempt retry
         except Exception as e:
             logger.error(
                 f"Unexpected error ensuring table '{self.FILE_TRACKER_TABLE_NAME}': {e}"
@@ -586,10 +606,12 @@ class PgvectorWrapper:
                 self.conn.rollback()
 
     def is_file_new_or_modified(
-        self, course_id: int, file_identifier: str, moodle_timemodified: int
+        self, course_id: int, file_identifier: str, moodle_timemodified: int, 
+        content_hash: Optional[str] = None
     ) -> bool:
         """
         Checks if the file is new or modified compared to the entry in file_tracker.
+        If content_hash is provided, also checks if the content has changed.
         Returns True if the file is new, modified, or if an error occurs (conservative).
         """
         if not self.conn or not self.cursor:
@@ -598,7 +620,7 @@ class PgvectorWrapper:
 
         try:
             query = f"""
-            SELECT moodle_timemodified
+            SELECT moodle_timemodified, content_hash
             FROM {self.FILE_TRACKER_TABLE_NAME}
             WHERE course_id = %s AND file_identifier = %s;
             """
@@ -612,11 +634,27 @@ class PgvectorWrapper:
                 return True  # File not found, so it's new
 
             stored_timemodified = result["moodle_timemodified"]
+            stored_content_hash = result.get("content_hash")
+
+            # Check if timemodified has changed
             if moodle_timemodified > stored_timemodified:
                 logger.info(
                     f"File '{file_identifier}' for course '{course_id}' is modified (new: {moodle_timemodified}, stored: {stored_timemodified})."
                 )
                 return True  # File is modified
+
+            # If content_hash is provided and stored, compare them
+            if content_hash and stored_content_hash:
+                if content_hash != stored_content_hash:
+                    logger.info(
+                        f"File '{file_identifier}' for course '{course_id}' has different content hash. Needs reprocessing."
+                    )
+                    return True  # Content has changed
+                else:
+                    logger.info(
+                        f"File '{file_identifier}' for course '{course_id}' has same content hash. Skipping reprocessing."
+                    )
+                    return False  # Content is identical
 
             logger.info(
                 f"File '{file_identifier}' for course '{course_id}' is up-to-date (timestamp: {moodle_timemodified})."
@@ -638,28 +676,29 @@ class PgvectorWrapper:
             return True  # Conservative approach
 
     def mark_file_as_processed(
-        self, course_id: int, file_identifier: str, moodle_timemodified: int
+        self, course_id: int, file_identifier: str, moodle_timemodified: int,
+        content_hash: Optional[str] = None
     ):
         """
         Marks the file as processed by inserting or updating its record in file_tracker.
         """
         if not self.conn or not self.cursor:
             logger.error("No database connection. Cannot mark file as processed.")
-            # Consider raising an error if this operation is critical and cannot be deferred
             return False
 
         processed_at_ts = int(time.time())
         try:
             upsert_sql = f"""
-            INSERT INTO {self.FILE_TRACKER_TABLE_NAME} (course_id, file_identifier, moodle_timemodified, processed_at)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO {self.FILE_TRACKER_TABLE_NAME} (course_id, file_identifier, moodle_timemodified, content_hash, processed_at)
+            VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT (course_id, file_identifier) DO UPDATE SET
                 moodle_timemodified = EXCLUDED.moodle_timemodified,
+                content_hash = EXCLUDED.content_hash,
                 processed_at = EXCLUDED.processed_at;
             """
             self.cursor.execute(
                 upsert_sql,
-                (course_id, file_identifier, moodle_timemodified, processed_at_ts),
+                (course_id, file_identifier, moodle_timemodified, content_hash, processed_at_ts),
             )
             self.conn.commit()
             logger.info(

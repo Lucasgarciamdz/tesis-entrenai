@@ -65,6 +65,14 @@ class BaseConfig(BaseModel):
         default_factory=lambda: os.getenv("AI_PROVIDER", "ollama").lower()
     )  # "ollama" o "gemini"
 
+    # File processing settings
+    chunk_size: int = Field(
+        default_factory=lambda: int(os.getenv("CHUNK_SIZE", "1000"))
+    )  # Characters per chunk
+    chunk_overlap: int = Field(
+        default_factory=lambda: int(os.getenv("CHUNK_OVERLAP", "200"))
+    )  # Characters overlap between chunks
+
     def __post_init__(self):
         # Ensure data directories exist
         self.download_dir = os.path.join(
