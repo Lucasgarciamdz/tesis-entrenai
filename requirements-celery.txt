@@ -1,0 +1,19 @@
+# Celery worker specific requirements
+# Only the minimal dependencies needed for the Celery worker
+
+# Core Celery functionality
+celery[redis]
+
+# HTTP client for API calls
+httpx
+
+# Data validation and models
+pydantic
+
+# Redis client (matching main requirements.txt)
+redis==5.0.1
+
+# Eventlet for async worker pool (used in CMD)
+eventlet
+
+python-dotenv

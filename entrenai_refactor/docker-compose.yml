@@ -135,6 +135,42 @@ services:
     networks:
       - entrenai_net
 
+  fastapi_backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.fastapi
+    container_name: entrenai_fastapi_backend
+    restart: unless-stopped
+    ports:
+      - "${FASTAPI_HOST_PORT:-8000}:8000"
+    volumes:
+      - ./src:/app/src # For development hot-reloading; remove for production if code is solely from image
+      - entrenai_data:/app/data # For downloads, markdown files, etc.
+    env_file:
+      - .env
+    environment:
+      APP_ENV: docker # To ensure docker-specific configurations are loaded
+      DATA_DIR: /app/data # Standardized data directory within the container
+      # Add any other necessary backend-specific environment variables from .env if not covered by env_file
+      # For example, ensure FastAPI host/port are set if uvicorn command in Dockerfile.fastapi doesn't use defaults
+      # Or if they are read from base_config which is loaded via .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      pgvector_db:
+        condition: service_healthy
+      moodle_db: # If the API interacts with Moodle services that depend on Moodle DB directly
+        condition: service_healthy
+        # Add other necessary dependencies
+    networks:
+      - entrenai_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"] # Basic health check for FastAPI
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s # Give it some time to start up
+
   # --- Redis for Celery ---
   redis:
     image: "redis:alpine"
@@ -152,66 +188,28 @@ services:
       timeout: 5s
       retries: 5
 
-  # --- FastAPI Application ---
-  aplicacion_api: # Service renamed
+  celery_worker:
     build:
-      context: . # Context is . because docker-compose.yml is in entrenai_refactor
-      dockerfile: Dockerfile # Dockerfile is in the same directory
-    container_name: entrenai_api # Keeping container name for now, can be changed
+      context: .
+      dockerfile: Dockerfile.celery
+    container_name: entrenai_celery_worker # Can remain the same
     restart: unless-stopped
-    ports:
-      - "${FASTAPI_HOST_PORT:-8000}:8000"
-    volumes:
-      - ./data:/app/data # Maps the new data directory in entrenai_refactor
-      - ./api:/app/api
-      - ./nucleo:/app/nucleo
-      - ./config:/app/config
-      # - ./entrenai_refactor:/app # Simpler, maps entire project
-      - entrenai_data:/app/persistent_data # For truly persistent data not code
+    command: sh -c "celery -A src.entrenai.celery_app.app worker -l INFO -P eventlet"
+    # No src volume mount needed as Dockerfile.celery copies necessary files
+    # No data volume mount needed as it doesn't process files directly
     env_file:
-      - ./.env.docker # MODIFICADO: Usar .env.docker desde el directorio entrenai_refactor
+      - .env
     environment:
-      APP_ENV: docker
-      DATA_DIR: /app/data # Internal data directory
-      PYTHONUNBUFFERED: 1
-      PYTHONPATH: /app
-    depends_on:
-      pgvector_db:
-        condition: service_healthy
-      ollama:
-        condition: service_started
-    networks:
-      - entrenai_net
-    command: sh -c "uvicorn api.principal:aplicacion --host 0.0.0.0 --port 8000 --reload"
-
-  # --- Minimalist Celery Worker ---
-  trabajador_celery: # Service renamed
-    build:
-      context: . # Context is .
-      dockerfile: Dockerfile.celery # Dockerfile is in the same directory
-    container_name: entrenai_celery_worker # Keeping container name
-    restart: unless-stopped
-    env_file:
-      - ./.env.docker # MODIFICADO: Usar .env.docker desde el directorio entrenai_refactor
-    volumes: # Adding volumes for celery worker to access necessary code
-      - ./celery:/app/celery
-      - ./nucleo:/app/nucleo
-      - ./config:/app/config
-    environment:
+      APP_ENV: docker # May not be strictly needed by celery worker but often inherited
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
-      FASTAPI_BASE_URL: http://aplicacion_api:8000 # Updated to new API service name
-      PYTHONUNBUFFERED: 1
-      PYTHONPATH: /app
-    depends_on:
-      redis:
-        condition: service_healthy
-      aplicacion_api: # Updated to new API service name
-        condition: service_started
-      pgvector_db:
-        condition: service_healthy
-      ollama:
-        condition: service_started
+      FASTAPI_BACKEND_URL: http://fastapi_backend:8000 # URL for the backend API
+      # PYTHONUNBUFFERED: 1 # Good for seeing logs immediately
+    # depends_on:
+    #   redis:
+    #     condition: service_healthy
+    #   fastapi_backend: # Depends on the new backend service
+    #     condition: service_healthy
     networks:
       - entrenai_net
 

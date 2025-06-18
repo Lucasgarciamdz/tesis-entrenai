@@ -8,6 +8,7 @@ python-dotenv
 # HTTP requests
 requests
 aiohttp # For async requests, if needed later
+httpx # For synchronous/asynchronous HTTP requests
 
 # Ollama client
 ollama

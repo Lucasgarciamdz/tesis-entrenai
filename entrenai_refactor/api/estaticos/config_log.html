@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Log de Configuraciones - Entrenai</title>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .success {
+            color: #28a745;
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .error {
+            color: #dc3545;
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .config-item {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-left: 4px solid #007bff;
+        }
+        .back-link {
+            display: inline-block;
+            margin-top: 20px;
+            color: #007bff;
+            text-decoration: none;
+        }
+        .back-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+    <script>
+        // Función para obtener parámetros de la URL
+        function getUrlParameter(name) {
+            name = name.replace(/[\[]/, '\\[').replace(/[\]]/, '\\]');
+            var regex = new RegExp('[\\?&]' + name + '=([^&#]*)');
+            var results = regex.exec(location.search);
+            return results === null ? '' : decodeURIComponent(results[1].replace(/\+/g, ' '));
+        }
+
+        // Función para mostrar el resultado de la actualización
+        async function showUpdateResult() {
+            const courseId = getUrlParameter('course_id');
+            const status = getUrlParameter('status');
+            const message = getUrlParameter('message');
+            
+            if (courseId && status) {
+                document.getElementById('course-id').textContent = courseId;
+                
+                if (status === 'success') {
+                    document.getElementById('success-message').style.display = 'block';
+                    document.getElementById('success-text').textContent = message || 'Configuraciones actualizadas exitosamente';
+                } else {
+                    document.getElementById('error-message').style.display = 'block';
+                    document.getElementById('error-text').textContent = message || 'Error al actualizar configuraciones';
+                }
+            } else {
+                // Si no hay parámetros, mostrar página de inicio
+                document.getElementById('default-content').style.display = 'block';
+            }
+        }
+
+        // Ejecutar cuando la página cargue
+        window.onload = showUpdateResult;
+    </script>
+</head>
+<body>
+    <div class="container">
+        <h1>Entrenai - Log de Configuraciones</h1>
+        
+        <div id="default-content" style="display: none;">
+            <p>Esta página muestra el resultado de las actualizaciones de configuración del chat de IA.</p>
+            <p>Para actualizar las configuraciones de un curso, use el enlace correspondiente desde Moodle.</p>
+        </div>
+
+        <div id="success-message" class="success" style="display: none;">
+            <h3>✅ Actualización Exitosa</h3>
+            <p><strong>Curso ID:</strong> <span id="course-id"></span></p>
+            <p id="success-text"></p>
+        </div>
+
+        <div id="error-message" class="error" style="display: none;">
+            <h3>❌ Error en la Actualización</h3>
+            <p><strong>Curso ID:</strong> <span id="course-id"></span></p>
+            <p id="error-text"></p>
+        </div>
+
+        <a href="/ui/manage_files.html" class="back-link">← Volver a Gestión de Archivos</a>
+    </div>
+</body>
+</html>
