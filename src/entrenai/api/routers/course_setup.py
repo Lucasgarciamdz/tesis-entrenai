@@ -1,7 +1,4 @@
-from pathlib import Path
-from typing import List, Optional, Dict, Any, Union
-import json # Añadido para manipulación de JSON
-import re  # Agregado para parsear HTML
+from typing import List, Optional, Union
 
 from celery.result import AsyncResult  # Import AsyncResult
 from fastapi import APIRouter, HTTPException, Query, Depends, Request
@@ -14,6 +11,12 @@ from src.entrenai.api.models import (
     IndexedFile,  # Added for the new endpoint
     DeleteFileResponse,  # Added for the new DELETE endpoint
 )
+# Importaciones para servicios (lazy imports en las funciones de dependencia)
+from src.entrenai.core.services.pgvector_service import PgvectorService
+from src.entrenai.core.services.n8n_workflow_service import N8NWorkflowService  
+from src.entrenai.core.services.moodle_integration_service import MoodleIntegrationService
+from src.entrenai.core.services.course_setup_service import CourseSetupService
+from src.entrenai.core.utils.course_utils import get_course_name_for_operations
 from src.entrenai.celery_app import app as celery_app  # Import Celery app instance
 
 from src.entrenai.config import (
@@ -49,124 +52,9 @@ router = APIRouter(
 
 
 # --- Helper Functions ---
-def _extract_chat_config_from_html(html_content: str) -> Dict[str, str]:
-    """
-    Extrae configuraciones del chat de IA desde el HTML Summary del curso.
-    
-    Busca patrones específicos en el HTML para extraer:
-    - Mensaje inicial/bienvenida
-    - Mensaje del sistema 
-    - Placeholder del input
-    - Título del chat
-    
-    Returns:
-        Dict con las configuraciones encontradas
-    """
-    config = {}
-    
-    logger.debug("Procesando HTML content para extraer configuraciones...")
-    
-    # Función para limpiar valores extraídos
-    def clean_extracted_value(value):
-        if not value:
-            return None
-        cleaned = value.strip()
-        # Remover comillas dobles al inicio y final si existen
-        if cleaned.startswith('"') and cleaned.endswith('"'):
-            cleaned = cleaned[1:-1]
-        # Remover comillas triples que puedan aparecer
-        while cleaned.startswith('"""') and cleaned.endswith('"""'):
-            cleaned = cleaned[3:-3]
-        # Remover múltiples comillas dobles consecutivas
-        while '""' in cleaned:
-            cleaned = cleaned.replace('""', '"')
-        # Devolver el valor limpio, incluso si es "No especificado"
-        return cleaned if cleaned else None
-    
-    # Patterns más específicos para buscar configuraciones en el HTML
-    # Usar patrones que capturen exactamente el valor después de los dos puntos hasta el final de la línea
-    patterns = {
-        'initial_messages': r'<strong>Mensajes Iniciales:</strong>\s*([^<\n\r]+)',
-        'system_message': r'<strong>Mensaje del Sistema:</strong>\s*([^<\n\r]+)',
-        'input_placeholder': r'<strong>Marcador de Posición de Entrada:</strong>\s*([^<\n\r]+)',
-        'chat_title': r'<strong>Título del Chat:</strong>\s*([^<\n\r]+)'
-    }
-    
-    for key, pattern in patterns.items():
-        match = re.search(pattern, html_content, re.IGNORECASE | re.MULTILINE)
-        if match:
-            extracted_value = clean_extracted_value(match.group(1))
-            if extracted_value:
-                config[key] = extracted_value
-                logger.info(f"Extraída configuración {key}: '{extracted_value}'")
-        else:
-            logger.debug(f"No se encontró patrón para {key}")
-    
-    if not config:
-        logger.warning("No se encontraron configuraciones válidas en el HTML")
-    
-    return config
 
-async def _get_course_name_for_operations(course_id: int, moodle: MoodleClient) -> str:
-    """
-    Retrieves the course name for a given course_id, used for Pgvector operations.
-    This logic is shared by refresh_course_files and the new delete_indexed_file endpoint.
-    """
-    course_name_for_pgvector: Optional[str] = None
-    try:
-        logger.info(
-            f"Obteniendo nombre del curso {course_id} para operaciones de Pgvector..."
-        )
-        target_user_id_for_name = moodle_config.default_teacher_id
-        if target_user_id_for_name:
-            courses = moodle.get_courses_by_user(user_id=target_user_id_for_name)
-            course = next((c for c in courses if c.id == course_id), None)
-            if course:
-                course_name_for_pgvector = course.displayname or course.fullname
 
-        if (
-            not course_name_for_pgvector
-        ):  # If not found under default teacher or no default teacher
-            all_courses = moodle.get_all_courses()
-            course = next((c for c in all_courses if c.id == course_id), None)
-            if course:
-                course_name_for_pgvector = course.displayname or course.fullname
 
-        if not course_name_for_pgvector:
-            # If still not found after checking all courses, it's a genuine "not found"
-            logger.warning(
-                f"No se pudo encontrar el curso {course_id} en Moodle para obtener su nombre."
-            )
-            raise HTTPException(
-                status_code=404,
-                detail=f"Curso con ID {course_id} no encontrado en Moodle.",
-            )
-
-        logger.info(f"Nombre del curso para Pgvector: '{course_name_for_pgvector}'")
-        return course_name_for_pgvector
-    except MoodleAPIError as e:
-        logger.error(
-            f"Error de API de Moodle al obtener el nombre del curso {course_id} para Pgvector: {e}"
-        )
-        raise HTTPException(
-            status_code=502,  # Bad Gateway, Moodle error
-            detail=f"Error de API de Moodle al intentar obtener el nombre del curso {course_id}.",
-        )
-    except HTTPException:  # Re-raise HTTPException (e.g. the 404 from above)
-        raise
-    except Exception as e:  # Catch-all for other unexpected errors
-        logger.error(
-            f"Error inesperado al obtener el nombre del curso {course_id} para Pgvector: {e}"
-        )
-        # Using a fallback name as in setup_ia_for_course or refresh_course_files might be an option,
-        # but for deletion, it's safer to fail if the name can't be reliably determined.
-        # However, the original refresh_course_files uses a fallback `Curso_{course_id}`.
-        # For deletion, this could be risky if the fallback name doesn't match what was used for table creation.
-        # Sticking to raising an error if not found via Moodle API.
-        raise HTTPException(
-            status_code=500,
-            detail=f"No se pudo determinar el nombre del curso {course_id} para operaciones de base de datos debido a un error interno.",
-        )
 
 
 # --- Inyección de Dependencias para Clientes ---
@@ -174,10 +62,8 @@ def get_moodle_client() -> MoodleClient:
     return MoodleClient(config=moodle_config)
 
 
-def get_pgvector_wrapper() -> (
-    PgvectorWrapper
-):  # Renamed function and updated return type
-    return PgvectorWrapper(config=pgvector_config)  # Updated instantiation
+def get_pgvector_wrapper() -> PgvectorWrapper:
+    return PgvectorWrapper(config=pgvector_config)
 
 
 def get_ai_client() -> Union[OllamaWrapper, GeminiWrapper]:
@@ -214,6 +100,28 @@ def get_ai_client() -> Union[OllamaWrapper, GeminiWrapper]:
 
 def get_n8n_client() -> N8NClient:
     return N8NClient(config=n8n_config)
+
+
+# --- Inyección de Dependencias para Servicios ---
+def get_pgvector_service(pgvector_wrapper: PgvectorWrapper = Depends(get_pgvector_wrapper)) -> PgvectorService:
+    return PgvectorService(pgvector_wrapper)
+
+
+def get_n8n_workflow_service(n8n_client: N8NClient = Depends(get_n8n_client)) -> N8NWorkflowService:
+    return N8NWorkflowService(n8n_client)
+
+
+def get_moodle_integration_service(moodle_client: MoodleClient = Depends(get_moodle_client)) -> MoodleIntegrationService:
+    return MoodleIntegrationService(moodle_client)
+
+
+def get_course_setup_service(
+    pgvector_service: PgvectorService = Depends(get_pgvector_service),
+    n8n_service: N8NWorkflowService = Depends(get_n8n_workflow_service),
+    moodle_service: MoodleIntegrationService = Depends(get_moodle_integration_service),
+    moodle_client: MoodleClient = Depends(get_moodle_client),
+) -> CourseSetupService:
+    return CourseSetupService(pgvector_service, n8n_service, moodle_service, moodle_client)
 
 
 @router.get("/courses", response_model=List[MoodleCourse])
@@ -276,7 +184,7 @@ async def delete_indexed_file(
     try:
         # 1. Obtener el nombre del curso para operaciones de Pgvector
         # This helper will raise HTTPException (404, 502, or 500) if it fails
-        course_name_for_pgvector = await _get_course_name_for_operations(
+        course_name_for_pgvector = await get_course_name_for_operations(
             course_id, moodle
         )
         logger.info(
@@ -382,304 +290,27 @@ async def setup_ia_for_course(
     chat_title: Optional[str] = Query(
         None, alias="chatTitle", description="Título del chat de IA."
     ),
-    moodle: MoodleClient = Depends(get_moodle_client),
-    pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper),
-    ai_client=Depends(get_ai_client),  # Updated dependency
-    n8n: N8NClient = Depends(get_n8n_client),
+    course_setup_service: CourseSetupService = Depends(get_course_setup_service),
 ):
     """Configura la IA para un curso específico de Moodle."""
-    logger.info(
-        f"Iniciando configuración de IA para el curso de Moodle ID: {course_id}"
-    )
-
-    course_name_str: str = ""
-    if course_name_query:
-        course_name_str = course_name_query
-        logger.info(f"Nombre del curso proporcionado en la query: '{course_name_str}'")
-    else:
-        try:
-            logger.info(
-                f"Intentando obtener nombre del curso {course_id} desde Moodle..."
-            )
-            moodle_course_details: Optional[MoodleCourse] = None
-            if moodle_config.default_teacher_id:
-                courses = moodle.get_courses_by_user(
-                    user_id=moodle_config.default_teacher_id
-                )
-                moodle_course_details = next(
-                    (c for c in courses if c.id == course_id), None
-                )
-            if not moodle_course_details:
-                all_courses = moodle.get_all_courses()
-                moodle_course_details = next(
-                    (c for c in all_courses if c.id == course_id), None
-                )
-            if moodle_course_details:
-                course_name_str = (
-                    moodle_course_details.displayname or moodle_course_details.fullname
-                )
-                logger.info(f"Nombre del curso obtenido de Moodle: '{course_name_str}'")
-            else:
-                logger.warning(
-                    f"No se pudo encontrar el curso {course_id} en Moodle para obtener su nombre."
-                )
-        except Exception as e:
-            logger.warning(
-                f"Excepción al obtener el nombre del curso {course_id} desde Moodle: {e}"
-            )
-        if not course_name_str:
-            course_name_str = f"Curso_{course_id}"
-            logger.warning(
-                f"Usando nombre de curso por defecto para Qdrant: '{course_name_str}'"
-            )
-
-    if not course_name_str:
-        logger.error(
-            f"El nombre del curso para el ID {course_id} no pudo ser determinado."
-        )
-        raise HTTPException(
-            status_code=500,
-            detail=f"No se pudo determinar el nombre del curso {course_id}.",
-        )
-
-    vector_size = pgvector_config.default_vector_size  # Updated config usage
-    pgvector_table_name = pgvector_db.get_table_name(
-        course_name_str
-    )  # Updated method call
-
-    moodle_section_name_desired = (
-        moodle_config.course_folder_name
-    )  # Nombre deseado para la sección
-    moodle_folder_name = "Documentos Entrenai"
-    moodle_chat_link_name = moodle_config.chat_link_name
-    moodle_refresh_link_name = moodle_config.refresh_link_name
-
-    response_details = CourseSetupResponse(
-        course_id=course_id,
-        status="pendiente",
-        message=f"Configuración iniciada para el curso {course_id} ('{course_name_str}').",
-        qdrant_collection_name=pgvector_table_name,
-        # Renamed field for clarity, though model might not reflect this directly
-    )
-
     try:
-        logger.info(
-            f"Asegurando tabla Pgvector '{pgvector_table_name}' para curso '{course_name_str}' con tamaño de vector {vector_size}"
-        )
-        # Removed qdrant.client check as PgvectorWrapper handles connection internally
-        if not pgvector_db.ensure_table(
-            course_name_str, vector_size
-        ):  # Updated method call
-            response_details.status = "fallido"
-            response_details.message = (
-                f"Falló al asegurar la tabla Pgvector '{pgvector_table_name}'."
-            )
-            logger.error(response_details.message)
-            raise HTTPException(status_code=500, detail=response_details.message)
-        logger.info(f"Tabla Pgvector '{pgvector_table_name}' asegurada.")
-
-        logger.info(
-            f"Configurando workflow de chat N8N para curso '{course_name_str}' (ID: {course_id})"
-        )
-        logger.info(f"El tableName para el nodo PGVector en N8N se establecerá a: '{pgvector_table_name}'")
-
-        # --- INICIO DE MODIFICACIÓN DEL WORKFLOW JSON (en memoria) ---
-        # Cargar la plantilla del workflow para asegurar que tableName se actualice.
-        # CWD es /Users/lucas/facultad/tesis_entrenai
-        workflow_template_path = Path("src/entrenai/n8n_workflow.json")
+        base_url = str(request.base_url).rstrip("/")
         
-        if not workflow_template_path.exists():
-            logger.warning(
-                f"No se encontró la plantilla del workflow de N8N en: {workflow_template_path}. "
-                "N8NClient deberá manejar la configuración del tableName usando qdrant_collection_name."
-            )
-        else:
-            try:
-                with open(workflow_template_path, 'r', encoding='utf-8') as f:
-                    workflow_data = json.load(f)
-
-                pg_vector_node_found_and_updated = False
-                for node in workflow_data.get("nodes", []):
-                    if node.get("type") == "@n8n/n8n-nodes-langchain.vectorStorePGVector" and \
-                       node.get("parameters", {}).get("mode") == "retrieve-as-tool":
-                        original_table_name = node["parameters"].get("tableName")
-                        node["parameters"]["tableName"] = pgvector_table_name # Usar el nombre de tabla del curso
-                        pg_vector_node_found_and_updated = True
-                        logger.info(
-                            f"Nodo PGVector ('retrieve-as-tool') encontrado en la plantilla n8n_workflow.json. "
-                            f"Actualizando 'tableName' de '{original_table_name}' a '{pgvector_table_name}' en la copia en memoria."
-                        )
-                        break 
-                
-                if not pg_vector_node_found_and_updated:
-                    logger.warning(
-                        "No se encontró el nodo Postgres PGVector Store ('retrieve-as-tool') en la plantilla "
-                        "n8n_workflow.json para actualizar 'tableName'. N8NClient deberá manejar esta configuración."
-                    )
-            except json.JSONDecodeError as e:
-                logger.error(f"Error al decodificar la plantilla JSON del workflow de N8N desde {workflow_template_path}: {e}")
-            except Exception as e:
-                logger.error(f"Error inesperado al procesar la plantilla del workflow de N8N desde {workflow_template_path}: {e}")
-        # --- FIN DE MODIFICACIÓN DEL WORKFLOW JSON ---
-
-        # Preparar parámetros de IA según el proveedor seleccionado
-        if base_config.ai_provider == "gemini":
-            ai_params = {
-                "api_key": gemini_config.api_key,
-                "embedding_model": gemini_config.embedding_model,
-                "qa_model": gemini_config.text_model,
-            }
-        else:  # Ollama por defecto
-            ai_params = {
-                "host": ollama_config.host,
-                "embedding_model": ollama_config.embedding_model,
-                "qa_model": ollama_config.qa_model,
-            }
-
-        n8n_chat_url_str = n8n.configure_and_deploy_chat_workflow(
+        return await course_setup_service.setup_course(
             course_id=course_id,
-            course_name=course_name_str,
-            qdrant_collection_name=pgvector_table_name,
-            ai_config_params=ai_params,
+            base_url=base_url,
+            course_name_query=course_name_query,
             initial_messages=initial_messages,
             system_message=system_message,
             input_placeholder=input_placeholder,
             chat_title=chat_title,
         )
-
-        if not n8n_chat_url_str:
-            logger.warning(
-                f"No se pudo configurar/obtener automáticamente la URL del chat de N8N para el curso '{course_name_str}'."
-            )
-            response_details.message += (
-                " URL del chat de N8N no configurada automáticamente."
-            )
-            n8n_chat_url_str = n8n_config.webhook_url
-        response_details.n8n_chat_url = (
-            HttpUrl(n8n_chat_url_str) if n8n_chat_url_str else None
-        )
-        logger.info(
-            f"URL del chat de N8N para curso '{course_name_str}': {response_details.n8n_chat_url}"
-        )
-
-        logger.info(
-            f"Paso 1: Creando/obteniendo estructura de sección de Moodle para curso {course_id} (nombre deseado: '{moodle_section_name_desired}')"
-        )
-        created_section_structure = moodle.create_course_section(
-            course_id, moodle_section_name_desired, position=1
-        )
-        if not created_section_structure or not created_section_structure.id:
-            response_details.status = "fallido"
-            response_details.message = f"Falló la creación de la estructura de la sección de Moodle para el curso {course_id}."
-            logger.error(response_details.message)
-            raise HTTPException(status_code=500, detail=response_details.message)
-
-        section_id_to_update = created_section_structure.id
-        response_details.moodle_section_id = section_id_to_update
-        logger.info(
-            f"Estructura de sección de Moodle (ID: {section_id_to_update}, Nombre Actual: '{created_section_structure.name}') obtenida/creada."
-        )
-
-        # Construir URLs y HTML summary
-        # Old way:
-        # refresh_path = router.url_path_for("refresh_files", course_id=course_id)
-        # refresh_files_url = str(request.base_url.replace(path=str(refresh_path)))
-        # Construir URLs para los enlaces
-        refresh_files_url = (
-            str(request.base_url).rstrip("/")
-            + "/ui/manage_files.html?course_id="
-            + str(course_id)
-        )
-        
-        refresh_chat_config_url = (
-            str(request.base_url).rstrip("/")
-            + f"/api/v1/courses/{course_id}/refresh-chat-config"
-        )
-
-        n8n_chat_url_for_moodle = (
-            str(response_details.n8n_chat_url).rstrip('/') if response_details.n8n_chat_url else "#"
-        )
-
-        # Mensaje para el profesor sobre la edición
-        edit_instruction_message = """
-<p><strong>Nota para el profesor:</strong> Puede modificar las configuraciones del chat directamente en la sección "Configuración del Chat de IA" a continuación. Después de realizar cambios, use el enlace "Actualizar Configuraciones del Chat" para aplicar los cambios al sistema de IA.</p>
-"""
-
-        # Construir el summary HTML con los nuevos campos
-        html_summary = f"""
-<h4>Recursos de Entrenai IA</h4>
-<p>Utilice esta sección para interactuar con la Inteligencia Artificial de asistencia para este curso.</p>
-<ul>
-    <li><a href="{n8n_chat_url_for_moodle}" target="_blank">{moodle_chat_link_name}</a>: Acceda aquí para chatear con la IA.</li>
-    <li>Carpeta "<strong>{moodle_folder_name}</strong>": Suba aquí los documentos PDF, DOCX, PPTX que la IA utilizará como base de conocimiento.</li>
-    <li><a href="{refresh_files_url}" target="_blank">{moodle_refresh_link_name}</a>: Haga clic aquí después de subir nuevos archivos o modificar existentes en la carpeta "{moodle_folder_name}" para que la IA los procese.</li>
-    <li><a href="{refresh_chat_config_url}" target="_blank">Actualizar Configuraciones del Chat</a>: Haga clic aquí después de modificar las configuraciones del chat (abajo) para aplicar los cambios.</li>
-</ul>
-{edit_instruction_message}
-<h5>Configuración del Chat de IA:</h5>
-<ul>
-    <li><strong>Mensajes Iniciales:</strong> {initial_messages if initial_messages else DEFAULT_UNSPECIFIED_TEXT}</li>
-    <li><strong>Mensaje del Sistema:</strong> {system_message if system_message else DEFAULT_UNSPECIFIED_TEXT}</li>
-    <li><strong>Marcador de Posición de Entrada:</strong> {input_placeholder if input_placeholder else DEFAULT_UNSPECIFIED_TEXT}</li>
-    <li><strong>Título del Chat:</strong> {chat_title if chat_title else DEFAULT_UNSPECIFIED_TEXT}</li>
-</ul>
-"""
-
-        # Payload para actualizar la sección (nombre, summary) y añadir módulos
-        update_section_and_modules_payload = {
-            "courseid": course_id,
-            "sections": [
-                {
-                    "type": "id",
-                    "section": section_id_to_update,
-                    "name": moodle_section_name_desired,  # Nombre deseado
-                    "summary": html_summary,
-                    "summaryformat": 1,  # 1 para HTML
-                    "visible": 1,
-                }
-            ],
-        }
-
-        logger.info(
-            f"Paso 2: Actualizando sección ID {section_id_to_update} con nombre '{moodle_section_name_desired}', summary y módulos."
-        )
-        logger.debug(
-            f"Payload para local_wsmanagesections_update_sections: {update_section_and_modules_payload}"
-        )
-
-        update_result = moodle._make_request(
-            "local_wsmanagesections_update_sections", update_section_and_modules_payload
-        )
-        logger.info(f"Resultado de actualización de sección y módulos: {update_result}")
-
-        # Verificar módulos creados (opcional, para obtener IDs)
-        # Por ahora, asumimos que la creación fue exitosa si no hubo error.
-        # Los IDs de los módulos no se capturan en response_details con este flujo simplificado.
-
-        response_details.status = "exitoso"
-        response_details.message = f"Configuración de Entrenai IA completada exitosamente para el curso {course_id} ('{course_name_str}')."
-        logger.info(response_details.message)
-        return response_details
-
-    except HTTPException as http_exc:
-        logger.error(
-            f"HTTPException durante configuración de IA para curso {course_id}: {http_exc.detail}"
-        )
-        raise http_exc
-    except MoodleAPIError as e:
-        logger.error(
-            f"Error de API de Moodle durante configuración de IA para curso {course_id}: {e}"
-        )
-        response_details.status = "fallido"
-        response_details.message = f"Error de API de Moodle: {str(e)}"
-        raise HTTPException(status_code=502, detail=response_details.message)
     except Exception as e:
-        logger.exception(
-            f"Error inesperado durante configuración de IA para curso {course_id}: {e}"
+        logger.error(f"Error en setup_ia_for_course para curso {course_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error interno del servidor: {str(e)}"
         )
-        response_details.status = "fallido"
-        response_details.message = f"Error interno del servidor: {str(e)}"
-        raise HTTPException(status_code=500, detail=response_details.message)
 
 
 @router.get("/courses/{course_id}/refresh-files", name="refresh_files")
@@ -713,7 +344,7 @@ async def refresh_course_files(
 
     # Obtener nombre del curso para Pgvector usando función helper
     try:
-        course_name_for_pgvector = await _get_course_name_for_operations(
+        course_name_for_pgvector = await get_course_name_for_operations(
             course_id, moodle
         )
     except HTTPException as e:
@@ -1034,7 +665,7 @@ async def get_n8n_workflow_config(
     logger.info(f"Solicitud para obtener configuración de workflow n8n para curso ID: {course_id}")
 
     try:
-        course_name_for_n8n = await _get_course_name_for_operations(course_id, moodle)
+        course_name_for_n8n = await get_course_name_for_operations(course_id, moodle)
         workflow_name_prefix = f"Entrenai - {course_id}"
         exact_workflow_name = f"{workflow_name_prefix} - {course_name_for_n8n}"
 
@@ -1175,19 +806,20 @@ async def refresh_chat_config(
     moodle: MoodleClient = Depends(get_moodle_client),
     n8n: N8NClient = Depends(get_n8n_client),
     pgvector_db: PgvectorWrapper = Depends(get_pgvector_wrapper),
+    moodle_service: MoodleIntegrationService = Depends(get_moodle_integration_service),
 ):
     """
     Refreshes the N8n chat workflow configuration for a given course.
 
     Steps:
     1.  Accepts `PgvectorWrapper` as a dependency.
-    2.  Obtains `course_name_str` using `_get_course_name_for_operations`.
+    2.  Obtains `course_name_str` using `get_course_name_for_operations`.
     3.  Determines `pgvector_table_name` using `pgvector_db.get_table_name(course_name_str)`.
     4.  Identifies the existing N8n workflow for the course and get its ID.
         If multiple workflows match, attempts to find the active one.
         If no specific workflow is found, logs a warning and attempts to proceed.
     5.  Fetches the Moodle section summary using `moodle.get_section_details`.
-    6.  Extracts chat configuration from the HTML summary using `_extract_chat_config_from_html`.
+    6.  Extracts chat configuration from the HTML summary using `moodle_service.extract_chat_config_from_html`.
         If no configuration is found, redirects with an error.
     7.  If an existing N8n workflow ID was found, calls `n8n.delete_workflow(existing_workflow_id)`.
         Logs the outcome and proceeds even if deletion fails.
@@ -1208,7 +840,7 @@ async def refresh_chat_config(
         # 1. & 2. Obtain course_name_str
         logger.info(f"Obteniendo nombre del curso {course_id} para operaciones...")
         try:
-            course_name_str = await _get_course_name_for_operations(course_id, moodle)
+            course_name_str = await get_course_name_for_operations(course_id, moodle)
         except HTTPException as e:
             logger.error(f"Error al obtener nombre del curso: {e.detail}")
             return RedirectResponse(
@@ -1251,7 +883,7 @@ async def refresh_chat_config(
 
         # 6. Extract chat configuration from HTML summary
         logger.info("Extrayendo configuraciones del chat desde el HTML summary...")
-        chat_config = _extract_chat_config_from_html(html_summary)
+        chat_config = moodle_service.extract_chat_config_from_html(html_summary)
         logger.info(f"Configuraciones del chat extraídas: {chat_config}")
         if not chat_config:
             logger.warning(f"No se encontraron configuraciones de chat válidas en el HTML summary de la sección {target_section_id}.")
