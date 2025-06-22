@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-db-config
+  namespace: lucas-garcia-entrenai-no-borrar
+data:
+  POSTGRES_DB: pgvector_db

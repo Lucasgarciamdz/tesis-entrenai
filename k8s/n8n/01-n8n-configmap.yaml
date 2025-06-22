@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: n8n-config
+  namespace: lucas-garcia-entrenai-no-borrar
+data:
+  DB_TYPE: postgresdb
+  DB_POSTGRESDB_HOST: n8n-db-service
+  DB_POSTGRESDB_PORT: "5432"
+  DB_POSTGRESDB_DATABASE: n8n_db
+  WEBHOOK_URL: "http://n8n.lucas-garcia-entrenai-no-borrar.my.kube.um.edu.ar/"
+  N8N_HOST: "n8n.lucas-garcia-entrenai-no-borrar.my.kube.um.edu.ar"
+  N8N_URL: http://n8n:5678
+  GENERIC_TIMEZONE: "America/Argentina/Buenos_Aires"

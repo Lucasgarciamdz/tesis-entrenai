@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: celery-config
+  namespace: lucas-garcia-entrenai-no-borrar
+data:
+  CELERY_BROKER_URL: "redis://redis-service:6379/0"
+  CELERY_RESULT_BACKEND: "db+postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@vector-db-service:5432/pgvector_db"
+  # Database connection for the app logic
+  DATABASE_URL: "postgresql+psycopg2://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@vector-db-service:5432/pgvector_db"
+  # Moodle config
+  MOODLE_URL: "http://moodle.local" # This should be the external URL if celery needs to reach it
+  MOODLE_TOKEN: "4fdfc79a88ad6d0f79a9a2e83c8e1419"
+  # AI Provider
+  AI_PROVIDER: "ollama"
+  OLLAMA_HOST: "http://172.16.16.76:11434"
+  OLLAMA_EMBEDDING_MODEL: "snowflake-arctic-embed2" # Example, choose a suitable model available in your Ollama
+  OLLAMA_MARKDOWN_MODEL: "llama3.2:1b" # Example, for transforming to Markdown
+  OLLAMA_QA_MODEL: "llama3.2:1b" # Example, for RAG question answering
+  OLLAMA_CONTEXT_MODEL: "llama3.2:1b" # Example, for adding context to chunks
+  # N8N
+  N8N_URL: "http://n8n-service:5678"
+  N8N_WEBHOOK_URL: "http://n8n.lucas-garcia-entrenai-no-borrar.my.kube.um.edu.ar"

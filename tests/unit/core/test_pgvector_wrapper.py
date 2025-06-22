@@ -227,7 +227,7 @@ def test_ensure_table_creates_with_large_vector_dimensions(
     wrapper, mock_conn, mock_cursor = pgvector_wrapper_with_mock_connection
     course_name = "Large Vector Course"
     table_name = wrapper.get_table_name(course_name)
-    vector_size = 3072  # Large vector size that exceeds HNSW limit of 2000
+    vector_size = 1024  # Large vector size that exceeds HNSW limit of 2000
 
     # Simulate table does not exist
     mock_cursor.fetchone.return_value = {"exists": False}

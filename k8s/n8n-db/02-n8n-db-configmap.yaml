@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: n8n-db-config
+  namespace: lucas-garcia-entrenai-no-borrar
+data:
+  POSTGRES_DB: n8n_db
