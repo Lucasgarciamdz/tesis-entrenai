@@ -17,3 +17,6 @@ redis==5.0.1
 eventlet
 
 python-dotenv
+
+# Database ORM for Celery backend
+sqlalchemy

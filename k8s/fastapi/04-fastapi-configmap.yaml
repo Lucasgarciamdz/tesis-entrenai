@@ -17,7 +17,7 @@ data:
   CELERY_BROKER_URL: "redis://redis-service:6379/0"
   CELERY_RESULT_BACKEND: "redis://redis-service:6379/0"
   # Moodle
-  MOODLE_URL: "http://moodle.local" # External URL
+  MOODLE_URL: "https://kvrtkc31-8080.brs.devtunnels.ms/" # External URL
   MOODLE_COURSE_FOLDER_NAME: "Entrenai Documents"
   MOODLE_REFRESH_LINK_NAME: "Refresh Entrenai IA"
   MOODLE_CHAT_LINK_NAME: "Chat con Entrenai IA"
@@ -38,5 +38,5 @@ data:
   GEMINI_EMBEDDING_DIMENSION: "1024"
   # N8N
   N8N_URL: "http://n8n-service:5678"
-  N8N_WEBHOOK_URL: "http://n8n.lucas-garcia-entrenai-no-borrar.my.kube.um.edu.ar"
+  N8N_WEBHOOK_URL: "https://n8n-ucas-garcia-entrenai-no-borrar.my.kube.um.edu.ar"
   N8N_WORKFLOW_JSON_PATH: "./src/entrenai/n8n_workflow.json"

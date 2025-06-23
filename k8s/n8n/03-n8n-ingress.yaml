@@ -5,9 +5,10 @@ metadata:
   namespace: lucas-garcia-entrenai-no-borrar
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
+    kubernetes.io/ingress.class: nginx
 spec:
   rules:
-  - host: n8n.lucas-garcia-entrenai-no-borrar.my.kube.um.edu.ar
+  - host: n8n-lucas-garcia-entrenai-no-borrar.my.kube.um.edu.ar
     http:
       paths:
       - path: /
