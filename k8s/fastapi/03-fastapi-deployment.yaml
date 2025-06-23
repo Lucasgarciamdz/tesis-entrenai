@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: fastapi-app
-        image: luxor12354/tesis-entrenai:api1
+        image: luxor12354/tesis-entrenai:api2
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
