@@ -5,10 +5,11 @@ metadata:
   namespace: lucas-garcia-entrenai-no-borrar
 data:
   # App
-  LOG_LEVEL: "INFO"
+  LOG_LEVEL: "DEBUG"
   FASTAPI_HOST: "0.0.0.0"
   FASTAPI_PORT: "8000"
   APP_ENV: "kubernetes"
+  APP_BASE_URL: "https://api-lucas-garcia-entrenai-no-borrar.my.kube.um.edu.ar"
   # Database
   DATABASE_URL: "postgresql+psycopg2://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@vector-db-service:5432/pgvector_db"
   PGVECTOR_COLLECTION_PREFIX: "entrenai_course_"
@@ -37,6 +38,6 @@ data:
   GEMINI_SAFETY_SETTINGS_ENABLED: "True"
   GEMINI_EMBEDDING_DIMENSION: "1024"
   # N8N
-  N8N_URL: "http://n8n-service:5678"
+  N8N_URL: "https://n8n-lucas-garcia-entrenai-no-borrar.my.kube.um.edu.ar"
   N8N_WEBHOOK_URL: "https://n8n-lucas-garcia-entrenai-no-borrar.my.kube.um.edu.ar"
   N8N_WORKFLOW_JSON_PATH: "./src/entrenai/n8n_workflow.json"

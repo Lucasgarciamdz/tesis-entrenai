@@ -53,6 +53,9 @@ class BaseConfig(BaseModel):
     fastapi_port: int = Field(
         default_factory=lambda: int(os.getenv("FASTAPI_PORT", "8000"))
     )
+    app_base_url: str = Field(
+        default_factory=lambda: os.getenv("APP_BASE_URL", "http://localhost:8000")
+    )
 
     # Path configurations
     data_dir: str = Field(

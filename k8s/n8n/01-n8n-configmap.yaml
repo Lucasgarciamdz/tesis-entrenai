@@ -10,5 +10,5 @@ data:
   DB_POSTGRESDB_DATABASE: n8n_db
   WEBHOOK_URL: "https://n8n-lucas-garcia-entrenai-no-borrar.my.kube.um.edu.ar/"
   N8N_HOST: "n8n-lucas-garcia-entrenai-no-borrar.my.kube.um.edu.ar"
-  N8N_URL: http://n8n:5678
+  N8N_URL: "https://n8n-lucas-garcia-entrenai-no-borrar.my.kube.um.edu.ar/"
   GENERIC_TIMEZONE: "America/Argentina/Buenos_Aires"

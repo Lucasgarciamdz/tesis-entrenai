@@ -582,18 +582,15 @@ async def setup_ia_for_course(
 
         # Construir URLs y HTML summary
         # Old way:
-        # refresh_path = router.url_path_for("refresh_files", course_id=course_id)
-        # refresh_files_url = str(request.base_url.replace(path=str(refresh_path)))
-        # Construir URLs para los enlaces
+        # Construir URLs para los enlaces usando base_config.app_base_url
+        app_base_url = base_config.app_base_url.rstrip("/")
+
         refresh_files_url = (
-            str(request.base_url).rstrip("/")
-            + "/ui/manage_files.html?course_id="
-            + str(course_id)
+            f"{app_base_url}/ui/manage_files.html?course_id={course_id}"
         )
         
         refresh_chat_config_url = (
-            str(request.base_url).rstrip("/")
-            + f"/api/v1/courses/{course_id}/refresh-chat-config"
+            f"{app_base_url}/api/v1/courses/{course_id}/refresh-chat-config"
         )
 
         n8n_chat_url_for_moodle = (
@@ -610,7 +607,7 @@ async def setup_ia_for_course(
 <h4>Recursos de Entrenai IA</h4>
 <p>Utilice esta sección para interactuar con la Inteligencia Artificial de asistencia para este curso.</p>
 <ul>
-    <li><a href="{n8n_chat_url_for_moodle}" target="_blank">{moodle_chat_link_name}</a>: Acceda aquí para chatear con la IA.</li>
+    <li><a href="{n8n_chat_url_for_moodle}" target="_blank">{moodle_config.chat_link_name}</a>: Acceda aquí para chatear con la IA.</li>
     <li>Carpeta "<strong>{moodle_folder_name}</strong>": Suba aquí los documentos PDF, DOCX, PPTX que la IA utilizará como base de conocimiento.</li>
     <li><a href="{refresh_files_url}" target="_blank">{moodle_refresh_link_name}</a>: Haga clic aquí después de subir nuevos archivos o modificar existentes en la carpeta "{moodle_folder_name}" para que la IA los procese.</li>
     <li><a href="{refresh_chat_config_url}" target="_blank">Actualizar Configuraciones del Chat</a>: Haga clic aquí después de modificar las configuraciones del chat (abajo) para aplicar los cambios.</li>
@@ -1201,8 +1198,8 @@ async def refresh_chat_config(
     logger.info(
         f"Iniciando refresco de configuración de chat para el curso ID: {course_id}"
     )
-    base_url = str(request.base_url).rstrip("/")
-    redirect_url_base = f"{base_url}/ui/config_log.html?course_id={course_id}"
+    app_base_url = base_config.app_base_url.rstrip("/")
+    redirect_url_base = f"{app_base_url}/ui/config_log.html?course_id={course_id}"
 
     try:
         # 1. & 2. Obtain course_name_str
@@ -1382,9 +1379,10 @@ async def refresh_chat_config(
         logger.info("Reconstruyendo HTML summary para la sección de Moodle...")
         
         # Links for Moodle section
-        refresh_files_ui_url = f"{base_url}/ui/manage_files.html?course_id={course_id}"
+        app_base_url = base_config.app_base_url.rstrip("/")
+        refresh_files_ui_url = f"{app_base_url}/ui/manage_files.html?course_id={course_id}"
         # The current endpoint itself is the refresh chat config URL
-        refresh_chat_config_api_url = str(request.url_for("refresh_chat_config", course_id=course_id))
+        refresh_chat_config_api_url = f"{app_base_url}/api/v1/courses/{course_id}/refresh-chat-config"
 
         # Ensure chat parameters used in summary are the ones applied
         # Limpiar comillas existentes para evitar acumulación infinita
@@ -1482,4 +1480,3 @@ async def refresh_chat_config(
             url=f"{redirect_url_base}&status=error&message=Error interno del servidor: {error_message}",
             status_code=302,
         )
-        

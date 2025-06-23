@@ -9,7 +9,7 @@ data:
   # Database connection for the app logic
   DATABASE_URL: "postgresql+psycopg2://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@vector-db-service:5432/pgvector_db"
   # Moodle config
-  MOODLE_URL: "http://moodle.local" # This should be the external URL if celery needs to reach it
+  MOODLE_URL: "https://kvrtkc31-8080.brs.devtunnels.ms/" # This should be the external URL if celery needs to reach it
   MOODLE_TOKEN: "4fdfc79a88ad6d0f79a9a2e83c8e1419"
   # AI Provider
   AI_PROVIDER: "ollama"
@@ -19,5 +19,5 @@ data:
   OLLAMA_QA_MODEL: "llama3.2:1b" # Example, for RAG question answering
   OLLAMA_CONTEXT_MODEL: "llama3.2:1b" # Example, for adding context to chunks
   # N8N
-  N8N_URL: "http://n8n-service:5678"
-  N8N_WEBHOOK_URL: "http://n8n-lucas-garcia-entrenai-no-borrar.my.kube.um.edu.ar"
+  N8N_URL: "https://n8n-lucas-garcia-entrenai-no-borrar.my.kube.um.edu.ar"
+  N8N_WEBHOOK_URL: "https://n8n-lucas-garcia-entrenai-no-borrar.my.kube.um.edu.ar"
