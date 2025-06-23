@@ -15,8 +15,8 @@ spec:
     spec:
       containers:
       - name: celery-worker
-        image: lucas-garcia-entrenai-no-borrar-celery:latest
-        imagePullPolicy: IfNotPresent # Assumes local image
+        image: luxor12354/tesis-entrenai:celery
+        imagePullPolicy: Always
         command: [ "celery", "-A", "entrenai.celery_app", "worker", "--loglevel=info" ]
         envFrom:
         - configMapRef:

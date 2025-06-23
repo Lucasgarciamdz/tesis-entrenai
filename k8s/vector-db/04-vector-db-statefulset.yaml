@@ -27,6 +27,7 @@ spec:
         volumeMounts:
         - name: vector-db-storage
           mountPath: /var/lib/postgresql/data
+          subPath: pgdata
   volumeClaimTemplates:
   - metadata:
       name: vector-db-storage

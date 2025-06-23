@@ -1,4 +1,4 @@
-FROM python:3.10-slim-bookworm AS builder
+FROM --platform=linux/amd64 python:3.10-slim-bookworm AS builder
 
 RUN pip install --no-cache-dir uv
 
@@ -31,7 +31,7 @@ RUN apt-get update \
 COPY ./src ./src
 
 
-FROM python:3.10-slim-bookworm AS final
+FROM --platform=linux/amd64 python:3.10-slim-bookworm AS final
 
 WORKDIR /app
 

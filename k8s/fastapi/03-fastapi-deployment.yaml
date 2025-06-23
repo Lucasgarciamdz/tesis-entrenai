@@ -15,8 +15,8 @@ spec:
     spec:
       containers:
       - name: fastapi-app
-        image: lucas-garcia-entrenai-no-borrar-fastapi:latest
-        imagePullPolicy: IfNotPresent # Assumes local image
+        image: luxor12354/tesis-entrenai:api
+        imagePullPolicy: Always
         ports:
         - containerPort: 8000
         envFrom:

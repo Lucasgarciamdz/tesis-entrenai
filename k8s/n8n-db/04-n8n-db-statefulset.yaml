@@ -27,6 +27,7 @@ spec:
         volumeMounts:
         - name: n8n-db-storage
           mountPath: /var/lib/postgresql/data
+          subPath: pgdata
   volumeClaimTemplates:
   - metadata:
       name: n8n-db-storage

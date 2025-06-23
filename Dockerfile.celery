@@ -1,4 +1,4 @@
-FROM python:3.10-slim-bookworm AS builder
+FROM --platform=linux/amd64 python:3.10-slim-bookworm AS builder
 
 RUN pip install --no-cache-dir uv
 
@@ -37,7 +37,7 @@ COPY ./src/entrenai/api/models.py ./src/entrenai/api/models.py
 COPY ./src/entrenai/celery_tasks.py ./src/entrenai/celery_tasks.py
 
 
-FROM python:3.10-slim-bookworm AS final
+FROM --platform=linux/amd64 python:3.10-slim-bookworm AS final
 
 WORKDIR /app
 
