@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-db-init-script
+  namespace: default
+data:
+  init.sql: |
+    DO
+    $do$
+    BEGIN
+       IF NOT EXISTS (
+          SELECT FROM pg_catalog.pg_roles
+          WHERE  rolname = 'pgvector_user') THEN
+          CREATE ROLE pgvector_user WITH LOGIN PASSWORD '$(POSTGRES_PASSWORD)';
+       END IF;
+    END
+    $do$;
+
+    SELECT 'CREATE DATABASE pgvector_db WITH OWNER pgvector_user'
+    WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'pgvector_db')\gexec
+
+    \c pgvector_db;
+
+    CREATE EXTENSION IF NOT EXISTS vector;

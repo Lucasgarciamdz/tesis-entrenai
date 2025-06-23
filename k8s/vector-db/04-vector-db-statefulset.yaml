@@ -28,6 +28,12 @@ spec:
         - name: vector-db-storage
           mountPath: /var/lib/postgresql/data
           subPath: pgdata
+        - name: vector-db-init-script-volume
+          mountPath: /docker-entrypoint-initdb.d/
+      volumes:
+      - name: vector-db-init-script-volume
+        configMap:
+          name: vector-db-init-script
   volumeClaimTemplates:
   - metadata:
       name: vector-db-storage

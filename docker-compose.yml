@@ -152,7 +152,7 @@ services:
     container_name: entrenai_fastapi_backend
     restart: unless-stopped
     ports:
-      - "${FASTAPI_HOST_PORT:-8000}:8000"
+      - "8765:8000"
     volumes:
       - ./src:/app/src # For development hot-reloading; remove for production if code is solely from image
       - entrenai_data:/app/data # For downloads, markdown files, etc.

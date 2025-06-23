@@ -12,7 +12,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // URL base de tu API FastAPI (ajusta si es necesario)
     // Si FastAPI sirve este HTML, una ruta relativa podría funcionar: '/api/v1'
     // Si se abre como file:// o desde otro servidor, se necesita la URL completa y CORS.
-    const API_BASE_URL = 'http://' + window.location.host + '/api/v1';
+    // Get base URL from current location, handling both root and subdirectory deployments
+    const API_BASE_URL = window.location.pathname.includes('/ui/') 
+        ? window.location.origin + '/api/v1'
+        : window.location.href.split('/ui/')[0] + '/api/v1';
 
     // Ensure essential DOM elements are present before proceeding.
     if (!courseSelect || !setupAiButton || !statusMessagesContainer || !manageFilesButton) {
