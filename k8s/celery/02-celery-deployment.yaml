@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: celery-worker
-        image: luxor12354/tesis-entrenai:celery
+        image: luxor12354/tesis-entrenai:celery1
         imagePullPolicy: Always
         command: [ "celery", "-A", "src.entrenai.celery_app.app", "worker", "-l", "INFO", "-P", "eventlet" ]
         envFrom:
