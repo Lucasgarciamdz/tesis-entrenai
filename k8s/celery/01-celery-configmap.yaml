@@ -20,4 +20,4 @@ data:
   OLLAMA_CONTEXT_MODEL: "llama3.2:1b" # Example, for adding context to chunks
   # N8N
   N8N_URL: "http://n8n-service:5678"
-  N8N_WEBHOOK_URL: "http://n8n-ucas-garcia-entrenai-no-borrar.my.kube.um.edu.ar"
+  N8N_WEBHOOK_URL: "http://n8n-lucas-garcia-entrenai-no-borrar.my.kube.um.edu.ar"

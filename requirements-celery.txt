@@ -3,6 +3,15 @@
 
 # Core Celery functionality
 celery[redis]
+celery
+eventlet # Required for Celery's eventlet pool
+redis==5.0.1
+# Generic
+uv
+ruff
+psycopg2-binary
+pydantic
+protobuf
 
 # HTTP client for API calls
 httpx

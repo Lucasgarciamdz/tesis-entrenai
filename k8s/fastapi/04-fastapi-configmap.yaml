@@ -38,5 +38,5 @@ data:
   GEMINI_EMBEDDING_DIMENSION: "1024"
   # N8N
   N8N_URL: "http://n8n-service:5678"
-  N8N_WEBHOOK_URL: "https://n8n-ucas-garcia-entrenai-no-borrar.my.kube.um.edu.ar"
+  N8N_WEBHOOK_URL: "https://n8n-lucas-garcia-entrenai-no-borrar.my.kube.um.edu.ar"
   N8N_WORKFLOW_JSON_PATH: "./src/entrenai/n8n_workflow.json"
