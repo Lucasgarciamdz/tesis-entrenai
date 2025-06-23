@@ -17,7 +17,7 @@ spec:
       - name: celery-worker
         image: luxor12354/tesis-entrenai:celery
         imagePullPolicy: Always
-        command: [ "celery", "-A", "entrenai.celery_app", "worker", "--loglevel=info" ]
+        command: [ "celery", "-A", "src.entrenai.celery_app.app", "worker", "-l", "INFO", "-P", "eventlet" ]
         envFrom:
         - configMapRef:
             name: celery-config

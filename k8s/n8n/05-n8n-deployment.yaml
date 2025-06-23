@@ -15,10 +15,12 @@ spec:
     spec:
       securityContext:
         runAsUser: 1000
+        runAsGroup: 1000
         fsGroup: 1000
+        fsGroupChangePolicy: "OnRootMismatch"
       containers:
       - name: n8n
-        image: n8nio/n8n:latest
+        image: n8nio/n8n:1.98.2
         ports:
         - containerPort: 5678
         envFrom:
