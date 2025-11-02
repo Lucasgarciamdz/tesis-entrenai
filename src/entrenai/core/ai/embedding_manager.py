@@ -5,6 +5,7 @@ from src.entrenai.api.models import DocumentChunk
 from src.entrenai.config.logger import get_logger
 from src.entrenai.core.ai.gemini_wrapper import GeminiWrapper
 from src.entrenai.core.ai.ollama_wrapper import OllamaWrapper
+from src.entrenai.core.ai.vllm_wrapper import VLLMWrapper
 
 logger = get_logger(__name__)
 
@@ -22,7 +23,7 @@ class EmbeddingManager:
 
     def __init__(
         self,
-        ollama_wrapper: Union[OllamaWrapper, GeminiWrapper],
+        ollama_wrapper: Union[OllamaWrapper, GeminiWrapper, VLLMWrapper],
         default_chunk_size: int = 1000,  # Caracteres
         default_chunk_overlap: int = 200,  # Caracteres
     ):

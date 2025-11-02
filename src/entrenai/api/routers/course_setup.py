@@ -21,17 +21,15 @@ from src.entrenai.config import (
     pgvector_config,
     ollama_config,
     gemini_config,
+    vllm_config,
     base_config,
     n8n_config,
 )
 from src.entrenai.config.logger import get_logger
 from src.entrenai.core.ai.ai_provider import get_ai_wrapper, AIProviderError
-from src.entrenai.core.ai.gemini_wrapper import (
-    GeminiWrapper,
-)  # Keep for type hint if get_ai_client stays
-from src.entrenai.core.ai.ollama_wrapper import (
-    OllamaWrapper,
-)  # Keep for type hint if get_ai_client stays
+from src.entrenai.core.ai.gemini_wrapper import GeminiWrapper
+from src.entrenai.core.ai.ollama_wrapper import OllamaWrapper
+from src.entrenai.core.ai.vllm_wrapper import VLLMWrapper
 from src.entrenai.core.clients.moodle_client import MoodleClient, MoodleAPIError
 from src.entrenai.core.clients.n8n_client import N8NClient
 from src.entrenai.core.db import PgvectorWrapper, PgvectorWrapperError  # Updated import
@@ -180,7 +178,7 @@ def get_pgvector_wrapper() -> (
     return PgvectorWrapper(config=pgvector_config)  # Updated instantiation
 
 
-def get_ai_client() -> Union[OllamaWrapper, GeminiWrapper]:
+def get_ai_client() -> Union[OllamaWrapper, GeminiWrapper, VLLMWrapper]:
     try:
         return get_ai_wrapper()
     except AIProviderError as e:
@@ -205,11 +203,30 @@ def get_ai_client() -> Union[OllamaWrapper, GeminiWrapper]:
                     status_code=500,
                     detail="No se pudo inicializar ningún proveedor de IA disponible.",
                 )
+        elif base_config.ai_provider == "vllm":
+            logger.warning(
+                "Intentando fallbacks para vLLM (Ollama seguido de Gemini)"
+            )
+            for fallback_provider in ("ollama", "gemini"):
+                try:
+                    return get_ai_wrapper(ai_provider=fallback_provider)
+                except AIProviderError as e2:
+                    logger.error(
+                        f"Error con fallback a {fallback_provider}: {e2}"
+                    )
         else:
             raise HTTPException(
                 status_code=500,
-                detail=f"Proveedor de IA '{base_config.ai_provider}' no válido. Opciones: 'ollama', 'gemini'",
+                detail=(
+                    f"Proveedor de IA '{base_config.ai_provider}' no válido. "
+                    "Opciones: 'ollama', 'gemini', 'vllm'"
+                ),
             )
+
+        raise HTTPException(
+            status_code=500,
+            detail="No se pudo inicializar ningún proveedor de IA disponible.",
+        )
 
 
 def get_n8n_client() -> N8NClient:
@@ -850,7 +867,9 @@ async def refresh_course_files(
                 }
                 if base_config.ai_provider == "gemini":
                     ai_provider_config_payload["gemini"] = vars(gemini_config)
-                else:  # Default to ollama
+                elif base_config.ai_provider == "vllm":
+                    ai_provider_config_payload["vllm"] = vars(vllm_config)
+                else:  # Default to Ollama
                     ai_provider_config_payload["ollama"] = vars(ollama_config)
 
                 # Dispatch Celery task
@@ -1327,6 +1346,13 @@ async def refresh_chat_config(
                 "host": ollama_config.host,
                 "embedding_model": ollama_config.embedding_model,
                 "qa_model": ollama_config.qa_model,
+            }
+        elif base_config.ai_provider == "vllm":
+            ai_params = {
+                "base_url": vllm_config.base_url,
+                "api_key": vllm_config.api_key,
+                "embedding_model": vllm_config.embedding_model,
+                "qa_model": vllm_config.chat_model,
             }
         else:
             logger.error(f"Proveedor de IA no soportado: {base_config.ai_provider}")

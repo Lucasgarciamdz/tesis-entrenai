@@ -18,11 +18,13 @@ from src.entrenai.config.config import (
     PgvectorConfig,
     OllamaConfig,
     GeminiConfig,
+    VLLMConfig,
     BaseConfig,
 )
 from src.entrenai.core.ai.embedding_manager import EmbeddingManager
 from src.entrenai.core.ai.gemini_wrapper import GeminiWrapper
 from src.entrenai.core.ai.ollama_wrapper import OllamaWrapper
+from src.entrenai.core.ai.vllm_wrapper import VLLMWrapper
 from src.entrenai.core.clients.moodle_client import MoodleClient
 from src.entrenai.core.db.pgvector_wrapper import PgvectorWrapper
 from src.entrenai.core.files.file_processor import FileProcessor
@@ -86,6 +88,11 @@ async def process_file_endpoint(request: FileProcessingRequest):
             g_config = GeminiConfig(**g_config_dict)
             g_config.data_dir = b_config.data_dir # Ensure data_dir is set
             ai_client = GeminiWrapper(config=g_config)
+        elif ai_provider == "vllm":
+            v_config_dict = request.ai_provider_config.get("vllm", {})
+            v_config = VLLMConfig(**v_config_dict)
+            v_config.data_dir = b_config.data_dir
+            ai_client = VLLMWrapper(config=v_config)
         else:  # Default to Ollama
             o_config_dict = request.ai_provider_config.get("ollama", {})
             o_config = OllamaConfig(**o_config_dict)

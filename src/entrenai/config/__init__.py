@@ -6,6 +6,7 @@ from .config import (
     pgvector_config,
     ollama_config,
     gemini_config,
+    vllm_config,
     n8n_config,
     celery_config,
     # Config classes
@@ -14,6 +15,7 @@ from .config import (
     PgvectorConfig,
     OllamaConfig,
     GeminiConfig,
+    VLLMConfig,
     N8NConfig,
     CeleryConfig,
 )
@@ -25,6 +27,7 @@ __all__ = [
     "pgvector_config",
     "ollama_config",
     "gemini_config",
+    "vllm_config",
     "n8n_config",
     "celery_config",
     # Config classes
@@ -33,6 +36,7 @@ __all__ = [
     "PgvectorConfig",
     "OllamaConfig",
     "GeminiConfig",
+    "VLLMConfig",
     "N8NConfig",
     "CeleryConfig",
 ]

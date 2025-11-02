@@ -4,12 +4,15 @@ from src.entrenai.config import (
     BaseConfig,
     OllamaConfig,
     GeminiConfig,
+    VLLMConfig,
     ollama_config,
     gemini_config,
+    vllm_config,
 )
 from src.entrenai.config.logger import get_logger
 from src.entrenai.core.ai.gemini_wrapper import GeminiWrapper, GeminiWrapperError
 from src.entrenai.core.ai.ollama_wrapper import OllamaWrapper, OllamaWrapperError
+from src.entrenai.core.ai.vllm_wrapper import VLLMWrapper, VLLMWrapperError
 
 logger = get_logger(__name__)
 
@@ -26,7 +29,7 @@ class AIProvider:
     def __init__(self, base_config: BaseConfig):
         self.config = base_config
         self.ai_provider = base_config.ai_provider
-        self._wrapper: Union[OllamaWrapper, GeminiWrapper, None] = None
+        self._wrapper: Union[OllamaWrapper, GeminiWrapper, VLLMWrapper, None] = None
         self._initialize_wrapper()
 
     def _initialize_wrapper(self):
@@ -43,27 +46,35 @@ class AIProvider:
             except GeminiWrapperError as e:
                 logger.error(f"Error inicializando GeminiWrapper: {e}")
                 raise AIProviderError(f"Error inicializando GeminiWrapper: {e}") from e
+        elif self.ai_provider == "vllm":
+            try:
+                self._wrapper = VLLMWrapper(config=vllm_config)
+            except VLLMWrapperError as e:
+                logger.error(f"Error inicializando VLLMWrapper: {e}")
+                raise AIProviderError(f"Error inicializando VLLMWrapper: {e}") from e
         else:
             msg = (
                 f"Proveedor de IA no válido: {self.ai_provider}. "
-                f"Opciones válidas: 'ollama', 'gemini'"
+                f"Opciones válidas: 'ollama', 'gemini', 'vllm'"
             )
             logger.error(msg)
             raise AIProviderError(msg)
 
-    def get_ai_wrapper(self) -> Union[OllamaWrapper, GeminiWrapper]:
+    def get_ai_wrapper(
+        self,
+    ) -> Union[OllamaWrapper, GeminiWrapper, VLLMWrapper]:
         """Retorna el wrapper apropiado según la configuración."""
         if not self._wrapper:
             self._initialize_wrapper()
 
-        return cast(Union[OllamaWrapper, GeminiWrapper], self._wrapper)
+        return cast(Union[OllamaWrapper, GeminiWrapper, VLLMWrapper], self._wrapper)
 
     def generate_embedding(self, text: str, model: Optional[str] = None) -> List[float]:
         """Genera un embedding vectorial para un texto usando el wrapper actual."""
         wrapper = self.get_ai_wrapper()
         try:
             return wrapper.generate_embedding(text=text, model=model)
-        except (OllamaWrapperError, GeminiWrapperError) as e:
+        except (OllamaWrapperError, GeminiWrapperError, VLLMWrapperError) as e:
             logger.error(f"Error generando embedding: {e}")
             raise AIProviderError(f"Error generando embedding: {e}") from e
 
@@ -85,7 +96,7 @@ class AIProvider:
                 context_chunks=context_chunks,
                 stream=stream,
             )
-        except (OllamaWrapperError, GeminiWrapperError) as e:
+        except (OllamaWrapperError, GeminiWrapperError, VLLMWrapperError) as e:
             error_msg = f"Error generando completación de chat: {e}"
             logger.error(error_msg)
             raise AIProviderError(error_msg) from e
@@ -102,7 +113,7 @@ class AIProvider:
             return wrapper.format_to_markdown(
                 text_content=text_content, model=model, save_path=save_path
             )
-        except (OllamaWrapperError, GeminiWrapperError) as e:
+        except (OllamaWrapperError, GeminiWrapperError, VLLMWrapperError) as e:
             error_msg = f"Error formateando texto a Markdown: {e}"
             logger.error(error_msg)
             raise AIProviderError(error_msg) from e
@@ -126,7 +137,7 @@ class AIProvider:
 def get_ai_wrapper(
     ai_provider: Optional[str] = None,
     provider_config: Optional[Dict[str, Any]] = None,
-) -> Union[OllamaWrapper, GeminiWrapper]:
+) -> Union[OllamaWrapper, GeminiWrapper, VLLMWrapper]:
     """Función auxiliar para obtener un wrapper de IA según el proveedor.
 
     Args:
@@ -160,10 +171,18 @@ def get_ai_wrapper(
                     setattr(config, key, value)
             return GeminiWrapper(config=config)
         return GeminiWrapper(config=gemini_config)
+    elif provider == "vllm":
+        if provider_config:
+            config = VLLMConfig()
+            for key, value in provider_config.items():
+                if hasattr(config, key):
+                    setattr(config, key, value)
+            return VLLMWrapper(config=config)
+        return VLLMWrapper(config=vllm_config)
     else:
         msg = (
             f"Proveedor de IA no válido: {provider}. "
-            f"Opciones válidas: 'ollama', 'gemini'"
+            f"Opciones válidas: 'ollama', 'gemini', 'vllm'"
         )
         logger.error(msg)
         raise AIProviderError(msg)

@@ -66,7 +66,7 @@ class BaseConfig(BaseModel):
     # AI provider settings
     ai_provider: str = Field(
         default_factory=lambda: os.getenv("AI_PROVIDER", "ollama").lower()
-    )  # "ollama" o "gemini"
+    )  # "ollama", "gemini" o "vllm"
 
     def __post_init__(self):
         # Ensure data directories exist
@@ -242,6 +242,46 @@ class GeminiConfig(BaseConfig):
             )
 
 
+class VLLMConfig(BaseConfig):
+    """vLLM OpenAI-compatible server configurations."""
+
+    base_url: Optional[str] = Field(
+        default_factory=lambda: os.getenv("VLLM_BASE_URL")
+    )
+    api_key: Optional[str] = Field(default_factory=lambda: os.getenv("VLLM_API_KEY"))
+    chat_model: str = Field(
+        default_factory=lambda: os.getenv("VLLM_CHAT_MODEL", "qwen3:1.7b-q8_0")
+    )
+    embedding_model: str = Field(
+        default_factory=lambda: os.getenv(
+            "VLLM_EMBEDDING_MODEL", "qwen3-embedding:8b"
+        )
+    )
+    markdown_model: Optional[str] = Field(
+        default_factory=lambda: os.getenv("VLLM_MARKDOWN_MODEL")
+    )
+    request_timeout_seconds: float = Field(
+        default_factory=lambda: float(os.getenv("VLLM_REQUEST_TIMEOUT_SECONDS", "60.0"))
+    )
+    idle_timeout_seconds: Optional[int] = Field(
+        default_factory=lambda: (
+            int(os.getenv("VLLM_IDLE_TIMEOUT_SECONDS"))
+            if os.getenv("VLLM_IDLE_TIMEOUT_SECONDS")
+            else None
+        )
+    )
+
+    def __post_init__(self):
+        super().__post_init__()
+        if not self.base_url:
+            logging.warning(
+                "Advertencia: VLLM_BASE_URL no está configurado en el entorno. El proveedor vLLM no estará disponible."
+            )
+        if not self.markdown_model:
+            # Fallback to chat model when no dedicated markdown model is provided
+            self.markdown_model = self.chat_model
+
+
 class N8NConfig(BaseConfig):
     """N8N specific configurations."""
 
@@ -316,6 +356,7 @@ ollama_config = OllamaConfig()
 gemini_config = GeminiConfig()
 n8n_config = N8NConfig()
 celery_config = CeleryConfig()
+vllm_config = VLLMConfig()
 
 # Example of how to use:
 # from entrenai.config import moodle_config

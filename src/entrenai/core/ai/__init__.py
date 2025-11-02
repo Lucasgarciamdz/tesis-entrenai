@@ -8,6 +8,8 @@ __all__ = [
     "GeminiWrapperError",
     "OllamaWrapper",
     "OllamaWrapperError",
+    "VLLMWrapper",
+    "VLLMWrapperError",
 ]
 
 
@@ -53,5 +55,18 @@ class OllamaWrapper:
 
 class OllamaWrapperError(Exception):
     """Custom exception for OllamaWrapper errors."""
+
+    pass
+
+
+class VLLMWrapper:
+    def __new__(cls, *args, **kwargs):
+        from .vllm_wrapper import VLLMWrapper as _VLLMWrapper
+
+        return _VLLMWrapper(*args, **kwargs)
+
+
+class VLLMWrapperError(Exception):
+    """Custom exception for VLLMWrapper errors."""
 
     pass

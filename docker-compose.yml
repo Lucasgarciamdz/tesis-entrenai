@@ -131,6 +131,40 @@ services:
               count: 1 # or 'all'
               capabilities: [gpu]
 
+  # --- vLLM OpenAI-Compatible Server ---
+  vllm:
+    image: vllm/vllm-openai:latest
+    container_name: entrenai_vllm
+    restart: unless-stopped
+    runtime: nvidia
+    ports:
+      - "${VLLM_HOST_PORT:-8001}:8000"
+    volumes:
+      - vllm_models:/models
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - HF_HOME=/models/hf-cache
+    command: >
+      python -m vllm.entrypoints.openai.api_server
+      --model ${VLLM_CHAT_MODEL:-qwen3:1.7b-q8_0}
+      --gpu-memory-utilization ${VLLM_GPU_MEMORY_UTILIZATION:-0.8}
+      --max-model-len ${VLLM_MAX_MODEL_LEN:-32768}
+      --api-key ${VLLM_API_KEY:-replace-with-secure-token}
+      --download-dir /models
+      --trust-remote-code
+      --host 0.0.0.0
+      --port 8000
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - entrenai_net
+
 
   # --- PostgreSQL Database for N8N ---
   n8n_db:
@@ -204,6 +238,8 @@ services:
         condition: service_healthy
       pgvector_db:
         condition: service_healthy
+      vllm:
+        condition: service_started
       # moodle_db: # If the API interacts with Moodle services that depend on Moodle DB directly
       #   condition: service_healthy
         # Add other necessary dependencies
@@ -251,11 +287,13 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       FASTAPI_BACKEND_URL: http://fastapi_backend:8000 # URL for the backend API
       # PYTHONUNBUFFERED: 1 # Good for seeing logs immediately
-    # depends_on:
-    #   redis:
-    #     condition: service_healthy
-    #   fastapi_backend: # Depends on the new backend service
-    #     condition: service_healthy
+    depends_on:
+      redis:
+        condition: service_healthy
+      fastapi_backend:
+        condition: service_started
+      vllm:
+        condition: service_started
     networks:
       - entrenai_net
 
@@ -282,6 +320,8 @@ volumes:
   pgvector_data: 
     driver: local
   ollama_models:
+    driver: local
+  vllm_models:
     driver: local
   n8n_db_data:
     driver: local
