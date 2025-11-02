@@ -1,6 +1,6 @@
 import logging  # Import standard logging to get a logger instance
 import os
-from typing import Optional
+from typing import Dict, Optional
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
@@ -248,14 +248,23 @@ class VLLMConfig(BaseConfig):
     base_url: Optional[str] = Field(
         default_factory=lambda: os.getenv("VLLM_BASE_URL")
     )
+    embedding_base_url: Optional[str] = Field(
+        default_factory=lambda: os.getenv("VLLM_EMBED_BASE_URL")
+    )
     api_key: Optional[str] = Field(default_factory=lambda: os.getenv("VLLM_API_KEY"))
     chat_model: str = Field(
         default_factory=lambda: os.getenv("VLLM_CHAT_MODEL", "qwen3:1.7b-q8_0")
+    )
+    chat_model_path: Optional[str] = Field(
+        default_factory=lambda: os.getenv("VLLM_CHAT_MODEL_PATH")
     )
     embedding_model: str = Field(
         default_factory=lambda: os.getenv(
             "VLLM_EMBEDDING_MODEL", "qwen3-embedding:8b"
         )
+    )
+    embedding_model_path: Optional[str] = Field(
+        default_factory=lambda: os.getenv("VLLM_EMBEDDING_MODEL_PATH")
     )
     markdown_model: Optional[str] = Field(
         default_factory=lambda: os.getenv("VLLM_MARKDOWN_MODEL")
@@ -270,6 +279,7 @@ class VLLMConfig(BaseConfig):
             else None
         )
     )
+    model_alias_map: Dict[str, str] = Field(default_factory=dict)
 
     def __post_init__(self):
         super().__post_init__()
@@ -277,9 +287,20 @@ class VLLMConfig(BaseConfig):
             logging.warning(
                 "Advertencia: VLLM_BASE_URL no está configurado en el entorno. El proveedor vLLM no estará disponible."
             )
+        if not self.embedding_base_url:
+            # Fallback al mismo endpoint si no se especifica uno para embeddings
+            self.embedding_base_url = self.base_url
         if not self.markdown_model:
             # Fallback to chat model when no dedicated markdown model is provided
             self.markdown_model = self.chat_model
+
+        # Construir el mapa de alias -> ruta real para los modelos pre-cargados
+        if self.chat_model and self.chat_model_path:
+            self.model_alias_map.setdefault(self.chat_model, self.chat_model_path)
+        if self.embedding_model and self.embedding_model_path:
+            self.model_alias_map.setdefault(
+                self.embedding_model, self.embedding_model_path
+            )
 
 
 class N8NConfig(BaseConfig):

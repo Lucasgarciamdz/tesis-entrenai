@@ -145,16 +145,52 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - HF_HOME=/models/hf-cache
+      - HF_TOKEN=${VLLM_HF_TOKEN:-}
     command: >
-      python -m vllm.entrypoints.openai.api_server
-      --model ${VLLM_CHAT_MODEL:-qwen3:1.7b-q8_0}
-      --gpu-memory-utilization ${VLLM_GPU_MEMORY_UTILIZATION:-0.8}
+      --model ${VLLM_CHAT_MODEL_PATH:-Qwen/Qwen3-1.7B-Instruct}
+      --served-model-name ${VLLM_CHAT_MODEL:-qwen3:1.7b-q8_0}
+      --gpu-memory-utilization ${VLLM_GPU_MEMORY_UTILIZATION:-0.6}
       --max-model-len ${VLLM_MAX_MODEL_LEN:-32768}
       --api-key ${VLLM_API_KEY:-replace-with-secure-token}
       --download-dir /models
       --trust-remote-code
       --host 0.0.0.0
       --port 8000
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - entrenai_net
+
+  # --- vLLM Embedding Server ---
+  vllm-embedding:
+    image: vllm/vllm-openai:latest
+    container_name: entrenai_vllm_embedding
+    restart: unless-stopped
+    runtime: nvidia
+    ports:
+      - "${VLLM_EMBED_HOST_PORT:-8002}:8000"
+    volumes:
+      - vllm_embedding_models:/models
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - HF_HOME=/models/hf-cache
+      - HF_TOKEN=${VLLM_HF_TOKEN:-}
+    command: >
+      --model ${VLLM_EMBEDDING_MODEL_PATH:-Qwen/Qwen3-Embedding-8B}
+      --served-model-name ${VLLM_EMBEDDING_MODEL:-qwen3-embedding:8b}
+      --gpu-memory-utilization ${VLLM_EMBED_GPU_MEMORY_UTILIZATION:-0.2}
+      --api-key ${VLLM_API_KEY:-replace-with-secure-token}
+      --download-dir /models
+      --trust-remote-code
+      --host 0.0.0.0
+      --port 8000
+      --task embedding
     deploy:
       resources:
         reservations:
@@ -240,6 +276,8 @@ services:
         condition: service_healthy
       vllm:
         condition: service_started
+      vllm-embedding:
+        condition: service_started
       # moodle_db: # If the API interacts with Moodle services that depend on Moodle DB directly
       #   condition: service_healthy
         # Add other necessary dependencies
@@ -294,6 +332,8 @@ services:
         condition: service_started
       vllm:
         condition: service_started
+      vllm-embedding:
+        condition: service_started
     networks:
       - entrenai_net
 
@@ -322,6 +362,8 @@ volumes:
   ollama_models:
     driver: local
   vllm_models:
+    driver: local
+  vllm_embedding_models:
     driver: local
   n8n_db_data:
     driver: local

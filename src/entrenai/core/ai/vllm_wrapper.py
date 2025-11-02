@@ -1,5 +1,3 @@
-import threading
-import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -19,184 +17,118 @@ CLIENT_NOT_INITIALIZED = "Cliente vLLM no inicializado."
 
 
 class VLLMWrapperError(Exception):
-    """Custom exception for VLLM wrapper related errors."""
+    """Custom exception for vLLM wrapper related errors."""
 
     pass
 
 
 class VLLMWrapper:
-    """Wrapper around a vLLM OpenAI-compatible server."""
+    """Wrapper for interacting with one or more vLLM OpenAI-compatible servers."""
 
     def __init__(self, config: VLLMConfig):
         self.config = config
+
         if not config.base_url:
-            logger.error(
-                "VLLM_BASE_URL no está configurado. VLLMWrapper no será funcional."
+            raise VLLMWrapperError(
+                "VLLM_BASE_URL no está configurado. El wrapper no será funcional."
             )
-            raise VLLMWrapperError("VLLM_BASE_URL no configurado.")
 
-        self._last_used_at: Dict[str, float] = {}
-        self._unload_timers: Dict[str, threading.Timer] = {}
-        self._loaded_models: Dict[str, bool] = {}
-        self._load_lock = threading.Lock()
+        self.chat_client = self._build_client(config.base_url, config.api_key)
+        embed_base_url = config.embedding_base_url or config.base_url
+        if embed_base_url.rstrip("/") == config.base_url.rstrip("/"):
+            self.embedding_client = self.chat_client
+        else:
+            self.embedding_client = self._build_client(embed_base_url, config.api_key)
 
-        headers = {}
-        if config.api_key:
-            headers["Authorization"] = f"Bearer {config.api_key}"
+        self._available_models: Dict[str, set[str]] = {}
 
-        self.client = httpx.Client(
-            base_url=config.base_url.rstrip("/"),
-            timeout=config.request_timeout_seconds,
+        # Verificar modelos esperados al inicializar
+        self._ensure_model_available(config.chat_model, self.chat_client)
+        if config.embedding_model:
+            self._ensure_model_available(config.embedding_model, self.embedding_client)
+        if config.markdown_model:
+            self._ensure_model_available(config.markdown_model, self.chat_client)
+
+    @staticmethod
+    def _build_client(base_url: str, api_key: Optional[str]) -> httpx.Client:
+        headers: Dict[str, str] = {}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        return httpx.Client(
+            base_url=base_url.rstrip("/"),
+            timeout=None,
             headers=headers,
         )
 
+    def _list_models(self, client: httpx.Client) -> set[str]:
+        base = client.base_url
+        if str(base) in self._available_models:
+            return self._available_models[str(base)]
+
         try:
-            self._ensure_connection()
-        except Exception as exc:
-            logger.error(
-                "Falló la conexión inicial con el servidor vLLM en %s: %s",
-                config.base_url,
-                exc,
-            )
-            self.client.close()
+            response = client.get("/v1/models")
+            response.raise_for_status()
+            payload = response.json()
+            models = {
+                item.get("id")
+                for item in payload.get("data", [])
+                if isinstance(item, dict) and item.get("id")
+            }
+            self._available_models[str(base)] = models
+            return models
+        except Exception as exc:  # pragma: no cover - network/infra errors
+            logger.error("Error obteniendo modelos disponibles de vLLM: %s", exc)
             raise VLLMWrapperError(
-                f"Falló la conexión inicial con el servidor vLLM: {exc}"
+                f"No se pudieron listar los modelos disponibles en {base!s}: {exc}"
             ) from exc
 
-    # ------------------------------------------------------------------ #
-    # Private helpers
-    # ------------------------------------------------------------------ #
-    def _ensure_connection(self) -> None:
-        """Confirms the server is reachable and caches any already loaded models."""
-        response = self.client.get("/v1/models")
-        response.raise_for_status()
-
-        data = response.json()
-        models = data.get("data", []) if isinstance(data, dict) else []
-        for model_obj in models:
-            model_id = model_obj.get("id")
-            if model_id:
-                self._loaded_models[model_id] = True
-                logger.info("Modelo vLLM '%s' detectado como cargado.", model_id)
-
-    def _ensure_model_loaded(self, model_name: str) -> None:
-        """Loads the model if it is not currently available."""
-        if not model_name:
-            raise VLLMWrapperError("Nombre de modelo vacío provisto para vLLM.")
-
-        with self._load_lock:
-            if self._loaded_models.get(model_name):
-                return
-
-            logger.info("Cargando modelo vLLM '%s' bajo demanda.", model_name)
-            payload: Dict[str, Any] = {"model": model_name}
-            response = self.client.post("/v1/models", json=payload)
-            if response.status_code not in (200, 201):
-                raise VLLMWrapperError(
-                    f"No se pudo cargar el modelo '{model_name}': {response.text}"
-                )
-            self._loaded_models[model_name] = True
-            logger.info("Modelo vLLM '%s' cargado exitosamente.", model_name)
-
-    def _schedule_unload(self, model_name: str) -> None:
-        """Schedules unloading a model after the configured idle timeout."""
-        if not self.config.idle_timeout_seconds:
+    def _ensure_model_available(
+        self, model_alias: str, client: httpx.Client
+    ) -> None:
+        models = self._list_models(client)
+        if model_alias in models:
             return
 
-        if model_name in self._unload_timers:
-            self._unload_timers[model_name].cancel()
+        resolved_path = self.config.model_alias_map.get(model_alias)
+        if resolved_path and resolved_path in models:
+            return
 
-        timer = threading.Timer(
-            self.config.idle_timeout_seconds, self._attempt_unload, args=(model_name,)
+        base = client.base_url
+        raise VLLMWrapperError(
+            f"El modelo '{model_alias}' no está registrado en el servidor vLLM ({base}). "
+            "Verifique que el contenedor se haya iniciado con --served-model-name "
+            "coincidente o ajuste las variables de entorno VLLM_*."
         )
-        timer.daemon = True
-        self._unload_timers[model_name] = timer
-        timer.start()
 
-    def _attempt_unload(self, model_name: str) -> None:
-        """Attempts to unload the model if it has been idle long enough."""
-        last_used = self._last_used_at.get(model_name)
-        if last_used is None:
-            return
-
-        elapsed = time.monotonic() - last_used
-        if elapsed < (self.config.idle_timeout_seconds or 0):
-            # A newer request refreshed the timer.
-            logger.debug(
-                "Modelo vLLM '%s' uso reciente detectado (%.2fs), no se descarga.",
-                model_name,
-                elapsed,
-            )
-            return
-
-        logger.info(
-            "Descargando modelo vLLM '%s' por inactividad (%.2f s).",
-            model_name,
-            elapsed,
-        )
-        try:
-            response = self.client.delete(f"/v1/models/{model_name}")
-            if response.status_code not in (200, 202, 204):
-                logger.warning(
-                    "El servidor vLLM devolvió estado %s al descargar '%s': %s",
-                    response.status_code,
-                    model_name,
-                    response.text,
-                )
-            else:
-                logger.info("Modelo vLLM '%s' descargado exitosamente.", model_name)
-                with self._load_lock:
-                    self._loaded_models.pop(model_name, None)
-        except Exception as exc:
-            logger.warning(
-                "No se pudo descargar el modelo vLLM '%s': %s", model_name, exc
-            )
-
-    def _update_last_used(self, model_name: str) -> None:
-        self._last_used_at[model_name] = time.monotonic()
-        self._schedule_unload(model_name)
-
-    def _chat_request(
-        self,
-        model_name: str,
-        messages: List[Dict[str, str]],
-        temperature: float = 0.2,
-        stream: bool = False,
-    ) -> Dict[str, Any]:
-        payload = {
-            "model": model_name,
-            "messages": messages,
-            "temperature": temperature,
-            "stream": stream,
-        }
-        response = self.client.post("/v1/chat/completions", json=payload)
-        response.raise_for_status()
-        return response.json()
-
-    # ------------------------------------------------------------------ #
-    # Public interface
-    # ------------------------------------------------------------------ #
-    def generate_embedding(self, text: str, model: Optional[str] = None) -> List[float]:
-        if not self.client:
+    def _select_client(
+        self, is_embedding: bool = False
+    ) -> httpx.Client:
+        if is_embedding and self.embedding_client:
+            return self.embedding_client
+        if not self.chat_client:
             raise VLLMWrapperError(CLIENT_NOT_INITIALIZED)
+        return self.chat_client
 
-        model_to_use = model or self.config.embedding_model
-        self._ensure_model_loaded(model_to_use)
+    def generate_embedding(self, text: str, model: Optional[str] = None) -> List[float]:
+        client = self._select_client(is_embedding=True)
+        model_alias = model or self.config.embedding_model
+        if not model_alias:
+            raise VLLMWrapperError("Nombre del modelo de embeddings no configurado.")
 
-        payload = {"model": model_to_use, "input": [text]}
-        response = self.client.post("/v1/embeddings", json=payload)
-        response.raise_for_status()
-        data = response.json()
+        self._ensure_model_available(model_alias, client)
 
         try:
-            embedding = data["data"][0]["embedding"]
-        except (KeyError, IndexError, TypeError) as exc:
+            response = client.post(
+                "/v1/embeddings", json={"model": model_alias, "input": [text]}
+            )
+            response.raise_for_status()
+            payload = response.json()
+            return payload["data"][0]["embedding"]
+        except Exception as exc:
+            logger.error("Error generando embedding con '%s': %s", model_alias, exc)
             raise VLLMWrapperError(
-                f"Respuesta inesperada al solicitar embeddings: {data}"
+                f"Falló la generación del embedding: {exc}"
             ) from exc
-
-        self._update_last_used(model_to_use)
-        return embedding
 
     def generate_chat_completion(
         self,
@@ -206,49 +138,48 @@ class VLLMWrapper:
         context_chunks: Optional[List[str]] = None,
         stream: bool = False,
     ) -> str:
-        if not self.client:
-            raise VLLMWrapperError(CLIENT_NOT_INITIALIZED)
+        if stream:
+            logger.warning(
+                "El streaming aún no está soportado en VLLMWrapper. Se devolverá la respuesta completa."
+            )
 
-        model_to_use = model or self.config.chat_model
-        self._ensure_model_loaded(model_to_use)
+        client = self._select_client()
+        model_alias = model or self.config.chat_model
+        self._ensure_model_available(model_alias, client)
 
         messages: List[Dict[str, str]] = []
         if system_message:
             messages.append({"role": "system", "content": system_message})
 
         if context_chunks:
-            context = "\n\n".join(context_chunks)
-            messages.append(
-                {
-                    "role": "user",
-                    "content": f"Contexto:\n{context}\n\nPregunta: {prompt}",
-                }
-            )
+            context_text = "\n\n".join(context_chunks)
+            user_prompt = f"Contexto:\n{context_text}\n\nPregunta: {prompt}"
         else:
-            messages.append({"role": "user", "content": prompt})
+            user_prompt = prompt
+        messages.append({"role": "user", "content": user_prompt})
 
         try:
-            response_data = self._chat_request(
-                model_name=model_to_use, messages=messages, stream=stream
+            response = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": model_alias,
+                    "messages": messages,
+                    "stream": False,
+                },
             )
-        except httpx.HTTPError as exc:
-            raise VLLMWrapperError(
-                f"Error en la solicitud de chat a vLLM: {exc}"
-            ) from exc
-
-        try:
-            choices = response_data["choices"]
+            response.raise_for_status()
+            payload = response.json()
+            choices = payload.get("choices", [])
             if not choices:
-                raise ValueError("La lista 'choices' está vacía.")
-            message = choices[0]["message"]
-            content = message.get("content", "")
-        except (KeyError, IndexError, TypeError, ValueError) as exc:
+                return ""
+            return choices[0]["message"].get("content", "") or ""
+        except Exception as exc:
+            logger.error(
+                "Error generando completado de chat con '%s': %s", model_alias, exc
+            )
             raise VLLMWrapperError(
-                f"Respuesta inesperada al generar completación: {response_data}"
+                f"Falló la generación de la respuesta del chat: {exc}"
             ) from exc
-
-        self._update_last_used(model_to_use)
-        return content or ""
 
     def format_to_markdown(
         self,
@@ -256,13 +187,12 @@ class VLLMWrapper:
         model: Optional[str] = None,
         save_path: Optional[str] = None,
     ) -> str:
-        if not self.client:
-            raise VLLMWrapperError(CLIENT_NOT_INITIALIZED)
-
-        model_to_use = model or self.config.markdown_model or self.config.chat_model
-        self._ensure_model_loaded(model_to_use)
+        client = self._select_client()
+        model_alias = model or self.config.markdown_model or self.config.chat_model
+        self._ensure_model_available(model_alias, client)
 
         cleaned_text = preprocess_text_content(text_content)
+
         system_prompt = (
             "Eres un experto formateador de texto especializado en convertir texto crudo a Markdown limpio. "
             "Tu tarea es transformar el contenido dado a un formato Markdown estructurado adecuadamente. Sigue estas reglas estrictamente:\n\n"
@@ -277,45 +207,44 @@ class VLLMWrapper:
             "El objetivo es un Markdown limpio y bien estructurado que represente con precisión el contenido original."
         )
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": cleaned_text},
-        ]
+        payload = {
+            "model": model_alias,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": cleaned_text},
+            ],
+            "stream": False,
+        }
 
         try:
-            response_data = self._chat_request(
-                model_name=model_to_use, messages=messages, temperature=0.0
-            )
-        except httpx.HTTPError as exc:
-            raise VLLMWrapperError(
-                f"Error formateando texto a Markdown con vLLM: {exc}"
-            ) from exc
-
-        try:
-            choices = response_data["choices"]
+            response = client.post("/v1/chat/completions", json=payload)
+            response.raise_for_status()
+            data = response.json()
+            choices = data.get("choices", [])
             if not choices:
-                raise ValueError("La lista 'choices' está vacía.")
-            message = choices[0]["message"]
-            content = postprocess_markdown_content(message.get("content", ""))
-        except (KeyError, IndexError, TypeError, ValueError) as exc:
+                return ""
+            content = postprocess_markdown_content(
+                choices[0]["message"].get("content", "")
+            )
+            if content and save_path:
+                save_markdown_to_file(content, Path(save_path))
+            return content
+        except Exception as exc:
+            logger.error(
+                "Error formateando texto a Markdown con '%s': %s", model_alias, exc
+            )
             raise VLLMWrapperError(
-                f"Respuesta inesperada al formatear Markdown: {response_data}"
+                f"Falló el formateo de texto a Markdown: {exc}"
             ) from exc
-
-        if save_path and content:
-            save_markdown_to_file(content, Path(save_path))
-
-        self._update_last_used(model_to_use)
-        return content
 
     def close(self) -> None:
-        """Release HTTP resources."""
-        if self.client:
-            self.client.close()
+        try:
+            if self.embedding_client is not self.chat_client:
+                self.embedding_client.close()
+            self.chat_client.close()
+        except Exception:  # pragma: no cover - cleanup best effort
+            pass
 
     def __del__(self):
-        try:
-            self.close()
-        except Exception:
-            pass
+        self.close()
 
