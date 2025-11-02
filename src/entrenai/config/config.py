@@ -82,7 +82,7 @@ class BaseConfig(BaseModel):
 class MoodleConfig(BaseConfig):
     """Moodle specific configurations."""
 
-    url: Optional[str] = Field(default_factory=lambda: os.getenv("MOODLE_URL"))
+    url: Optional[str] = Field(default_factory=lambda: os.getenv("MOODLE_URL_API"))
     token: Optional[str] = Field(default_factory=lambda: os.getenv("MOODLE_TOKEN"))
     course_folder_name: str = Field(
         default_factory=lambda: os.getenv(

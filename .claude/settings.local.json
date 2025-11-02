@@ -1,0 +1,9 @@
+{
+  "enabledMcpjsonServers": [
+    "context7",
+    "postgresql",
+    "memory",
+    "exa"
+  ],
+  "enableAllProjectMcpServers": true
+}

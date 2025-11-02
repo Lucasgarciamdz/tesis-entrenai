@@ -1,56 +1,59 @@
 services:
-  # --- PostgreSQL Database for Moodle ---
+  # # --- PostgreSQL Database for Moodle ---
   moodle_db:
-    image: postgres:17.5
-    container_name: entrenai_moodle_db
+    image: postgres:15
     restart: unless-stopped
-    ports:
-      - "${MOODLE_DB_HOST_PORT:-5433}:5432" # PostgreSQL port
-    volumes:
-      - moodle_db_data:/var/lib/postgresql/data
-    environment:
-      POSTGRES_USER: ${MOODLE_DB_USER:-moodle_user}
-      POSTGRES_PASSWORD: ${MOODLE_DB_PASSWORD:-moodle_password}
-      POSTGRES_DB: ${MOODLE_DB_NAME:-moodle_db}
-      POSTGRES_INITDB_ARGS: ${POSTGRES_INITDB_ARGS}
-      POSTGRES_HOST_AUTH_METHOD: ${POSTGRES_HOST_AUTH_METHOD}
     networks:
       - entrenai_net
+    environment:
+      POSTGRES_DB: ${DB_NAME:-moodle}
+      POSTGRES_USER: ${DB_USER:-moodle}
+      POSTGRES_PASSWORD: ${DB_PASS:-strongpass}
+    volumes:
+      - moodle_db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-moodle_user} -d $${POSTGRES_DB:-moodle_db}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # --- Moodle Application ---
+  # # --- Moodle Application ---
   moodle:
-    image: bitnami/moodle:4.5.4
-    container_name: entrenai_moodle_app
-    restart: unless-stopped
-    ports:
-      - "${MOODLE_HOST_PORT:-8080}:8080" # Moodle app port
-      - "${MOODLE_HOST_SSL_PORT:-8443}:8443" # Moodle SSL port
-    volumes:
-      - moodle_app_data:/bitnami/moodle
-      - moodle_data_dir:/bitnami/moodledata # Moodle data directory
-    environment:
-      MOODLE_DATABASE_TYPE: pgsql
-      MOODLE_DATABASE_HOST: moodle_db
-      MOODLE_DATABASE_PORT_NUMBER: 5432
-      MOODLE_DATABASE_USER: ${MOODLE_DB_USER:-moodle_user}
-      MOODLE_DATABASE_PASSWORD: ${MOODLE_DB_PASSWORD:-moodle_password}
-      MOODLE_DATABASE_NAME: ${MOODLE_DB_NAME:-moodle_db}
-      MOODLE_USERNAME: ${MOODLE_USERNAME:-admin}
-      MOODLE_PASSWORD: ${MOODLE_PASSWORD:-admin_password}
-      MOODLE_EMAIL: ${MOODLE_EMAIL:-admin@example.com}
-      MOODLE_SITE_NAME: ${MOODLE_SITENAME:-Entrenai Moodle}
-      MOODLE_REVERSEPROXY: ${MOODLE_REVERSEPROXY:-no}
-      ALLOW_EMPTY_PASSWORD: 'no'
+    build:
+      context: .
+      dockerfile: Dockerfile.moodle
+    image: local/moodle:5
+    networks:
+      - entrenai_net
     depends_on:
       moodle_db:
         condition: service_healthy
-    networks:
-      - entrenai_net
+    ports:
+      - "80:80"
+    environment:
+      MOODLE_URL: ${MOODLE_URL:-http://moodle:80}
+      DB_HOST: ${MOODLE_DB_HOST:-moodle_db}
+      DB_PORT: ${MOODLE_DB_PORT:-5432}
+      DB_NAME: ${MOODLE_DB_NAME:-moodle}
+      DB_USER: ${MOODLE_DB_USER:-moodle}
+      DB_PASS: ${MOODLE_DB_PASS:-strongpass}
+      SITE_FULLNAME: ${SITE_FULLNAME:-Moodle 5 Site}
+      SITE_SHORTNAME: ${SITE_SHORTNAME:-M5}
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASS: ${ADMIN_PASS:-ChangeMe!123}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+      ENTRENAI_USER_PASSWORD: ${ENTRENAI_USER_PASSWORD:-ChangeMe!123}
+      BOOTSTRAP_FIXTURES: ${BOOTSTRAP_FIXTURES:-0}
+    volumes:
+      - moodle_code:/var/www/html
+      - moodle_data:/var/moodledata
+      - ./bootstrap:/bootstrap:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost/login/index.php || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
 
   # --- PGVector Database ---
   pgvector_db:
@@ -77,25 +80,57 @@ services:
 
   # --- Ollama LLM Server ---
   ollama:
-    image: ollama/ollama:0.6.8
+    image: ollama/ollama:0.12.9
     container_name: entrenai_ollama
     restart: unless-stopped
+    runtime: nvidia
     ports:
       - "${OLLAMA_HOST_PORT:-11434}:11434"
     volumes:
       - ollama_models:/root/.ollama # Persist models
     environment:
-      OLLAMA_CONTEXT_LENGTH: 25000
-    # To enable GPU support (example for NVIDIA, ensure drivers are installed on host):
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1 # or 'all'
-    #           capabilities: [gpu]
+      - OLLAMA_KEEP_ALIVE=10m
+      - OLLAMA_MAX_LOADED_MODELS=2
+      - OLLAMA_CONTEXT_LENGTH=32768
+      - OLLAMA_FLASH_ATTENTION=true
+      - OLLAMA_GPU_OVERHEAD=0
+      - OLLAMA_LLM_LIBRARY=auto
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - OLLAMA_CUDA=1
+      - OLLAMA_NUM_GPU_LAYERS=999
+      - OLLAMA_KV_CACHE_TYPE=q8_0
+      - OLLAMA_LLM_LIBRARY=cuda
+      - CUDA_VISIBLE_DEVICES=0
+      - OLLAMA_MAX_QUEUE=1024
+      - OLLAMA_NUM_PARALLEL=2
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        ollama serve &
+        sleep 10 &&
+        ollama pull qwen3:1.7b-q8_0 &&
+        ollama pull qwen3-embedding:8b &&
+        # preload only the generative model
+        ollama run qwen3:1.7b-q8_0 &&
+        wait
     networks:
       - entrenai_net
+    devices:
+      - /dev/nvidia0
+      - /dev/nvidiactl
+      - /dev/nvidia-uvm
+      - /dev/nvidia-uvm-tools
+      - /dev/nvidia-modeset
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1 # or 'all'
+              capabilities: [gpu]
+
 
   # --- PostgreSQL Database for N8N ---
   n8n_db:
@@ -120,7 +155,7 @@ services:
 
   # --- N8N Workflow Automation ---
   n8n:
-    image: n8nio/n8n:1.91.3
+    image: n8nio/n8n:1.117.3
     container_name: entrenai_n8n_app
     restart: unless-stopped
     ports:
@@ -169,8 +204,8 @@ services:
         condition: service_healthy
       pgvector_db:
         condition: service_healthy
-      moodle_db: # If the API interacts with Moodle services that depend on Moodle DB directly
-        condition: service_healthy
+      # moodle_db: # If the API interacts with Moodle services that depend on Moodle DB directly
+      #   condition: service_healthy
         # Add other necessary dependencies
     networks:
       - entrenai_net
@@ -198,6 +233,7 @@ services:
       timeout: 5s
       retries: 5
 
+
   celery_worker:
     build:
       context: .
@@ -223,9 +259,22 @@ services:
     networks:
       - entrenai_net
 
+# (Optional) ADD this GPU check service to the same compose (use when needed)
+  cuda-smi:
+    image: nvidia/cuda:12.9.0-base-ubuntu22.04
+    command: ["bash","-lc","nvidia-smi && ls -l /dev/nvidia*"]
+    restart: "no"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - entrenai_net
+
 volumes:
-  moodle_db_data:
-    driver: local
   moodle_app_data:
     driver: local
   moodle_data_dir:
@@ -242,6 +291,9 @@ volumes:
     driver: local
   entrenai_data: # Added for Celery worker data
     driver: local
+  moodle_db_data:
+  moodle_code:
+  moodle_data:
 
 networks:
   entrenai_net:

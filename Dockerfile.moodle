@@ -1,0 +1,99 @@
+FROM php:8.3-apache
+
+ENV MOODLE_BRANCH=stable501 \
+    MOODLE_TARBALL=moodle-latest-501.tgz \
+    MOODLE_DOWNLOAD_BASE=https://download.moodle.org/download.php/direct
+
+# Install required system packages and PHP extensions
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        gosu \
+        rsync \
+        unzip \
+        gnupg \
+        libicu-dev \
+        libxml2-dev \
+        libzip-dev \
+        libcurl4-openssl-dev \
+        libpng-dev \
+        libjpeg62-turbo-dev \
+        libfreetype6-dev \
+        libonig-dev \
+        libpq-dev \
+        libsodium-dev \
+        postgresql-client; \
+    docker-php-ext-configure gd --with-freetype --with-jpeg; \
+    docker-php-ext-install -j"$(nproc)" \
+        intl \
+        soap \
+        xml \
+        zip \
+        gd \
+        mbstring \
+        exif \
+        sodium \
+        curl \
+        pdo_pgsql \
+        pgsql \
+        opcache; \
+    a2enmod rewrite; \
+    rm -rf /var/lib/apt/lists/*
+
+# Configure Apache DocumentRoot for Moodle public directory and allow overrides
+ENV APACHE_DOCUMENT_ROOT=/var/www/html/public
+RUN set -eux; \
+    sed -ri 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/000-default.conf /etc/apache2/sites-available/default-ssl.conf; \
+    { \
+        echo "<Directory /var/www/html>"; \
+        echo "    AllowOverride All"; \
+        echo "</Directory>"; \
+    } > /etc/apache2/conf-available/moodle-root.conf; \
+    { \
+        echo "<Directory ${APACHE_DOCUMENT_ROOT}>"; \
+        echo "    AllowOverride All"; \
+        echo "    Require all granted"; \
+        echo "</Directory>"; \
+    } > /etc/apache2/conf-available/moodle-public.conf; \
+    a2enconf moodle-root moodle-public
+
+# Fetch and extract Moodle 5.1+ (weekly) with checksum verification
+RUN set -eux; \
+    mkdir -p /usr/src; \
+    rm -rf /usr/src/moodle; \
+    curl -fsSL "${MOODLE_DOWNLOAD_BASE}/${MOODLE_BRANCH}/${MOODLE_TARBALL}" -o /tmp/moodle.tgz; \
+    curl -fsSL "${MOODLE_DOWNLOAD_BASE}/${MOODLE_BRANCH}/${MOODLE_TARBALL}.sha256" -o /tmp/moodle.tgz.sha256; \
+    SHA256=$(grep -Eo '[0-9a-fA-F]{64}' /tmp/moodle.tgz.sha256 | head -n 1); \
+    if [ -z "$SHA256" ]; then echo "Unable to parse Moodle SHA256 checksum" >&2; exit 1; fi; \
+    echo "${SHA256}  /tmp/moodle.tgz" | sha256sum -c -; \
+    tar -xzf /tmp/moodle.tgz -C /usr/src; \
+    rm -f /tmp/moodle.tgz /tmp/moodle.tgz.sha256; \
+    chown -R www-data:www-data /usr/src/moodle
+
+COPY moodle.ini /usr/local/etc/php/conf.d/moodle.ini
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY manage_sections_plugin.zip /tmp/wsmanagesections.zip
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+RUN set -eux; \
+    tmpdir=$(mktemp -d); \
+    unzip /tmp/wsmanagesections.zip -d "$tmpdir"; \
+    src_dir=""; \
+    if [ -d "$tmpdir"/wsmanagesections ]; then \
+        src_dir="$tmpdir"/wsmanagesections; \
+    elif [ -d "$tmpdir"/moodle-local_wsmanagesections ]; then \
+        src_dir="$tmpdir"/moodle-local_wsmanagesections; \
+    fi; \
+    if [ -z "$src_dir" ]; then echo "Unable to locate plugin directory in archive" >&2; exit 1; fi; \
+    mkdir -p /usr/src/moodle/public/local/wsmanagesections; \
+    rsync -a --delete "$src_dir"/ /usr/src/moodle/public/local/wsmanagesections/; \
+    rm -rf /usr/src/moodle/public/local/wsmanagesections/.git; \
+    chown -R www-data:www-data /usr/src/moodle/public/local/wsmanagesections; \
+    rm -rf "$tmpdir" /tmp/wsmanagesections.zip
+
+WORKDIR /var/www/html
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["apache2-foreground"]
