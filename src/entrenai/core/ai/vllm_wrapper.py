@@ -159,17 +159,31 @@ class VLLMWrapper:
         messages.append({"role": "user", "content": user_prompt})
 
         try:
+            payload: Dict[str, Any] = {
+                "model": model_alias,
+                "messages": messages,
+                "stream": False,
+                "temperature": self.config.chat_temperature,
+                "top_p": self.config.chat_top_p,
+            }
+            if self.config.chat_max_tokens is not None:
+                payload["max_tokens"] = self.config.chat_max_tokens
+            if self.config.chat_presence_penalty is not None:
+                payload["presence_penalty"] = self.config.chat_presence_penalty
+
+            extra_body: Dict[str, Any] = {}
+            if self.config.chat_top_k is not None:
+                extra_body["top_k"] = self.config.chat_top_k
+            if extra_body:
+                payload["extra_body"] = extra_body
+
             response = client.post(
                 "/v1/chat/completions",
-                json={
-                    "model": model_alias,
-                    "messages": messages,
-                    "stream": False,
-                },
+                json=payload,
             )
             response.raise_for_status()
-            payload = response.json()
-            choices = payload.get("choices", [])
+            resp_payload = response.json()
+            choices = resp_payload.get("choices", [])
             if not choices:
                 return ""
             return choices[0]["message"].get("content", "") or ""
@@ -214,7 +228,14 @@ class VLLMWrapper:
                 {"role": "user", "content": cleaned_text},
             ],
             "stream": False,
+            "temperature": min(self.config.chat_temperature, 0.3),
+            "top_p": min(self.config.chat_top_p, 0.9),
         }
+        extra_body: Dict[str, Any] = {}
+        if self.config.chat_top_k is not None:
+            extra_body["top_k"] = self.config.chat_top_k
+        if extra_body:
+            payload["extra_body"] = extra_body
 
         try:
             response = client.post("/v1/chat/completions", json=payload)
@@ -247,4 +268,3 @@ class VLLMWrapper:
 
     def __del__(self):
         self.close()
-

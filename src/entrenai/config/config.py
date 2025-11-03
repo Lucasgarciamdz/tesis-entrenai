@@ -253,14 +253,14 @@ class VLLMConfig(BaseConfig):
     )
     api_key: Optional[str] = Field(default_factory=lambda: os.getenv("VLLM_API_KEY"))
     chat_model: str = Field(
-        default_factory=lambda: os.getenv("VLLM_CHAT_MODEL", "qwen3:1.7b-q8_0")
+        default_factory=lambda: os.getenv("VLLM_CHAT_MODEL", "qwen3-4b-instruct-fp8")
     )
     chat_model_path: Optional[str] = Field(
         default_factory=lambda: os.getenv("VLLM_CHAT_MODEL_PATH")
     )
     embedding_model: str = Field(
         default_factory=lambda: os.getenv(
-            "VLLM_EMBEDDING_MODEL", "qwen3-embedding:8b"
+            "VLLM_EMBEDDING_MODEL", "qwen3-embedding-4b"
         )
     )
     embedding_model_path: Optional[str] = Field(
@@ -276,6 +276,40 @@ class VLLMConfig(BaseConfig):
         default_factory=lambda: (
             int(os.getenv("VLLM_IDLE_TIMEOUT_SECONDS"))
             if os.getenv("VLLM_IDLE_TIMEOUT_SECONDS")
+            else None
+        )
+    )
+    embed_max_model_len: Optional[int] = Field(
+        default_factory=lambda: (
+            int(os.getenv("VLLM_EMBED_MAX_MODEL_LEN"))
+            if os.getenv("VLLM_EMBED_MAX_MODEL_LEN")
+            else None
+        )
+    )
+    chat_temperature: float = Field(
+        default_factory=lambda: float(os.getenv("VLLM_CHAT_TEMPERATURE", "0.7"))
+    )
+    chat_top_p: float = Field(
+        default_factory=lambda: float(os.getenv("VLLM_CHAT_TOP_P", "0.8"))
+    )
+    chat_top_k: Optional[int] = Field(
+        default_factory=lambda: (
+            int(os.getenv("VLLM_CHAT_TOP_K"))
+            if os.getenv("VLLM_CHAT_TOP_K")
+            else None
+        )
+    )
+    chat_presence_penalty: Optional[float] = Field(
+        default_factory=lambda: (
+            float(os.getenv("VLLM_CHAT_PRESENCE_PENALTY"))
+            if os.getenv("VLLM_CHAT_PRESENCE_PENALTY")
+            else None
+        )
+    )
+    chat_max_tokens: Optional[int] = Field(
+        default_factory=lambda: (
+            int(os.getenv("VLLM_CHAT_MAX_TOKENS"))
+            if os.getenv("VLLM_CHAT_MAX_TOKENS")
             else None
         )
     )
@@ -301,6 +335,15 @@ class VLLMConfig(BaseConfig):
             self.model_alias_map.setdefault(
                 self.embedding_model, self.embedding_model_path
             )
+        if self.markdown_model and self.markdown_model_path:
+            self.model_alias_map.setdefault(
+                self.markdown_model, self.markdown_model_path
+            )
+        if self.chat_top_k is not None and self.chat_top_k <= 0:
+            logging.warning(
+                "VLLM_CHAT_TOP_K debe ser mayor que 0. Se ignorará el valor configurado."
+            )
+            self.chat_top_k = None
 
 
 class N8NConfig(BaseConfig):
