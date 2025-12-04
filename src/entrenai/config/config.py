@@ -346,6 +346,17 @@ class VLLMConfig(BaseConfig):
             self.chat_top_k = None
 
 
+def _get_workflow_json_path_for_provider() -> str:
+    """Selecciona el workflow JSON correcto basado en el AI_PROVIDER."""
+    provider = os.getenv("AI_PROVIDER", "ollama").lower()
+    if provider == "ollama":
+        return "src/entrenai/ollama_n8n_workflow.json"
+    elif provider == "vllm":
+        return "src/entrenai/vllm_n8n_workflow.json"
+    else:  # gemini u otro proveedor usa el default
+        return os.getenv("N8N_WORKFLOW_JSON_PATH", "src/entrenai/n8n_workflow.json")
+
+
 class N8NConfig(BaseConfig):
     """N8N specific configurations."""
 
@@ -360,11 +371,7 @@ class N8NConfig(BaseConfig):
         default_factory=lambda: os.getenv("N8N_CHAT_WORKFLOW_ID")
     )  # Might be deprecated if we import by JSON path
     workflow_json_path: Optional[str] = Field(
-        default_factory=lambda: (
-            "src/entrenai/ollama_n8n_workflow.json"
-            if os.getenv("AI_PROVIDER", "ollama").lower() == "ollama"
-            else os.getenv("N8N_WORKFLOW_JSON_PATH", "src/entrenai/n8n_workflow.json")
-        )
+        default_factory=lambda: _get_workflow_json_path_for_provider()
     )
     # N8N_ENCRYPTION_KEY is used by N8N itself, not directly by our app typically
 

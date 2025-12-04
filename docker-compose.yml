@@ -240,6 +240,7 @@ services:
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: n8n_db
       DB_POSTGRESDB_PORT: 5432
+      N8N_SECURE_COOKIE: false
       DB_POSTGRESDB_DATABASE: ${N8N_DB_NAME:-n8n_db}
       DB_POSTGRESDB_USER: ${N8N_DB_USER:-n8n_user}
       DB_POSTGRESDB_PASSWORD: ${N8N_DB_PASSWORD:-n8n_password}
