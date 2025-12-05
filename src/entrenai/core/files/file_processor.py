@@ -50,8 +50,6 @@ def get_paddle_ocr() -> PaddleOCR:
                 det_db_box_thresh=0.5,  # Box threshold
                 rec_batch_num=6,  # Batch size for recognition (speed optimization)
                 max_batch_size=10,  # Max batch size
-                use_mp=False,  # Disable multiprocessing (we use GPU)
-                total_process_num=1,  # Single process for GPU
             )
             logger.info("PaddleOCR inicializado correctamente con GPU")
         except Exception as e:
