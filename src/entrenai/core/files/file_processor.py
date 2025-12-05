@@ -42,13 +42,7 @@ def get_paddle_ocr() -> PaddleOCR:
         logger.info("Inicializando PaddleOCR con soporte GPU...")
         try:
             _paddle_ocr_instance = PaddleOCR(
-                use_angle_cls=False,  # Disable angle classification for speed (PDFs are usually upright)
                 lang="es",  # Spanish (includes latin characters)
-                show_log=False,  # Reduce log verbosity
-                det_db_thresh=0.3,  # Detection threshold
-                det_db_box_thresh=0.5,  # Box threshold
-                rec_batch_num=6,  # Batch size for recognition (speed optimization)
-                max_batch_size=10,  # Max batch size
             )
             logger.info("PaddleOCR inicializado correctamente con GPU")
         except Exception as e:
