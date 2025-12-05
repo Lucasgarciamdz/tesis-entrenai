@@ -29,7 +29,7 @@ services:
       moodle_db:
         condition: service_healthy
     ports:
-      - "80:80"
+      - "8089:80"
     environment:
       MOODLE_URL: ${MOODLE_URL:-http://moodle:80}
       DB_HOST: ${MOODLE_DB_HOST:-moodle_db}
@@ -245,8 +245,8 @@ services:
       DB_POSTGRESDB_PASSWORD: ${N8N_DB_PASSWORD:-n8n_password}
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-a_very_secure_random_string_for_n8n} # CHANGE THIS IN .env!
       N8N_EMAIL_MODE: smtp # Placeholder, can be configured later if email sending is needed
-      N8N_HOST: ${N8N_HOST_DOMAIN:-localhost} # Set to your domain if N8N is publicly accessible
-      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678} # URL N8N uses for its webhooks
+      N8N_HOST: ${N8N_HOST_DOMAIN:-n8n.42n.com.ar} # Set to your domain if N8N is publicly accessible
+      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-https://n8n.42n.com.ar} # URL N8N uses for its webhooks
       # GENERIC_TIMEZONE: America/Argentina/Buenos_Aires # Set your timezone
     depends_on:
       n8n_db:
@@ -261,7 +261,7 @@ services:
     container_name: entrenai_fastapi_backend
     restart: unless-stopped
     ports:
-      - "8765:8000"
+      - "8000:8000"
     volumes:
       - ./src:/app/src # For development hot-reloading; remove for production if code is solely from image
       - entrenai_data:/app/data # For downloads, markdown files, etc.
@@ -356,7 +356,32 @@ services:
     networks:
       - entrenai_net
 
+  # --- Nginx Proxy Manager ---
+  nginx-proxy-manager:
+    image: 'jc21/nginx-proxy-manager:latest'
+    container_name: entrenai_nginx_proxy_manager
+    restart: unless-stopped
+    ports:
+      - '80:80'      # HTTP
+      - '443:443'    # HTTPS
+      - '81:81'      # Admin Web UI
+    volumes:
+      - npm_data:/data
+      - npm_letsencrypt:/etc/letsencrypt
+    environment:
+      DISABLE_IPV6: 'true'
+    networks:
+      - entrenai_net
+    depends_on:
+      - moodle
+      - n8n
+      - fastapi_backend
+
 volumes:
+  npm_data:
+    driver: local
+  npm_letsencrypt:
+    driver: local
   moodle_app_data:
     driver: local
   moodle_data_dir:

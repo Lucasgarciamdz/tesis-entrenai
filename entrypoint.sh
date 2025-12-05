@@ -632,12 +632,108 @@ apply_bootstrap_fixtures() {
     fi
 }
 
+ensure_proxy_config() {
+    local config_file="$MOODLE_DIR/config.php"
+
+    if [ ! -f "$config_file" ]; then
+        echo "Config file $config_file not found; skipping proxy settings."
+        return
+    fi
+
+    CONFIG_FILE="$config_file" php <<'PHP'
+<?php
+$file = getenv('CONFIG_FILE');
+if (!$file || !file_exists($file)) {
+    fwrite(STDERR, "Config file not found; cannot enforce proxy settings\n");
+    exit(1);
+}
+
+$wwwroot = getenv('MOODLE_URL');
+if (!$wwwroot) {
+    $wwwroot = 'http://localhost:8080';
+}
+
+$to_bool = function($value, $default) {
+    if ($value === false || $value === null) {
+        return $default;
+    }
+    $value = strtolower(trim($value));
+    return in_array($value, ['1', 'true', 'yes', 'on'], true);
+};
+
+$reverseproxy = $to_bool(getenv('MOODLE_REVERSE_PROXY'), false);
+$sslproxy = $to_bool(getenv('MOODLE_SSL_PROXY'), null);
+
+$parsed = parse_url($wwwroot);
+if (!$parsed || empty($parsed['scheme'])) {
+    $parsed['scheme'] = 'http';
+}
+if ($sslproxy === null) {
+    // auto-enable sslproxy if wwwroot is https
+    $sslproxy = ($parsed['scheme'] === 'https');
+}
+
+$lines = file($file, FILE_IGNORE_NEW_LINES);
+if ($lines === false) {
+    fwrite(STDERR, "Unable to read $file\n");
+    exit(1);
+}
+
+$found = [
+    'wwwroot' => false,
+    'reverseproxy' => false,
+    'sslproxy' => false,
+];
+$out = [];
+
+foreach ($lines as $line) {
+    if (preg_match('/^\$CFG->wwwroot\s*=/', $line)) {
+        $out[] = '$CFG->wwwroot   = \'' . addslashes($wwwroot) . '\';';
+        $found['wwwroot'] = true;
+        continue;
+    }
+    if (preg_match('/^\$CFG->reverseproxy\s*=/', $line)) {
+        $out[] = '$CFG->reverseproxy = ' . ($reverseproxy ? 'true' : 'false') . ';';
+        $found['reverseproxy'] = true;
+        continue;
+    }
+    if (preg_match('/^\$CFG->sslproxy\s*=/', $line)) {
+        $out[] = '$CFG->sslproxy = ' . ($sslproxy ? 'true' : 'false') . ';';
+        $found['sslproxy'] = true;
+        continue;
+    }
+
+    if (preg_match('#^require_once\(__DIR__ . \'/lib/setup\.php\'\);#', $line)) {
+        if (!$found['wwwroot']) {
+            $out[] = '$CFG->wwwroot   = \'' . addslashes($wwwroot) . '\';';
+            $found['wwwroot'] = true;
+        }
+        if (!$found['reverseproxy']) {
+            $out[] = '$CFG->reverseproxy = ' . ($reverseproxy ? 'true' : 'false') . ';';
+            $found['reverseproxy'] = true;
+        }
+        if (!$found['sslproxy']) {
+            $out[] = '$CFG->sslproxy = ' . ($sslproxy ? 'true' : 'false') . ';';
+            $found['sslproxy'] = true;
+        }
+    }
+
+    $out[] = $line;
+}
+
+file_put_contents($file, implode(PHP_EOL, $out) . PHP_EOL);
+PHP
+
+    echo "Ensured wwwroot=${MOODLE_URL:-http://localhost:8080}, reverseproxy=${MOODLE_REVERSE_PROXY:-false}, sslproxy=${MOODLE_SSL_PROXY:-auto} in $config_file"
+}
+
 main() {
     initial_sync_code
     sync_wsmanagesections_plugin
     chown -R www-data:www-data "$MOODLE_DIR"
     prepare_data_dir
     run_install_if_needed
+    ensure_proxy_config
     apply_post_install_config
     run_upgrade
     ensure_entrenai_user
