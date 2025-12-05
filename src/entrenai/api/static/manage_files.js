@@ -10,7 +10,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const noFilesMessage = document.getElementById('no-files-message');
 
 
-    const API_BASE_URL = 'http://10.147.17.205:8765/api/v1'; // Adjust if necessary
+    const API_BASE_URL = '/api/v1'; // Adjust if necessary
     let courseId; // Stores the current course ID from URL parameters.
     let courseDisplayName = ''; // Para guardar el nombre del curso
     // activeTasks almacenará objetos con: { pollIntervalId, animationFrameId, simulatedProgress, realStatus, filename }

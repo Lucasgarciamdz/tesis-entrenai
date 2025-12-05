@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from urllib.parse import urljoin
@@ -42,13 +43,27 @@ class MoodleClient:
         self, config: MoodleConfig, session: Optional[requests.Session] = None
     ):
         self.config = config
-        if not config.url:
+        preferred_url = config.url
+
+        # Si existe una URL pública HTTPS (MOODLE_URL) úsala para evitar redirecciones 303
+        public_url = os.getenv("MOODLE_URL")
+        if public_url and public_url.startswith("https://"):
+            if not preferred_url or preferred_url.startswith("http://"):
+                logger.info(
+                    "Usando URL pública de Moodle definida en MOODLE_URL (%s) para evitar redirecciones.",
+                    public_url,
+                )
+                preferred_url = public_url
+
+        if not preferred_url:
             logger.error(
                 "URL de Moodle no configurada. MoodleClient no será funcional."
             )
             self.base_url = None
         else:
-            clean_url = config.url + "/" if not config.url.endswith("/") else config.url
+            clean_url = (
+                preferred_url + "/" if not preferred_url.endswith("/") else preferred_url
+            )
             self.base_url = urljoin(clean_url, "webservice/rest/server.php")
 
         self.session = session or requests.Session()
