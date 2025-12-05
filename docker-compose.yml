@@ -133,7 +133,7 @@ services:
 
   # --- vLLM OpenAI-Compatible Server ---
   vllm:
-    image: vllm/vllm-openai:latest
+    image: vllm/vllm-openai:v0.11.2
     container_name: entrenai_vllm
     runtime: nvidia
     ports:
@@ -170,7 +170,7 @@ services:
 
   # --- vLLM Embedding Server ---
   vllm-embedding:
-    image: vllm/vllm-openai:latest
+    image: vllm/vllm-openai:v0.11.2
     container_name: entrenai_vllm_embedding
     runtime: nvidia
     ports:
