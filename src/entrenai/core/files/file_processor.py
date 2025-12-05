@@ -164,7 +164,7 @@ class PdfFileProcessor(BaseFileProcessor):
                     image_np = np.array(image)
 
                     # Run OCR on the image
-                    result = ocr.ocr(image_np, cls=False)
+                    result = ocr.ocr(image_np)
 
                     # Extract text from OCR result
                     page_text_lines: List[str] = []
