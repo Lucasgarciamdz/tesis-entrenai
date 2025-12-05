@@ -40,17 +40,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install -r requirements_no_paddle.txt
 
-# Install system dependencies for PDF processing (poppler for pdf2image)
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      poppler-utils \
-      libgomp1 \
-      libgl1-mesa-glx \
-      libglib2.0-0 \
- && apt-get clean \
- && rm -rf /var/lib/apt/lists/*
-
 # Copy the source code
 COPY ./src ./src
 
@@ -59,9 +48,10 @@ FROM --platform=linux/amd64 nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04 AS fina
 
 WORKDIR /app
 
-# Create a non-root user for security
+# Create a non-root user for security with a proper home directory
 ENV APP_USER=appuser
-RUN groupadd -r ${APP_USER} && useradd --no-log-init -r -g ${APP_USER} ${APP_USER}
+RUN groupadd -r ${APP_USER} && \
+    useradd --no-log-init -r -g ${APP_USER} -m -d /home/${APP_USER} ${APP_USER}
 
 # Install Python 3.10 and system dependencies
 ENV DEBIAN_FRONTEND=noninteractive
@@ -95,17 +85,18 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # Environment variables for PaddleOCR GPU
 ENV OMP_THREAD_LIMIT=1
-ENV CUDA_VISIBLE_DEVICES=0
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
-# PaddleOCR will download models to this directory
-ENV PADDLEOCR_HOME=/app/.paddleocr
-RUN mkdir -p /app/.paddleocr && chown -R ${APP_USER}:${APP_USER} /app/.paddleocr
+# Set HOME for PaddleX/PaddleOCR cache directories
+ENV HOME=/home/${APP_USER}
 
-# Create data directories and set ownership before switching to appuser
-RUN mkdir -p /app/data/downloads && \
+# Create all necessary directories for PaddleOCR/PaddleX
+RUN mkdir -p /home/${APP_USER}/.paddlex/temp && \
+    mkdir -p /home/${APP_USER}/.paddleocr && \
+    mkdir -p /app/data/downloads && \
     mkdir -p /app/data/markdown_files && \
+    chown -R ${APP_USER}:${APP_USER} /home/${APP_USER} && \
     chown -R ${APP_USER}:${APP_USER} /app
 
 # Switch to non-root user

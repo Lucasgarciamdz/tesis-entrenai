@@ -270,18 +270,17 @@ services:
     volumes:
       - ./src:/app/src # For development hot-reloading; remove for production if code is solely from image
       - entrenai_data:/app/data # For downloads, markdown files, etc.
-      - paddleocr_models:/app/.paddleocr # Persist PaddleOCR downloaded models
+      - paddleocr_models:/home/appuser/.paddleocr # Persist PaddleOCR downloaded models
+      - paddlex_cache:/home/appuser/.paddlex # Persist PaddleX cache
     env_file:
       - .env
     environment:
       APP_ENV: docker # To ensure docker-specific configurations are loaded
       DATA_DIR: /app/data # Standardized data directory within the container
+      HOME: /home/appuser
       # GPU environment variables for PaddleOCR
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
-      CUDA_VISIBLE_DEVICES: "0"
-      # PaddleOCR configuration
-      PADDLEOCR_HOME: /app/.paddleocr
     deploy:
       resources:
         reservations:
@@ -419,6 +418,8 @@ volumes:
   entrenai_data: # Added for Celery worker data
     driver: local
   paddleocr_models: # Added for PaddleOCR model persistence
+    driver: local
+  paddlex_cache: # Added for PaddleX cache persistence
     driver: local
   moodle_db_data:
   moodle_code:
