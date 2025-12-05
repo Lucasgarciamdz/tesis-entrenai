@@ -34,8 +34,7 @@ chardet
 
 # OCR with GPU support (PaddleOCR)
 # Note: paddlepaddle-gpu requires CUDA 11.8 or 12.6
-paddleocr>=2.9.0
-paddlepaddle-gpu==3.0.0
+paddlepaddle-gpu
 
 # Moodle (No client library specified, will use requests. Add if a specific client is found/needed)
 

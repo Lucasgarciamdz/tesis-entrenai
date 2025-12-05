@@ -29,16 +29,9 @@ ENV UV_COMPILE_BYTECODE=1
 # Copy requirements first to leverage Docker cache
 COPY requirements.txt .
 
-# Create a modified requirements file without paddlepaddle (we install it separately)
-RUN grep -v "paddlepaddle" requirements.txt > requirements_no_paddle.txt || true
-
-# Install PaddlePaddle GPU first from official source
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install paddlepaddle-gpu==3.0.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
-
 # Install all other dependencies
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install -r requirements_no_paddle.txt
+    uv pip install -r requirements.txt
 
 # Copy the source code
 COPY ./src ./src

@@ -57,7 +57,7 @@ class PaddleOCRSingleton:
             # Simple initialization - PaddleOCR auto-detects GPU
             instance = PaddleOCR(
                 lang="es",  # Spanish (includes latin characters)
-                show_log=False,  # Reduce log verbosity
+                device="gpu",  # Force GPU usage
             )
             logger.info("PaddleOCR singleton inicializado correctamente")
             return instance
