@@ -4,7 +4,6 @@ from typing import List, Optional, Dict
 
 # For DOCX:
 import docx  # type: ignore
-import pytesseract  # type: ignore
 
 # Import specific libraries for file processing
 # For PDF:
@@ -15,12 +14,58 @@ from pdf2image.exceptions import (
     PDFSyntaxError,
 )  # type: ignore
 
+# For OCR with GPU support (PaddleOCR)
+from paddleocr import PaddleOCR  # type: ignore
+import numpy as np  # type: ignore
+
 # For PPTX:
 from pptx import Presentation  # type: ignore
 
 from src.entrenai.config.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Initialize PaddleOCR once at module level for efficiency
+# Using PP-OCRv4 mobile model for speed, with Spanish + English support
+# det_model_dir, rec_model_dir will be auto-downloaded
+_paddle_ocr_instance: Optional[PaddleOCR] = None
+
+
+def get_paddle_ocr() -> PaddleOCR:
+    """
+    Get or create a singleton PaddleOCR instance.
+    Uses PP-OCRv4 with GPU support, optimized for speed.
+    Language: Spanish (latin) which includes English characters.
+    """
+    global _paddle_ocr_instance
+    if _paddle_ocr_instance is None:
+        logger.info("Inicializando PaddleOCR con soporte GPU...")
+        try:
+            _paddle_ocr_instance = PaddleOCR(
+                use_angle_cls=False,  # Disable angle classification for speed (PDFs are usually upright)
+                lang="es",  # Spanish (includes latin characters)
+                use_gpu=True,  # Enable GPU acceleration
+                show_log=False,  # Reduce log verbosity
+                det_db_thresh=0.3,  # Detection threshold
+                det_db_box_thresh=0.5,  # Box threshold
+                rec_batch_num=6,  # Batch size for recognition (speed optimization)
+                max_batch_size=10,  # Max batch size
+                use_mp=False,  # Disable multiprocessing (we use GPU)
+                total_process_num=1,  # Single process for GPU
+            )
+            logger.info("PaddleOCR inicializado correctamente con GPU")
+        except Exception as e:
+            logger.warning(f"No se pudo inicializar PaddleOCR con GPU, intentando CPU: {e}")
+            _paddle_ocr_instance = PaddleOCR(
+                use_angle_cls=False,
+                lang="es",
+                use_gpu=False,
+                show_log=False,
+                det_db_thresh=0.3,
+                det_db_box_thresh=0.5,
+            )
+            logger.info("PaddleOCR inicializado con CPU (fallback)")
+    return _paddle_ocr_instance
 
 
 class FileProcessingError(Exception):
@@ -100,24 +145,18 @@ class MarkdownFileProcessor(BaseFileProcessor):
 
 
 class PdfFileProcessor(BaseFileProcessor):
-    """Procesa archivos PDF (.pdf) usando OCR (Tesseract vía pdf2image)."""
+    """Procesa archivos PDF (.pdf) usando OCR (PaddleOCR con GPU)."""
 
     SUPPORTED_EXTENSIONS = [".pdf"]
 
     def extract_text(self, file_path: Path) -> str:
-        logger.info(f"Extrayendo texto de archivo PDF: {file_path} usando OCR.")
+        logger.info(f"Extrayendo texto de archivo PDF: {file_path} usando PaddleOCR con GPU.")
         full_text_parts: List[str] = []
         try:
-            try:
-                pytesseract.get_tesseract_version()
-            except Exception as tess_err:
-                logger.error(
-                    f"Tesseract OCR no está instalado o no se encuentra en el PATH: {tess_err}"
-                )
-                raise FileProcessingError(
-                    "Tesseract OCR no está instalado o no se encuentra en el PATH."
-                ) from tess_err
+            # Get or initialize PaddleOCR instance
+            ocr = get_paddle_ocr()
 
+            # Convert PDF pages to images
             images = convert_from_path(file_path)
             if not images:
                 logger.warning(
@@ -127,27 +166,39 @@ class PdfFileProcessor(BaseFileProcessor):
 
             for i, image in enumerate(images):
                 logger.debug(
-                    f"Procesando página {i + 1} de {len(images)} del PDF {file_path} con OCR..."
+                    f"Procesando página {i + 1} de {len(images)} del PDF {file_path} con PaddleOCR..."
                 )
                 try:
-                    page_text = pytesseract.image_to_string(image, lang="spa+eng")
+                    # Convert PIL Image to numpy array for PaddleOCR
+                    image_np = np.array(image)
+
+                    # Run OCR on the image
+                    result = ocr.ocr(image_np, cls=False)
+
+                    # Extract text from OCR result
+                    page_text_lines: List[str] = []
+                    if result and result[0]:
+                        for line in result[0]:
+                            if line and len(line) >= 2:
+                                # line format: [box_coordinates, (text, confidence)]
+                                text_info = line[1]
+                                if text_info and len(text_info) >= 1:
+                                    page_text_lines.append(text_info[0])
+
+                    page_text = "\n".join(page_text_lines)
                     full_text_parts.append(page_text)
-                except pytesseract.TesseractError as ocr_page_err:
+
+                except Exception as ocr_page_err:
                     logger.error(
-                        f"Error de Tesseract OCR en página {i + 1} de {file_path}: {ocr_page_err}"
+                        f"Error de PaddleOCR en página {i + 1} de {file_path}: {ocr_page_err}"
                     )
                     full_text_parts.append(
                         f"\n[Error OCR en página {i + 1}: {ocr_page_err}]\n"
                     )
-                except Exception as page_processing_err:
-                    logger.error(
-                        f"Error inesperado procesando página {i + 1} del PDF {file_path} con OCR: {page_processing_err}"
-                    )
-                    full_text_parts.append(f"\n[Error procesando página {i + 1}]\n")
 
             extracted_text = "\n\n".join(filter(None, full_text_parts))
             logger.info(
-                f"Texto extraído exitosamente de PDF (OCR): {file_path} (longitud: {len(extracted_text)})"
+                f"Texto extraído exitosamente de PDF (PaddleOCR): {file_path} (longitud: {len(extracted_text)})"
             )
             return extracted_text
 
@@ -167,12 +218,8 @@ class PdfFileProcessor(BaseFileProcessor):
             ) from pdf_err
         except Exception as e:
             logger.error(
-                f"Error general procesando archivo PDF {file_path} con OCR: {e}"
+                f"Error general procesando archivo PDF {file_path} con PaddleOCR: {e}"
             )
-            if "Tesseract is not installed or not in your PATH" in str(e):
-                raise FileProcessingError(
-                    "Tesseract (para OCR) no está instalado o no se encuentra en el PATH."
-                ) from e
             raise FileProcessingError(
                 f"No se pudo extraer texto del PDF {file_path}: {e}"
             ) from e

@@ -171,7 +171,7 @@ def test_docx_file_processor_handles_library_error(
 
 
 # Similar tests would be created for PptxFileProcessor and PdfFileProcessor
-# by mocking 'pptx.Presentation', 'pdf2image.convert_from_path', and 'pytesseract.image_to_string'
+# by mocking 'pptx.Presentation', 'pdf2image.convert_from_path', and 'paddleocr.PaddleOCR'
 
 
 # Example for Pptx (very basic mock)
@@ -209,70 +209,176 @@ def test_pptx_file_processor_extract_text(mock_pptx_presentation, tmp_path: Path
     mock_pptx_presentation.assert_called_once_with(str(pptx_file))
 
 
-# Example for PDF (very basic mock)
-@patch("src.entrenai.core.file_processor.convert_from_path")  # Patch where it's used
-@patch("src.entrenai.core.file_processor.pytesseract.image_to_string")
-@patch(
-    "src.entrenai.core.file_processor.pytesseract.get_tesseract_version"
-)  # Mock tesseract check
+# --- Tests for PDF with PaddleOCR ---
+@patch("src.entrenai.core.files.file_processor.get_paddle_ocr")
+@patch("src.entrenai.core.files.file_processor.convert_from_path")
 def test_pdf_file_processor_extract_text(
-    mock_get_tesseract_version,
-    mock_image_to_string,
     mock_convert_from_path,
+    mock_get_paddle_ocr,
     tmp_path: Path,
 ):
+    """Test PdfFileProcessor with mocked PaddleOCR."""
     processor = PdfFileProcessor()
     pdf_file = tmp_path / "sample.pdf"
     pdf_file.touch()
 
-    mock_get_tesseract_version.return_value = (
-        "mocked tesseract 5.0"  # Simulate tesseract is found
-    )
-    mock_image_page1 = MagicMock()  # Simulate a PIL Image object
+    # Mock PaddleOCR instance
+    mock_ocr_instance = MagicMock()
+    mock_get_paddle_ocr.return_value = mock_ocr_instance
+
+    # Mock PDF to images conversion
+    mock_image_page1 = MagicMock()
     mock_image_page2 = MagicMock()
     mock_convert_from_path.return_value = [mock_image_page1, mock_image_page2]
 
-    mock_image_to_string.side_effect = ["Text from page 1.", "Text from page 2."]
+    # Mock OCR results - PaddleOCR returns [[box, (text, confidence)], ...]
+    mock_ocr_instance.ocr.side_effect = [
+        # Page 1 result
+        [[
+            [[[0, 0], [100, 0], [100, 20], [0, 20]], ("Text from page 1.", 0.95)],
+        ]],
+        # Page 2 result
+        [[
+            [[[0, 0], [100, 0], [100, 20], [0, 20]], ("Text from page 2.", 0.93)],
+        ]],
+    ]
 
     extracted_text = processor.extract_text(pdf_file)
     expected_text = "Text from page 1.\n\nText from page 2."
     assert extracted_text == expected_text
     mock_convert_from_path.assert_called_once_with(pdf_file)
-    assert mock_image_to_string.call_count == 2
+    assert mock_ocr_instance.ocr.call_count == 2
 
 
+@patch("src.entrenai.core.files.file_processor.get_paddle_ocr")
+@patch("src.entrenai.core.files.file_processor.convert_from_path")
+def test_pdf_file_processor_multiline_page(
+    mock_convert_from_path,
+    mock_get_paddle_ocr,
+    tmp_path: Path,
+):
+    """Test PdfFileProcessor correctly extracts multiple lines per page."""
+    processor = PdfFileProcessor()
+    pdf_file = tmp_path / "multiline.pdf"
+    pdf_file.touch()
+
+    mock_ocr_instance = MagicMock()
+    mock_get_paddle_ocr.return_value = mock_ocr_instance
+
+    mock_image = MagicMock()
+    mock_convert_from_path.return_value = [mock_image]
+
+    # Multiple lines in one page
+    mock_ocr_instance.ocr.return_value = [[
+        [[[0, 0], [100, 0], [100, 20], [0, 20]], ("Line 1 of the document.", 0.98)],
+        [[[0, 25], [100, 25], [100, 45], [0, 45]], ("Line 2 continues here.", 0.96)],
+        [[[0, 50], [100, 50], [100, 70], [0, 70]], ("Line 3 ends the page.", 0.94)],
+    ]]
+
+    extracted_text = processor.extract_text(pdf_file)
+    assert "Line 1 of the document." in extracted_text
+    assert "Line 2 continues here." in extracted_text
+    assert "Line 3 ends the page." in extracted_text
+
+
+@patch("src.entrenai.core.files.file_processor.get_paddle_ocr")
 @patch(
-    "src.entrenai.core.file_processor.convert_from_path",
+    "src.entrenai.core.files.file_processor.convert_from_path",
     side_effect=PDFInfoNotInstalledError("Poppler not found"),
 )
-@patch("src.entrenai.core.file_processor.pytesseract.get_tesseract_version")
 def test_pdf_file_processor_handles_poppler_error(
-    mock_get_tesseract_version, mock_convert_from_path_error, tmp_path: Path
+    mock_convert_from_path_error,
+    mock_get_paddle_ocr,
+    tmp_path: Path,
 ):
+    """Test PdfFileProcessor handles Poppler not installed error."""
     processor = PdfFileProcessor()
     pdf_file = tmp_path / "error.pdf"
     pdf_file.touch()
-    mock_get_tesseract_version.return_value = "mocked tesseract 5.0"
+
+    mock_ocr_instance = MagicMock()
+    mock_get_paddle_ocr.return_value = mock_ocr_instance
 
     with pytest.raises(
         FileProcessingError,
-        match="Poppler (dependency for PDF processing) not installed",
+        match="Poppler \\(dependencia para procesamiento de PDF\\) no instalado",
     ):
         processor.extract_text(pdf_file)
 
 
-@patch(
-    "src.entrenai.core.file_processor.pytesseract.get_tesseract_version",
-    side_effect=Exception("Tesseract not found"),
-)
-def test_pdf_file_processor_handles_tesseract_not_found_error(
-    mock_get_tesseract_version_error, tmp_path: Path
+@patch("src.entrenai.core.files.file_processor.get_paddle_ocr")
+@patch("src.entrenai.core.files.file_processor.convert_from_path")
+def test_pdf_file_processor_handles_empty_pdf(
+    mock_convert_from_path,
+    mock_get_paddle_ocr,
+    tmp_path: Path,
 ):
+    """Test PdfFileProcessor handles empty PDF (no pages)."""
     processor = PdfFileProcessor()
-    pdf_file = tmp_path / "error_tess.pdf"
+    pdf_file = tmp_path / "empty.pdf"
     pdf_file.touch()
 
-    with pytest.raises(
-        FileProcessingError, match="Tesseract OCR is not installed or not found in PATH"
-    ):
-        processor.extract_text(pdf_file)
+    mock_ocr_instance = MagicMock()
+    mock_get_paddle_ocr.return_value = mock_ocr_instance
+    mock_convert_from_path.return_value = []  # Empty PDF
+
+    extracted_text = processor.extract_text(pdf_file)
+    assert extracted_text == ""
+
+
+@patch("src.entrenai.core.files.file_processor.get_paddle_ocr")
+@patch("src.entrenai.core.files.file_processor.convert_from_path")
+def test_pdf_file_processor_handles_ocr_page_error(
+    mock_convert_from_path,
+    mock_get_paddle_ocr,
+    tmp_path: Path,
+    caplog,
+):
+    """Test PdfFileProcessor handles OCR error on individual page."""
+    processor = PdfFileProcessor()
+    pdf_file = tmp_path / "partial_error.pdf"
+    pdf_file.touch()
+
+    mock_ocr_instance = MagicMock()
+    mock_get_paddle_ocr.return_value = mock_ocr_instance
+
+    mock_image_page1 = MagicMock()
+    mock_image_page2 = MagicMock()
+    mock_convert_from_path.return_value = [mock_image_page1, mock_image_page2]
+
+    # First page succeeds, second page fails
+    mock_ocr_instance.ocr.side_effect = [
+        [[
+            [[[0, 0], [100, 0], [100, 20], [0, 20]], ("Page 1 text.", 0.95)],
+        ]],
+        Exception("OCR processing failed"),
+    ]
+
+    extracted_text = processor.extract_text(pdf_file)
+    assert "Page 1 text." in extracted_text
+    assert "[Error OCR en página 2" in extracted_text
+
+
+@patch("src.entrenai.core.files.file_processor.get_paddle_ocr")
+@patch("src.entrenai.core.files.file_processor.convert_from_path")
+def test_pdf_file_processor_handles_empty_ocr_result(
+    mock_convert_from_path,
+    mock_get_paddle_ocr,
+    tmp_path: Path,
+):
+    """Test PdfFileProcessor handles empty OCR results (blank page)."""
+    processor = PdfFileProcessor()
+    pdf_file = tmp_path / "blank.pdf"
+    pdf_file.touch()
+
+    mock_ocr_instance = MagicMock()
+    mock_get_paddle_ocr.return_value = mock_ocr_instance
+
+    mock_image = MagicMock()
+    mock_convert_from_path.return_value = [mock_image]
+
+    # Empty OCR result (no text detected)
+    mock_ocr_instance.ocr.return_value = [[]]
+
+    extracted_text = processor.extract_text(pdf_file)
+    assert extracted_text == ""

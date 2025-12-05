@@ -25,13 +25,17 @@ pytest-asyncio # For testing async code with pytest
 
 # File processing
 pdf2image
-pytesseract
 python-pptx
 python-docx
 beautifulsoup4
 pandas
 lxml # Often a faster parser for BeautifulSoup
 chardet
+
+# OCR with GPU support (PaddleOCR)
+# Note: paddlepaddle-gpu requires CUDA 11.8 or 12.6
+paddleocr>=2.9.0
+paddlepaddle-gpu==3.0.0
 
 # Moodle (No client library specified, will use requests. Add if a specific client is found/needed)
 
