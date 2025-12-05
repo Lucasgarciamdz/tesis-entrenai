@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
+import threading
 
 # For DOCX:
 import docx  # type: ignore
@@ -14,8 +15,7 @@ from pdf2image.exceptions import (
     PDFSyntaxError,
 )  # type: ignore
 
-# For OCR with GPU support (PaddleOCR)
-from paddleocr import PaddleOCR  # type: ignore
+# Lazy import for PaddleOCR - will be imported only when needed
 import numpy as np  # type: ignore
 
 # For PPTX:
@@ -25,38 +25,53 @@ from src.entrenai.config.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Initialize PaddleOCR once at module level for efficiency
-# Using PP-OCRv4 mobile model for speed, with Spanish + English support
-# det_model_dir, rec_model_dir will be auto-downloaded
-_paddle_ocr_instance: Optional[PaddleOCR] = None
 
+class PaddleOCRSingleton:
+    """
+    Thread-safe singleton for PaddleOCR instance.
+    Lazy initialization - only loads when first accessed.
+    """
+    _instance: Optional[Any] = None
+    _lock = threading.Lock()
+    _initialized = False
 
-def get_paddle_ocr() -> PaddleOCR:
-    """
-    Get or create a singleton PaddleOCR instance.
-    Uses PP-OCRv4 with GPU support, optimized for speed.
-    Language: Spanish (latin) which includes English characters.
-    """
-    global _paddle_ocr_instance
-    if _paddle_ocr_instance is None:
-        logger.info("Inicializando PaddleOCR con soporte GPU...")
+    @classmethod
+    def get_instance(cls) -> Any:
+        """Get or create the singleton PaddleOCR instance."""
+        if cls._instance is None:
+            with cls._lock:
+                # Double-check locking pattern
+                if cls._instance is None:
+                    cls._instance = cls._create_ocr_instance()
+        return cls._instance
+
+    @classmethod
+    def _create_ocr_instance(cls) -> Any:
+        """Create and configure PaddleOCR instance."""
+        # Lazy import to avoid loading at module import time
+        from paddleocr import PaddleOCR  # type: ignore
+
+        logger.info("Inicializando PaddleOCR singleton (esto solo ocurre una vez)...")
+
         try:
-            _paddle_ocr_instance = PaddleOCR(
+            # Simple initialization - PaddleOCR auto-detects GPU
+            instance = PaddleOCR(
                 lang="es",  # Spanish (includes latin characters)
+                show_log=False,  # Reduce log verbosity
             )
-            logger.info("PaddleOCR inicializado correctamente con GPU")
+            logger.info("PaddleOCR singleton inicializado correctamente")
+            return instance
         except Exception as e:
-            logger.warning(f"No se pudo inicializar PaddleOCR con GPU, intentando CPU: {e}")
-            _paddle_ocr_instance = PaddleOCR(
-                use_angle_cls=False,
-                lang="es",
-                use_gpu=False,
-                show_log=False,
-                det_db_thresh=0.3,
-                det_db_box_thresh=0.5,
-            )
-            logger.info("PaddleOCR inicializado con CPU (fallback)")
-    return _paddle_ocr_instance
+            logger.error(f"Error inicializando PaddleOCR: {e}")
+            raise
+
+
+def get_paddle_ocr() -> Any:
+    """
+    Get the singleton PaddleOCR instance.
+    Thread-safe and lazy-loaded.
+    """
+    return PaddleOCRSingleton.get_instance()
 
 
 class FileProcessingError(Exception):
