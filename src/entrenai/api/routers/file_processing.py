@@ -128,15 +128,16 @@ async def process_file_endpoint(request: FileProcessingRequest):
             raise ValueError(f"API Endpoint - No se pudo extraer texto del archivo: {filename}")
         logger.info(f"API Endpoint - Text extracted successfully from: {filename}")
 
+        markdown_text = raw_text
         # 10. Format to Markdown
-        markdown_save_dir = Path(b_config.data_dir) / "markdown_files" / str(request.course_id)
-        markdown_save_dir.mkdir(parents=True, exist_ok=True)
-        markdown_file_path = markdown_save_dir / f"{Path(filename).stem}.md"
-        logger.info(f"API Endpoint - Formatting text to Markdown for: {filename}")
-        markdown_text = ai_client.format_to_markdown(raw_text, save_path=markdown_file_path)
-        if not markdown_text:
-            raise RuntimeError(f"API Endpoint - No se pudo formatear el texto a markdown para: {filename}")
-        logger.info(f"API Endpoint - Markdown generated and saved to: {markdown_file_path}")
+        # markdown_save_dir = Path(b_config.data_dir) / "markdown_files" / str(request.course_id)
+        # markdown_save_dir.mkdir(parents=True, exist_ok=True)
+        # markdown_file_path = markdown_save_dir / f"{Path(filename).stem}.md"
+        # logger.info(f"API Endpoint - Formatting text to Markdown for: {filename}")
+        # markdown_text = ai_client.format_to_markdown(raw_text, save_path=markdown_file_path)
+        # if not markdown_text:
+        #     raise RuntimeError(f"API Endpoint - No se pudo formatear el texto a markdown para: {filename}")
+        # logger.info(f"API Endpoint - Markdown generated and saved to: {markdown_file_path}")
 
         # 11. Split text
         logger.info(f"API Endpoint - Splitting Markdown text for: {filename}")

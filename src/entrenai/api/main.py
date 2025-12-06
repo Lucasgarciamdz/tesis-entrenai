@@ -2,6 +2,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
+
 
 # Direct imports to avoid potential circular imports
 import src.entrenai.api.routers.course_setup as course_setup
@@ -49,10 +51,9 @@ app.add_middleware(
 )
 
 
-@app.get("/")
-async def read_root():
-    logger.info("Endpoint raíz '/' fue llamado.")
-    return {"message": "¡Bienvenido a la API de Entrenai!"}
+@app.get("/", include_in_schema=False)
+async def redirect_to_ui():
+    return RedirectResponse(url="/ui")
 
 
 @app.get("/health")
