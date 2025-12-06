@@ -14,6 +14,7 @@ from pdf2image.exceptions import (
     PDFPageCountError,
     PDFSyntaxError,
 )  # type: ignore
+import pdfplumber  # type: ignore
 
 # Lazy import for PaddleOCR - will be imported only when needed
 import numpy as np  # type: ignore
@@ -159,10 +160,27 @@ class PdfFileProcessor(BaseFileProcessor):
     """Procesa archivos PDF (.pdf) usando OCR (PaddleOCR con GPU)."""
 
     SUPPORTED_EXTENSIONS = [".pdf"]
+    MIN_NATIVE_TEXT_LENGTH = 50  # Longitud mínima para considerar válida la extracción nativa
 
     def extract_text(self, file_path: Path) -> str:
-        logger.info(f"Extrayendo texto de archivo PDF: {file_path} usando PaddleOCR con GPU.")
+        logger.info(f"Extrayendo texto de archivo PDF: {file_path} (nativo y fallback OCR).")
         full_text_parts: List[str] = []
+
+        # 1) Intento de extracción nativa (más preciso y barato si el PDF tiene capa de texto)
+        native_text = self._extract_text_native(file_path)
+        if self._is_native_text_sufficient(native_text):
+            logger.info(
+                f"Texto extraído nativamente de PDF: {file_path} (longitud: {len(native_text)})"
+            )
+            return native_text
+        else:
+            logger.info(
+                f"Extracción nativa insuficiente o vacía para PDF: {file_path}. Longitud obtenida: {len(native_text)}. "
+                "Aplicando fallback OCR."
+            )
+
+        # 2) Fallback OCR si la extracción nativa falla o es insuficiente
+        logger.info(f"Extrayendo texto de archivo PDF: {file_path} usando PaddleOCR con GPU.")
         try:
             # Get or initialize PaddleOCR instance
             ocr = get_paddle_ocr()
@@ -234,6 +252,38 @@ class PdfFileProcessor(BaseFileProcessor):
             raise FileProcessingError(
                 f"No se pudo extraer texto del PDF {file_path}: {e}"
             ) from e
+
+    @staticmethod
+    def _is_native_text_sufficient(text: str) -> bool:
+        """Evalúa si la extracción nativa es suficiente para evitar OCR."""
+        if not text:
+            return False
+        # Considera número de caracteres no vacíos para evitar devolver sólo saltos/espacios
+        non_space_chars = len(text.strip())
+        return non_space_chars >= PdfFileProcessor.MIN_NATIVE_TEXT_LENGTH
+
+    @staticmethod
+    def _extract_text_native(file_path: Path) -> str:
+        """Intenta extraer texto usando pdfplumber. Retorna '' si falla."""
+        try:
+            with pdfplumber.open(str(file_path)) as pdf:
+                page_texts: List[str] = []
+                for i, page in enumerate(pdf.pages):
+                    try:
+                        txt = page.extract_text() or ""
+                        if txt:
+                            page_texts.append(txt)
+                    except Exception as page_err:
+                        logger.warning(
+                            f"Fallo de extracción nativa en página {i + 1} de {file_path}: {page_err}"
+                        )
+                        continue
+                return "\n\n".join(page_texts).strip()
+        except Exception as e:
+            logger.warning(
+                f"Fallo de extracción nativa (pdfplumber) para {file_path}: {e}"
+            )
+            return ""
 
 
 class DocxFileProcessor(BaseFileProcessor):
