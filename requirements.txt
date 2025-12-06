@@ -32,10 +32,7 @@ pandas
 lxml # Often a faster parser for BeautifulSoup
 chardet
 
-# OCR with GPU support (PaddleOCR)
-# Note: paddlepaddle-gpu requires CUDA 11.8 or 12.6
-
-paddlepaddle-gpu
+paddleocr
 
 # Moodle (No client library specified, will use requests. Add if a specific client is found/needed)
 
@@ -47,7 +44,7 @@ pgvector
 # Celery and Redis
 celery
 eventlet # Required for Celery's eventlet pool
-redis==5.0.1
+redis
 
 # Generic
 uv

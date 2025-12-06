@@ -105,8 +105,7 @@
     },
     {
       "parameters": {
-        "model": "qwen3-embedding-4b-gguf",
-        "options": {}
+        "model": "qwen3-embedding-0.6b"
       },
       "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
       "typeVersion": 1.2,
