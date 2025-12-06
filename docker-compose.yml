@@ -133,7 +133,7 @@ services:
 
   # --- vLLM OpenAI-Compatible Server ---
   vllm:
-    image: vllm/vllm-openai:v0.11.2
+    image: vllm/vllm-openai:latest
     container_name: entrenai_vllm
     runtime: nvidia
     ports:
@@ -155,9 +155,8 @@ services:
       --download-dir /models
       --enable-auto-tool-choice
       --tool-call-parser hermes
-      --dtype float16
+      --dtype auto
       --kv-cache-dtype fp8 
-      --enforce-eager
       --trust-remote-code
       --host 0.0.0.0
       --port 8000
@@ -173,7 +172,7 @@ services:
 
   # --- vLLM Embedding Server ---
   vllm-embedding:
-    image: vllm/vllm-openai:v0.11.2
+    image: vllm/vllm-openai:latest
     container_name: entrenai_vllm_embedding
     runtime: nvidia
     ports:
